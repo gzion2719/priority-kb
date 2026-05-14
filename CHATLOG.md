@@ -6,15 +6,15 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
-## 2026-05-14 — Bootstrap: protocol scaffold + tech stack pinned
+## 2026-05-14 — Bootstrap: scaffold, push, prereqs cleared
 
-- Defined project as agent-driven Priority ERP KB (admin ingests via chat, users query via Retrieval Agent with citations); two agents, Claude API direct.
-- Locked tech stack: Next.js + Postgres + pgvector (HNSW), Voyage `voyage-3-large` embeddings + `rerank-2`, Python FastAPI worker added in M2b for OCR/parsing, Microsoft Entra ID in M5 (stub auth before).
-- Independent architectural review (subagent) surfaced critical changes adopted: repo moved to `C:\dev\PriorityKB` (out of OneDrive), retrieval (M3) sequenced before media ingestion (M2b), evals + observability + backups land in M1, embedding abstraction with model versioning per row, prompt files hashed and stored with responses, ≥2 admin accounts, degraded mode for outages.
-- Brand standards pinned to the Kramer skill (GT Eesti, `--kramer-*` palette, embedded logo); `styles/kramer-brand.css` is the canonical source.
-- Generated full scaffold: `CLAUDE.md`, `SESSION_PROTOCOL.md`, `WORKFLOW.md`, `CHATLOG.md`, `README.md`, `docs/ROADMAP.md`, `docs/BACKLOG.md`, `docs/AGENTS.md`, `docs/adr/0001-bootstrap.md` + `docs/adr/README.md`, `prompts/{ingestion,retrieval}-agent.md`, `evals/golden_set.yaml`, `styles/kramer-brand.css`, `package.json`, `pyproject.toml`, `.gitignore`, `.github/workflows/ci.yml`.
-- **Process improvement:** Spawning a Plan subagent for an unbiased cold review caught smells the in-conversation self-critique missed (OneDrive corruption risk, missing reranker, eval/backup sequencing). Codified as a habit — for any architectural decision, spawn a cold-review subagent before generating code (see `SESSION_PROTOCOL.md` Step 7's "smaller cleaner first increment" prompt; cold-review is the cleanest version of that check for big decisions).
-- **Next session:** M1 Foundation — `git init` + first push to GitHub, Next.js scaffold with `styles/kramer-brand.css` wired in, Postgres + pgvector locally via Docker Compose, Alembic migrations folder structure, embedding abstraction skeleton (interface only), `pg_dump` cron stub.
+- Generated full protocol scaffold (18 files) at `C:\dev\PriorityKB` (deliberately off OneDrive per ADR-0001); pushed to private GitHub repo `gzion2719/priority-kb` on `main`; repo description + 5 topics set via `gh`.
+- Independent Plan-subagent review surfaced and forced adoption of: OneDrive avoidance, Voyage `rerank-2` in M3 (not later), evals + observability + `pg_dump` cron land in M1, embedding abstraction with model+version per row, prompt files hashed and stored with every response, ≥2 admin accounts, degraded mode for outages.
+- Stack locked: Next.js + Postgres+pgvector (HNSW), Voyage `voyage-3-large` embeddings + `rerank-2` reranker, Haiku/Sonnet/Opus model split (ingestion/retrieval/evals), Python FastAPI worker added in M2b only, Microsoft Entra ID deferred to M5 with `x-stub-user-role` header in dev. Brand: Kramer (`styles/kramer-brand.css`).
+- Sequencing flipped: **M3 retrieval before M2b media** — text-only retrieval E2E is the viability proof.
+- Prereqs swept: Node v24.14.1 ✓, Python 3.12.10 ✓, Docker + WSL2 working (after `wsl --install` recovered a corrupted state) ✓, `gh` authenticated ✓, CRLF auto-handling on ✓.
+- **Process improvement:** SESSION_PROTOCOL.md Closing Ritual "When to run" gained a status-update-is-not-a-farewell clarification, after this session treated a GitHub URL share as a farewell signal (see `SESSION_PROTOCOL.md` Closing Ritual "What does NOT trigger the ritual").
+- **Next session:** M1 Foundation first slice — `create-next-app` scaffold in `.` with TypeScript + app router + ESLint, `styles/kramer-brand.css` imported in root layout, one branded landing page renders. Docker-Compose Postgres+pgvector + Alembic baseline come the session after.
 
 ---
 
