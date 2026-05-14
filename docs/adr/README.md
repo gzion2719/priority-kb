@@ -18,3 +18,5 @@ For ADR-shaped focuses, the supporting reads (existing code, related ADRs, schem
 | #    | Title                                                                              | Status   |
 |------|------------------------------------------------------------------------------------|----------|
 | 0001 | [Bootstrap-time decisions: stack, hosting, repo location, sequencing](0001-bootstrap.md) | Accepted |
+| 0002 | [Branching and merge policy](0002-branching-and-merge-policy.md)                   | Accepted |
+| 0003 | [CI security gates baseline](0003-ci-security-gates-baseline.md)                   | Accepted |

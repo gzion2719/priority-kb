@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 concurrency:
@@ -36,6 +36,11 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # Advisory only — surfaces high/critical CVEs in the job log without
+      # blocking merge. Dependabot opens fix PRs. See ADR-0003.
+      - name: npm audit (advisory)
+        run: npm audit --audit-level=high || true
 
   # Python lane — activated when M2b adds the FastAPI worker under api/.
   # Until api/ exists, this job is a no-op skip.

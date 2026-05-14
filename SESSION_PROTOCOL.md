@@ -128,8 +128,11 @@ npm run check                     # Node gate — mirrors .github/workflows/ci.y
 # make py-check                   # Python gate — uncomment once M2b adds Python
 git add <files>
 git commit -m "<suggested commit message>"
-git push
+git push -u origin <feature-branch>
+gh pr create --base dev --title "<conventional-commit-style title>" --body "..."
 ```
+
+**Never push to `main` directly** (see ADR-0002). Feature branches PR to `dev`; `dev` is promoted to `main` via a separate `release: dev → main` PR. Hotfixes are the only exception — `hotfix/<slug>` PRs target `main`, then immediately back-merge into `dev`. If a commit was created on `main` locally by accident, rewind `main` to `origin/main` and re-point the commit to a feature branch BEFORE pushing.
 
 The gate is a verbatim mirror of the project's CI job. Running it locally before pushing catches red CI in seconds rather than minutes-plus-roundtrip; that's why it leads.
 

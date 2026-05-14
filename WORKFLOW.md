@@ -70,6 +70,53 @@ Any farewell triggers the closing ritual (see `SESSION_PROTOCOL.md` Closing Ritu
 
 ---
 
+## Branching & merging
+
+See **ADR-0002** for the full decision; the short version:
+
+- **`main`** = deployable line, protected. Only `dev` merges in via `release: dev → main` PR (or a hotfix — see below).
+- **`dev`** = integration line, protected. Feature branches merge in via PR + green CI.
+- **Feature branches** = `feat/<slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>`, `refactor/<slug>`, `test/<slug>`, `ci/<slug>`. Cut from `dev`. PR target = `dev`. Deleted after merge.
+- **Hotfix branches** = `hotfix/<slug>`. Cut from `main`. PR target = `main`. ONLY for production-broken or security-critical fixes. **Immediately back-merge `main` → `dev`** in the same session.
+
+PR title format: Conventional Commits with type allowlist `feat, fix, chore, docs, refactor, test, ci, release`. Enforced by `.github/workflows/pr-title.yml`.
+
+Merge mechanics: merge commit on all PRs (no squash, no rebase). `dev` carries the integration log; `main` carries the release log.
+
+### Handoff command examples
+
+Feature → dev:
+```
+cd "C:\dev\PriorityKB"
+git checkout dev && git pull
+git checkout -b feat/<slug>
+# ... work, commits ...
+npm run check
+git push -u origin feat/<slug>
+gh pr create --base dev --title "feat(scope): subject" --body "..."
+```
+
+Release → main (when `dev` has an integrated slice ready):
+```
+cd "C:\dev\PriorityKB"
+git checkout dev && git pull
+gh pr create --base main --head dev --title "release: dev → main" --body "..."
+```
+
+Hotfix → main:
+```
+cd "C:\dev\PriorityKB"
+git checkout main && git pull
+git checkout -b hotfix/<slug>
+# ... fix + tests + npm run check ...
+git push -u origin hotfix/<slug>
+gh pr create --base main --title "fix(scope): subject" --body "..."
+# After merge:
+git checkout dev && git pull && git merge --no-ff origin/main -m "chore: back-merge hotfix <slug> into dev" && git push
+```
+
+---
+
 ## Pre-push gate
 
 Mirrors `.github/workflows/ci.yml` exactly. The gate command lives in `package.json` and (eventually) `pyproject.toml`.
