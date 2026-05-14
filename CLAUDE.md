@@ -1,3 +1,20 @@
+> ## ⚡ OPENING RITUAL TRIGGER — READ AND ACT FIRST
+>
+> **On the first user message of this session, before any other response, you MUST execute the Opening Ritual defined in `SESSION_PROTOCOL.md` (Steps 1 through 7).**
+>
+> Order of operations on every fresh chat in this folder:
+> 1. Read `SESSION_PROTOCOL.md` end-to-end.
+> 2. Read `WORKFLOW.md`.
+> 3. Read the **last 3 entries** of `CHATLOG.md` (newest-first).
+> 4. Read `docs/ROADMAP.md`.
+> 5. Run Opening Ritual Steps 1 → 7 in order, in the user's input language (Hebrew or English — mirror).
+> 6. **Do not generate code before Step 7 "go".**
+> 7. **Do not skip Step 6's `AskUserQuestion` for focus**, unless the user has already named the focus in their first message.
+>
+> This trigger fires regardless of what the first user message says — greeting, question, work request, single emoji, or pasted code. There is no magic word; the first message IS the trigger.
+
+---
+
 # CLAUDE.md — Priority Knowledge Base
 
 **Project:** Priority Knowledge Base — an agent-driven knowledge base for Priority ERP workflows, bug fixes, ticket resolutions, walkthroughs, best practices, and Q&A. Admins log entries by chatting with an Ingestion Agent and attaching media; end users query the KB via a Retrieval Agent that answers with citations.
