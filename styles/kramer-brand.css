@@ -13,25 +13,26 @@
 
 :root {
   /* Brand palette */
-  --kramer-purple:  #8200B4;  /* Primary brand / accent */
-  --kramer-mint:    #68FFC3;  /* Highlight / success / CTA */
-  --kramer-pink:    #BE0078;  /* Secondary accent / alert */
-  --kramer-neutral: #DCDDDE;  /* Light text, borders, dividers */
-  --kramer-dark:    #121212;  /* Page background / deep surface */
+  --kramer-purple: #8200b4; /* Primary brand / accent */
+  --kramer-mint: #68ffc3; /* Highlight / success / CTA */
+  --kramer-pink: #be0078; /* Secondary accent / alert */
+  --kramer-neutral: #dcddde; /* Light text, borders, dividers */
+  --kramer-dark: #121212; /* Page background / deep surface */
 
   /* Typography */
-  --font-body:    'GT Eesti Display Lt', 'GT Eesti Display', sans-serif;
-  --font-heading: 'GT Eesti Display Md', 'GT Eesti Display', sans-serif;
-  --fs-body:    12px;
+  --font-body: "GT Eesti Display Lt", "GT Eesti Display", sans-serif;
+  --font-heading: "GT Eesti Display Md", "GT Eesti Display", sans-serif;
+  --fs-body: 12px;
   --fs-subhead: 18px;
-  --fs-title:   24px;
+  --fs-title: 24px;
 
   /* Line heights */
-  --lh-body:    1.4;
+  --lh-body: 1.4;
   --lh-heading: 1.2;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   background: var(--kramer-dark);
@@ -51,7 +52,8 @@ h1 {
   margin: 0 0 0.5em;
 }
 
-h2, h3 {
+h2,
+h3 {
   font-family: var(--font-heading);
   font-size: var(--fs-subhead);
   line-height: var(--lh-heading);
@@ -101,7 +103,7 @@ hr,
 
 code,
 pre {
-  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
   font-size: 12px;
 }
 

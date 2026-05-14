@@ -19,7 +19,7 @@ Pacing: **milestone-by-milestone, open-ended.**
 - [ ] Observability: structured JSON log helper (every Claude/Voyage call → `tokens, latency, cost, prompt_hash, model, model_version`).
 - [ ] `pg_dump` nightly backup cron stub (script + scheduled task; restore deferred to M5 drill).
 - [ ] Hebrew OCR spike: 1-day prototype against Azure Document Intelligence with 5 sample Priority screenshots; record quality notes in BACKLOG.
-- [ ] Chunking strategy doc (M1 ADR-0002) — default ~500 token chunks with overlap, semantic boundaries where possible.
+- [ ] Chunking strategy doc (M1 ADR-0004) — default ~500 token chunks with overlap, semantic boundaries where possible. (ADR-0002 and 0003 were claimed by the branching-policy + CI-security-gates work.)
 - [ ] `evals/golden_set.yaml` skeleton with 5 placeholder Q/A pairs (Hebrew + English) — fleshed out in M3.
 - [ ] CI green on first push (`npm run check` mirrors `.github/workflows/ci.yml`).
 
