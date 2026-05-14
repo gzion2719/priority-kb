@@ -4,6 +4,27 @@ How chats work across the project. Read on the first message of every chat (per 
 
 ---
 
+## How to start a new session
+
+Fresh Claude has no memory of past chats. Two paths to bootstrap a session correctly:
+
+### Path A — Claude Code (recommended for this project)
+1. Open a terminal at the project root: `cd "C:\dev\PriorityKB"`.
+2. Launch Claude Code (`claude`).
+3. Claude Code auto-loads `CLAUDE.md` as system context — it sees the language pair, non-negotiables, and the "always read first" instruction.
+4. Type any first message (`hi`, `שלום חבר`, or your actual focus). The opening ritual fires.
+
+### Path B — Cowork / Claude web / any other client
+The client may not auto-load `CLAUDE.md`. Paste this as your **first message** verbatim:
+
+```
+You are in the Priority Knowledge Base project at C:\dev\PriorityKB. Before responding, read CLAUDE.md, then SESSION_PROTOCOL.md, then WORKFLOW.md, then the last 3 entries of CHATLOG.md, then docs/ROADMAP.md — in that order. Then run the Opening Ritual defined in SESSION_PROTOCOL.md starting at Step 1. Do not skip steps. Do not generate code before Step 7 confirmation.
+```
+
+Either path lands in the same place: Step 1 greeting → Step 2 folder confirm → … → Step 6 focus choice → Step 7 critique + wait for "go".
+
+---
+
 ## Chat archetypes
 
 ### Build — implementing a milestone task
