@@ -1,0 +1,15 @@
+# Normalize line endings: LF in repo, OS-native in working tree on checkout.
+# Eliminates the CRLF/LF warning storm when committing from Windows.
+* text=auto eol=lf
+
+# Binary files — never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary

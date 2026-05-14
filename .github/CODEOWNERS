@@ -1,0 +1,6 @@
+# Code owners — see ADR-0003 and CLAUDE.md non-negotiable #11 (≥2 admins).
+# When admin #2 lands, add them here and consider tightening branch protection
+# to require 1 approval (currently not required because GitHub blocks self-approval
+# on a solo repo — would self-lock).
+
+* @gzion2719
