@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+build
+coverage
+package-lock.json
+public
+*.md
+docs/**/*.md
+prompts/**/*.md
+evals/**/*.yaml
