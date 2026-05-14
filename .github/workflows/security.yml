@@ -5,7 +5,8 @@ on:
     branches: [main, dev]
   pull_request:
   schedule:
-    # Weekly CodeQL re-scan on Monday 06:00 UTC.
+    # Weekly re-scan on Monday 06:00 UTC (catches new gitleaks rules / regexes
+    # against existing history without waiting for a PR).
     - cron: "0 6 * * 1"
 
 concurrency:
@@ -38,30 +39,28 @@ jobs:
           GITLEAKS_ENABLE_COMMENTS: "false"
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
 
-  codeql:
-    name: codeql
-    runs-on: ubuntu-latest
-    # CodeQL is path-filtered to source code only — it is intentionally NOT in
-    # required-status-checks (path-filtered + required = pending-forever block).
-    # See ADR-0003.
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [javascript-typescript]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-          queries: security-extended
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-
-      - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: "/language:${{ matrix.language }}"
+  # CodeQL deferred — Code Scanning must first be enabled in the repo settings
+  # (Settings → Code security → Code scanning). Re-enable this job once that's
+  # done; the path-filter trap means it must stay advisory (NOT in required
+  # status checks). See ADR-0003.
+  #
+  # codeql:
+  #   name: codeql
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       language: [javascript-typescript]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Initialize CodeQL
+  #       uses: github/codeql-action/init@v3
+  #       with:
+  #         languages: ${{ matrix.language }}
+  #         queries: security-extended
+  #     - name: Autobuild
+  #       uses: github/codeql-action/autobuild@v3
+  #     - name: Perform CodeQL analysis
+  #       uses: github/codeql-action/analyze@v3
+  #       with:
+  #         category: "/language:${{ matrix.language }}"

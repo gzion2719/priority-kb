@@ -18,7 +18,7 @@ ADR-0002 establishes the branching model and the *shape* of branch protection. T
 
 ### Advisory checks (run, surface findings, do NOT block merge)
 
-1. **CodeQL JS/TS** (from `security.yml`) — runs on PRs to relevant paths + weekly schedule. Surfaces SAST findings via GitHub Code Scanning UI. NOT a required check because (a) it uses path filters, and required + path-filtered = "pending forever" trap, and (b) acting on findings is a deliberate review, not a merge-blocker. Python lane added when M2b lands.
+1. **CodeQL JS/TS** (from `security.yml`) — **DEFERRED**: the workflow job is committed but commented out. Code Scanning must first be enabled in repo settings (Settings → Code security → Code scanning); the first run failed with "Code scanning is not enabled for this repository". Re-enable the job once that's done. When live: runs on PRs + weekly schedule, surfaces SAST findings via GitHub Code Scanning UI. **Must stay advisory** — NOT in required status checks because (a) it uses path filters, and required + path-filtered = "pending forever" trap, and (b) acting on findings is a deliberate review, not a merge-blocker. Python lane added when M2b lands. Reviewer already flagged CodeQL would produce zero findings on the M1 scaffold; the value compounds as routes and DB-touching code land — fine to bring online at M2a alongside the ingestion API.
 2. **`npm audit --audit-level=high`** in the Node lane, run as `|| true` — annotates the job log with high/critical advisories but does NOT fail the build. Dependabot (below) does the actual patching; making `audit` a hard fail blocks unrelated PRs every time a transitive CVE drops.
 
 ### Dependabot (no PR check, just opens PRs)
