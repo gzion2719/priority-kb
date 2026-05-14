@@ -1,0 +1,69 @@
+# Retrieval Golden Set — Priority Knowledge Base
+#
+# Used by the eval runner to measure retrieval quality (recall@5, citation precision).
+# Each item describes a realistic user query, the entry IDs that should appear in retrieval,
+# and optionally a reference answer (for LLM-as-judge citation-quality scoring).
+#
+# Skeleton — populated as M2a/M3 produce real entries. Target: 30+ pairs (15 Hebrew, 15 English) by M3 acceptance.
+# See `docs/ROADMAP.md` M3 checklist.
+
+version: 0.1.0
+language_split:
+  hebrew_target: 15
+  english_target: 15
+
+cases:
+  # --- English placeholders ---
+  - id: en-001
+    query: "How do I fix duplicate customer codes when importing from Excel?"
+    language: en
+    expected_source_ids: []          # to be filled when the real entry is logged
+    expected_answer_contains:        # optional LLM-as-judge hints
+      - "Import wizard"
+      - "duplicate"
+    notes: "M2a smoke test target — log this real Q&A first."
+
+  - id: en-002
+    query: "What's the F11 shortcut do in a Priority form?"
+    language: en
+    expected_source_ids: []
+    expected_answer_contains:
+      - "lock"
+
+  - id: en-003
+    query: "Steps to set up a new ledger for FY2027"
+    language: en
+    expected_source_ids: []
+
+  # --- Hebrew placeholders ---
+  - id: he-001
+    query: "איך מתקנים קודי לקוח כפולים בייבוא מאקסל?"
+    language: he
+    expected_source_ids: []
+
+  - id: he-002
+    query: "מה עושה הקיצור F11 בטופס פריוריטי?"
+    language: he
+    expected_source_ids: []
+
+  # Add more as real entries land. Mix:
+  #   - Procedural ("how do I X")
+  #   - Diagnostic ("error Y, what now")
+  #   - Conceptual ("what is the difference between A and B")
+  #   - Cross-lingual: Hebrew query → English entry, English query → Hebrew entry
+
+metrics:
+  recall_at_k:
+    k: 5
+    target: 0.80                     # M3 acceptance bar
+  citation_precision:
+    target: 0.90                     # M3 acceptance bar
+  baseline_configs:                  # regression baseline — run alongside main config
+    - name: no-reranker
+      config:
+        rerank: false
+        hybrid_search: true
+    - name: vector-only
+      config:
+        rerank: false
+        hybrid_search: false

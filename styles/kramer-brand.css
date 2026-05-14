@@ -1,0 +1,134 @@
+/*
+ * Kramer Brand — Priority Knowledge Base
+ *
+ * Source: anthropic-skills:kramer-brand
+ * Typography: GT Eesti Display (Lt for body, Md for headings)
+ * Palette: --kramer-purple / --kramer-mint / --kramer-pink / --kramer-neutral / --kramer-dark
+ *
+ * Import this in the Next.js root layout (M1):
+ *   import "../styles/kramer-brand.css";
+ *
+ * Logo: served as base64 PNG (see <KramerLogo /> component in M1) — do not hotlink.
+ */
+
+:root {
+  /* Brand palette */
+  --kramer-purple:  #8200B4;  /* Primary brand / accent */
+  --kramer-mint:    #68FFC3;  /* Highlight / success / CTA */
+  --kramer-pink:    #BE0078;  /* Secondary accent / alert */
+  --kramer-neutral: #DCDDDE;  /* Light text, borders, dividers */
+  --kramer-dark:    #121212;  /* Page background / deep surface */
+
+  /* Typography */
+  --font-body:    'GT Eesti Display Lt', 'GT Eesti Display', sans-serif;
+  --font-heading: 'GT Eesti Display Md', 'GT Eesti Display', sans-serif;
+  --fs-body:    12px;
+  --fs-subhead: 18px;
+  --fs-title:   24px;
+
+  /* Line heights */
+  --lh-body:    1.4;
+  --lh-heading: 1.2;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--kramer-dark);
+  color: var(--kramer-neutral);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1 {
+  font-family: var(--font-heading);
+  font-size: var(--fs-title);
+  line-height: var(--lh-heading);
+  color: var(--kramer-neutral);
+  margin: 0 0 0.5em;
+}
+
+h2, h3 {
+  font-family: var(--font-heading);
+  font-size: var(--fs-subhead);
+  line-height: var(--lh-heading);
+  color: var(--kramer-neutral);
+  margin: 0 0 0.5em;
+}
+
+a {
+  color: var(--kramer-mint);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--kramer-purple);
+}
+
+button,
+.btn {
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  background: var(--kramer-purple);
+  color: var(--kramer-neutral);
+  border: none;
+  padding: 0.5em 1em;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+button.cta,
+.btn.cta {
+  background: var(--kramer-mint);
+  color: var(--kramer-dark);
+}
+
+button.alert,
+.btn.alert {
+  background: var(--kramer-pink);
+}
+
+hr,
+.divider {
+  border: none;
+  border-top: 1px solid var(--kramer-neutral);
+  opacity: 0.2;
+  margin: 1em 0;
+}
+
+code,
+pre {
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* RTL support — applied per element via `dir="rtl"` */
+[dir="rtl"] {
+  text-align: right;
+}
+
+/*
+ * GT Eesti font loading
+ * --------------------
+ * GT Eesti is a commercial font by Grilli Type. If `.woff2` files are placed in
+ * `public/fonts/`, uncomment the @font-face blocks below. Otherwise the browser
+ * falls back to system sans-serif via the `'GT Eesti Display'` family entry.
+ *
+ * @font-face {
+ *   font-family: 'GT Eesti Display Lt';
+ *   src: url('/fonts/GT-Eesti-Display-Light.woff2') format('woff2');
+ *   font-weight: normal;
+ *   font-style: normal;
+ *   font-display: swap;
+ * }
+ * @font-face {
+ *   font-family: 'GT Eesti Display Md';
+ *   src: url('/fonts/GT-Eesti-Display-Medium.woff2') format('woff2');
+ *   font-weight: normal;
+ *   font-style: normal;
+ *   font-display: swap;
+ * }
+ */
