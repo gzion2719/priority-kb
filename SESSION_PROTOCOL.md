@@ -148,12 +148,12 @@ gh pr create --base dev --title "<conventional-commit-style title>" --body "..."
 Session closed. N PR pair(s) to open + merge:
 
 **1. <change name / branch scope>**
-- [feature → dev](https://github.com/gzion2719/priority-kb/compare/dev...<branch>)
-- [dev → main](https://github.com/gzion2719/priority-kb/compare/main...dev)
+- [feature → dev](https://github.com/gzion2719/priority-kb/compare/dev...<branch>) — title: `<type>(<scope>): <subject>`
+- [dev → main](https://github.com/gzion2719/priority-kb/compare/main...dev) — title: `release: dev → main (<one-line scope summary>)`
 
 **2. <second logical change, if any>**
-- [feature → dev](https://github.com/gzion2719/priority-kb/compare/dev...<branch-2>)
-- [dev → main](https://github.com/gzion2719/priority-kb/compare/main...dev)
+- [feature → dev](https://github.com/gzion2719/priority-kb/compare/dev...<branch-2>) — title: `<type>(<scope>): <subject>`
+- [dev → main](https://github.com/gzion2719/priority-kb/compare/main...dev) — title: `release: dev → main (<one-line scope summary>)`
 
 [Then deploy block — OMIT entirely until M5 hosting lands.]
 
@@ -169,7 +169,9 @@ Compare URLs are **clickable markdown links** (`[label](url)`), never bare code 
 
 **Two-PR rule — enforced every time, no exceptions.** Every PR pair MUST include BOTH links (feature → dev AND dev → main) in the same message. Never give one without the other. If the `dev → main` promotion is being batched with a future session, say so explicitly in one line under the pair — but the link still appears.
 
-**Mechanical pre-send self-check.** Re-read the draft before sending. If `git push` appears, the draft MUST also contain (a) `npm run check` earlier in the same message, AND (b) the PR pair(s) with both clickable compare links each. If either is missing, fix the draft before sending. Applies to ANY "ready to commit" handoff — closing ritual, mid-session commits, ADR-only commits, anything.
+**Mechanical pre-send self-check.** Re-read the draft before sending. If `git push` appears, the draft MUST also contain (a) `npm run check` earlier in the same message, AND (b) the PR pair(s) with both clickable compare links each, AND (c) a conventional-commits-compliant `title:` proposal beside *every* PR link (including the `dev → main` link — GitHub's compare UI defaults the title to the head-branch name `Dev`, which fails the `pr-title.yml` allowlist; codified 2026-05-15 after PR #18's `Dev` title failed the gate). If any of (a)/(b)/(c) is missing, fix the draft before sending. Applies to ANY "ready to commit" handoff — closing ritual, mid-session commits, ADR-only commits, anything.
+
+**Title-allowlist sub-rule.** Every proposed PR title must start with a type from `.github/workflows/pr-title.yml`'s allowlist (`feat, fix, chore, docs, refactor, test, ci, release`) followed by an optional `(scope)` and a `: subject`. The `dev → main` release PR specifically uses `release: dev → main (<scope summary>)`. Bare branch names, GitHub UI defaults, or anything starting with a capital letter and no colon — `Dev`, `Update`, `Wip`, `Pass 2b` — will fail CI. If you can't think of a clean title, the work isn't ready to PR.
 
 **Worktree-mode override sub-rule.** When the session ran inside `.claude/worktrees/<name>/` (the default Claude Code setup on this project — see WORKFLOW.md "Worktree commit-handoff rule"), Claude runs the gate, the commit, and the push *itself* via the Bash tool from inside the worktree, **before** sending the handoff message. The user-facing message then drops the gate-first bash block entirely and leads with: a one-line confirmation that Claude ran the gate + commit + push (with the commit SHA + branch name), then the canonical PR-pair compare links, then (post-M5) the deploy block, then the session summary. The mechanical pre-send self-check above still applies — but vacuously: in worktree mode `git push` will not appear in the draft, so the `npm run check` co-presence requirement is moot. The PR-pair clickable-links requirement and the two-PR rule remain in full force regardless of mode.
 
