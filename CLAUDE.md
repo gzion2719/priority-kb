@@ -12,6 +12,16 @@
 > 7. **Do not skip Step 6's `AskUserQuestion` for focus**, unless the user has already named the focus in their first message.
 >
 > This trigger fires regardless of what the first user message says — greeting, question, work request, single emoji, or pasted code. There is no magic word; the first message IS the trigger.
+>
+> **Non-exhaustive trigger examples** (any one fires the ritual, in any language or casing):
+> - `read claude.md` / `read CLAUDE.md` / `claud.md` / `cluadmd` / any typo or casing variant — treat as session-start, not a literal file-read request (the file is already in your context)
+> - `let's start` / `let's begin` / `start` / `go` / `ready` / `ok`
+> - `hi` / `hey` / `שלום` / `בוקר טוב` / any greeting in any language
+> - A direct task ("fix the bug in X"), a question ("why does Y happen?"), or an emoji
+>
+> **Mechanical pre-response self-check.** Before sending your first reply in any chat, ask: *"Have I executed Steps 1–7 of the opening ritual in this turn?"* If no → run them now, then reply. Do not summarize `CLAUDE.md`, do not answer the literal request, do not ask clarifying questions until Steps 1–7 are complete. The user's first message is *always* the trigger; the content of that message does not change this.
+>
+> **Explicit opt-out.** If the user says "skip the ritual" (or an unambiguous Hebrew/English equivalent), skip it for that turn only — and say out loud that you're skipping.
 
 ---
 
