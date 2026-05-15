@@ -6,6 +6,17 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-15 — M1 first slice + third-strike autotitle floor
+
+- Shipped first M1 DB-foundation slice (PR #24): `docker-compose.yml` + `db/init.sql` + `lib/db.ts` + `app/healthz/route.ts` + 3 vitest cases (mocked `pg`, non-negotiable #8). Independent plan review surfaced 3 BLOCKING + 7 MAJOR pre-implementation; all resolved before commit. Does NOT close M1.
+- `Dev`-title bug fired a *third* time on PR #25 — `gh pr create --base main` denied by auto-mode, handoff fell back to a compare URL, GitHub's UI defaulted the title to `Dev`. PR #26 added the prose-layer fix (no compare URL for `dev → main`; paste-ready `gh` one-liner instead).
+- Recognized the pattern across PR #18 → #20 → #25: every prose-layer fix patched the path that broke last time without preventing a new path. PR #27 adds `.github/workflows/release-pr-autotitle.yml` — server-side `gh pr edit` that rewrites any `dev → main` PR title not starting with `release:`. Mechanical floor, fires regardless of how the PR was opened.
+- BACKLOG gained three deferred items: pin `pgvector/pgvector:pg16` by digest, ORM/query-builder ADR before any schema-touching route, Alembic-vs-node migration-runner cross-runtime decision.
+- **Process improvement:** `.github/workflows/release-pr-autotitle.yml` + `WORKFLOW.md` "Server-side safety net" paragraph (commit `65435f8`). Defense-in-depth at the GitHub layer complementing the prose rules; the bug can no longer reach merge regardless of who opens the PR.
+- **Next session:** next M1 item — pick between (a) structured JSON log helper (M1 acceptance line item; isolated, ~one session) and (b) Alembic baseline + ORM/query-builder ADR (unblocks schema work; bigger). Recommend (a) first to keep slices narrow.
+
+---
+
 ## 2026-05-15 — Pass 2b + gh-pr-create automation (after PR-title rule failed live)
 
 - Pass 2b: ported 3 sub-rules from TradeBot — stacked-PR + describe-from-source (WORKFLOW.md), verify-before-asking (SESSION_PROTOCOL.md Step 7). Deferred to Pass 2c: invisible Unicode, multi-session user-visible artifact, CI debugging, web research.
