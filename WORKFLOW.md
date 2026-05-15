@@ -117,6 +117,59 @@ git checkout dev && git pull && git merge --no-ff origin/main -m "chore: back-me
 
 ---
 
+## Stacked-PR rule
+
+When a feature **depends on another feature branch that isn't merged yet**, do NOT wait for the parent PR to merge before starting the child — and do NOT cut the child from `dev`. **Cut the child from the parent branch**, and set the child PR's `--base` to the parent branch, not to `dev`. After the parent merges to `dev`, retarget the child PR (`gh pr edit <num> --base dev`) and rebase/merge `dev` into the child to drop the now-redundant parent commits.
+
+Why: cutting the child from `dev` while the parent is still open means the child's diff falsely contains every commit from the parent — the PR diff becomes unreviewable, CI runs the parent's tests twice, and merging the child to `dev` before the parent re-introduces the parent's commits as if they were the child's work. Stacking keeps each PR's diff scoped to exactly what that PR adds.
+
+Mechanics:
+
+```
+# Parent already exists as feat/A with an open PR → dev.
+git --no-optional-locks fetch origin
+git checkout feat/A && git pull
+git checkout -b feat/B          # cut child from parent, NOT from dev
+# ... work, commits ...
+npm run check
+git push -u origin feat/B
+gh pr create --base feat/A --title "feat(scope): B (stacked on feat/A)" --body "..."
+
+# After feat/A merges to dev:
+git --no-optional-locks fetch origin
+gh pr edit <B-PR-number> --base dev
+git checkout feat/B
+git merge origin/dev            # drop A's commits from B's diff
+git push
+```
+
+Naming: title the child PR with `(stacked on feat/A)` so reviewers know not to merge it before the parent. The first line of the PR body should restate the dependency and link the parent PR.
+
+**Limit stack depth to 2.** Three-deep stacks (`C` on `B` on `A`) almost always mean the work should have been split differently — pause and re-scope rather than stacking deeper.
+
+(Ported 2026-05-15 from TradeBot's `WORKFLOW.md`; adapted to PriorityKB's `dev` integration branch in place of TradeBot's `develop`.)
+
+---
+
+## Describe-from-source rule
+
+PR descriptions, commit bodies, CHATLOG bullets, and ADR prose describe **what the diff actually contains**, not what you remember intending to do. Before writing any of these, run the source-of-truth command for that artifact and write *from* its output:
+
+| Artifact | Source-of-truth command |
+| --- | --- |
+| Commit body | `git --no-optional-locks diff --staged --stat` then `git --no-optional-locks diff --staged` for the parts that need detail |
+| PR description | `git --no-optional-locks log --oneline <base>..HEAD` + `git --no-optional-locks diff <base>...HEAD --stat` |
+| CHATLOG bullet | the actual edits made this session — re-read the changed files or `git diff` if already staged |
+| ADR "Consequences" section | the implementation diff that motivated the ADR, not the original plan |
+
+Memory drifts within a single session: a refactor gets renamed mid-edit, a function gets dropped because a simpler approach emerged, a test gets added that wasn't in the plan. A description written from memory tells the *plan's* story; a description written from source tells the *code's* story. The code is what reviewers will read, what `git log -S` will search, and what future-Claude will orient against — so that's what the prose must match.
+
+Concrete failure mode this prevents: a PR body that confidently claims "removed the `<old-name>` helper" when the diff actually renamed it, OR a CHATLOG bullet that lists a sub-rule by the name it had in the planning critique rather than the name it has in the committed file. Both leak as soon as someone clicks the compare link.
+
+(Ported 2026-05-15 from TradeBot's `WORKFLOW.md`.)
+
+---
+
 ## Pre-push gate
 
 Mirrors `.github/workflows/ci.yml` exactly. The gate command lives in `package.json` and (eventually) `pyproject.toml`.
