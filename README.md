@@ -113,6 +113,14 @@ cd "C:\dev\PriorityKB"
 npm install
 npm run check         # lint + format + typecheck + test — must pass before push
 
+# Database — Postgres + pgvector via Docker Compose
+cp .env.example .env  # adjust DATABASE_URL if 5432 is taken (e.g., map 5433:5432 in docker-compose.yml)
+docker compose up -d
+npm run dev           # Next.js runs on host; DB in container at localhost:5432
+# Smoke: http://localhost:3000/healthz should return {"ok":true,"pgvector":true}
+# Manual extension check:
+# docker compose exec db psql -U postgres -d priority_kb -c "SELECT extname FROM pg_extension WHERE extname='vector';"
+
 # Python side (M2b+)
 # python -m venv .venv && .venv\Scripts\activate
 # pip install -e ".[dev]"
