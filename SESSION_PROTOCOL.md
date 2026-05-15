@@ -25,12 +25,18 @@ Defer deeper docs (`docs/AGENTS.md`, ADRs, prompts, eval set) to Step 4b after S
 **Step 4b — ADR/design-document timing sub-rule:** for focuses that are design/ADR work, do the supporting reads (existing code, related ADRs, schema) *before* the Step 7 planning critique — not after. The critique needs the facts to evaluate against.
 
 ### Step 5 — Repo state summary
-Run `git --no-optional-locks status` (the `--no-optional-locks` flag prevents stale `.git/index.lock`). Flag drift: uncommitted changes from previous session, branches ahead/behind, files outside the expected shape.
+Run `git --no-optional-locks fetch origin main dev` **first**, then `git --no-optional-locks status` and `git branch`. The fetch is non-negotiable before judging merge state — a status/log check against stale remote-tracking refs will flag drift that's already resolved (or miss drift that exists). The `--no-optional-locks` flag prevents stale `.git/index.lock`.
+
+Flag drift: uncommitted changes from previous session, branches ahead/behind, files outside the expected shape.
+
+**Reconstruct-on-drift sub-rule.** If `git log` shows merged work that `CHATLOG.md` doesn't mention, the previous session likely ended without closing (API error, accidental close, network drop). **Offer to reconstruct the missing CHATLOG entry from git + chat transcript BEFORE starting new work** — don't pile new context on top of stale state. Mark the reconstructed entry `RECONSTRUCTED` in its title so the verify-before-recommending sub-rule (Step 6) knows to distrust its `Next session:` line.
 
 ### Step 6 — Ask for current focus
 Use `AskUserQuestion` with 2-3 grounded options derived from the last CHATLOG entry's `Next session:` line and the active ROADMAP milestone.
 
 **Scope-sprawl audit sub-rule:** if the previous CHATLOG entry's `Next session:` line bundles ≥3 distinct deliverables OR introduces an ADR-worthy architectural surface, present the smaller-cleaner first increment as the **Recommended** option.
+
+**Verify-before-recommending sub-rule.** Before presenting a previous CHATLOG's `Next session:` item as the Recommended option, verify it is still pending. Cheap checks first: `git --no-optional-locks log origin/main origin/dev` for code/merge claims; for visibly-deployable artifacts (running services, dashboards, merged PRs, pushed branches) ask the user one sentence ("is X already live?") rather than trusting the doc. **Especially required when the previous CHATLOG entry is marked `RECONSTRUCTED`** — the reconstruction is built from git + chat transcript, but anything completed after the originating session's API error / context exhaustion appears in neither source, so the `Next session:` line is unverified by definition.
 
 ### Step 7 — Restate + planning self-critique
 Restate the chosen focus in one sentence. Then run a **substantive** planning self-critique:
@@ -41,6 +47,8 @@ Restate the chosen focus in one sentence. Then run a **substantive** planning se
 - Does this introduce a new architectural surface that needs an ADR before code?
 
 Wait for **"go"**. For trivial focuses, a one-line ack is fine; for new content landing in user-facing docs / code modules / architectural decisions, the critique must be a substantive list — not theater.
+
+**Verify-before-finalize sub-rule.** A plan section titled "pre-coding verification" or "open assumptions to check after go" is a smell. If the plan holds N "verify later" assumptions, **answer them with greps/reads BEFORE presenting the plan** for approval — a 30-second `Read` or `Grep` is always cheaper than re-planning when the assumption turns out wrong. If the plan would benefit from a "pre-coding verification checklist," do the checklist now and bake the answers into the plan, not into a future blocker.
 
 ---
 
@@ -132,11 +140,38 @@ git push -u origin <feature-branch>
 gh pr create --base dev --title "<conventional-commit-style title>" --body "..."
 ```
 
+**Then the canonical PR-pair handoff (non-negotiable shape).** Immediately after the gate block, render the PR pair(s) and session summary in this exact shape — see also the feedback memory `feedback_pr_handoff_shape.md`:
+
+```
+Session closed. N PR pair(s) to open + merge:
+
+**1. <change name / branch scope>**
+- [feature → dev](https://github.com/gzion2719/priority-kb/compare/dev...<branch>)
+- [dev → main](https://github.com/gzion2719/priority-kb/compare/main...dev)
+
+**2. <second logical change, if any>**
+- [feature → dev](https://github.com/gzion2719/priority-kb/compare/dev...<branch-2>)
+- [dev → main](https://github.com/gzion2719/priority-kb/compare/main...dev)
+
+[Then deploy block — OMIT entirely until M5 hosting lands.]
+
+Session summary:
+- <commit SHA(s) + what each did>
+- <key diagnosis / decision>
+- <new artifacts: files / methods / tests>
+- <test count + lint status with ✅ when green>
+- Process improvement captured in CHATLOG: <one-line pointer>
+```
+
+Compare URLs are **clickable markdown links** (`[label](url)`), never bare code blocks — a code block is not clickable and forces copy-paste, exactly the friction the shape eliminates. The gate-first `bash` block above STAYS a code block; only the PR URLs become links.
+
+**Two-PR rule — enforced every time, no exceptions.** Every PR pair MUST include BOTH links (feature → dev AND dev → main) in the same message. Never give one without the other. If the `dev → main` promotion is being batched with a future session, say so explicitly in one line under the pair — but the link still appears.
+
+**Mechanical pre-send self-check.** Re-read the draft before sending. If `git push` appears, the draft MUST also contain (a) `npm run check` earlier in the same message, AND (b) the PR pair(s) with both clickable compare links each. If either is missing, fix the draft before sending. Applies to ANY "ready to commit" handoff — closing ritual, mid-session commits, ADR-only commits, anything.
+
 **Never push to `main` directly** (see ADR-0002). Feature branches PR to `dev`; `dev` is promoted to `main` via a separate `release: dev → main` PR. Hotfixes are the only exception — `hotfix/<slug>` PRs target `main`, then immediately back-merge into `dev`. If a commit was created on `main` locally by accident, rewind `main` to `origin/main` and re-point the commit to a feature branch BEFORE pushing.
 
 The gate is a verbatim mirror of the project's CI job. Running it locally before pushing catches red CI in seconds rather than minutes-plus-roundtrip; that's why it leads.
-
-**Mechanical pre-send self-check.** Re-read your draft's first 3 lines before sending. If they don't contain the gate command, the draft is wrong — prepend it. The "summary first, gate last" pattern is a recurring anti-pattern; the gate goes first because that's what the user runs first. This applies to ANY "ready to commit" handoff, not just the closing one — including ADR-only commits, protocol-only commits, anything that gets pushed. **The check is text-based, not memory-based; apply it to your own draft mechanically.**
 
 ### Step 6 — Close warmly
 
