@@ -145,6 +145,40 @@ If either gate is red, **do not push**. Fix locally; the gate is the contract.
 
 ---
 
+## Secret-redaction rule
+
+When writing CHATLOG bullets, commit messages, ADR prose, or comments that describe the *removal* of a secret or sensitive literal, **never quote the actual literal** — write `<voyage-api-key>`, `<entra-client-secret>`, `<token>`, or `[redacted]` instead. Quoting the real value in the description re-introduces exactly the leak the redaction was meant to close, and any future grep-based gate (or a casual `git log -S` by a human) will surface it just as fast as the original commit would have.
+
+This is the symmetric pair to non-negotiable #1 ("credentials never committed"): #1 keeps secrets out of code; this rule keeps them out of the prose *describing* the cleanup.
+
+Example: a CHATLOG bullet for a hypothetical "rotated leaked Voyage key" session must read `redacted <voyage-api-key> from styles/kramer-brand.css comment`, not `redacted pa-XXXX...XXXX from styles/kramer-brand.css comment`. The latter re-commits the live key into `CHATLOG.md` — the very file we read on every session start.
+
+(Ported 2026-05-15 from TradeBot's `WORKFLOW.md`, where a CR-cleanup CHATLOG entry quoted the real account-ID literal it claimed to have redacted, and the project's `DUE[0-9]{6,9}` grep gate failed the develop→main PR.)
+
+---
+
+## Worktree commit-handoff rule
+
+When Claude's edits live in a worktree (`.claude/worktrees/<name>/`) and the user's shell is in the main checkout — the default Claude Code setup on this project — **Claude commits and pushes from the worktree itself** instead of giving the user a gate-first command block. The user runs only the steps that require their hands: clicking "Merge PR" in the browser, and (eventually, post-M5) the deploy one-liner.
+
+Why: the user's shell is PowerShell on Windows + the main checkout, which differs from Claude's Bash + worktree environment in two ways:
+1. **Shell language.** PowerShell can't run bash heredoc (`<<'EOF'`), `$(cat <<...)`, or `cmd | git commit -F -` reliably for multi-line commit messages.
+2. **Working directory.** Claude's file edits aren't in the user's `pwd`; the user must `cd` into the worktree first or git will say "nothing to commit, working tree clean" on whatever branch the main checkout last had.
+
+Default flow when the session ran in a worktree:
+1. Claude runs `npm run check` (and eventually `make py-check`) inside the worktree via Bash tool.
+2. Claude runs `git add ... && git commit -F -` (Bash heredoc works because Claude IS in bash) inside the worktree.
+3. Claude runs `git push -u origin <worktree-branch>` inside the worktree.
+4. Claude hands the user **only**: the canonical PR-pair compare URLs, the merge instruction, and (post-M5) the deploy one-liner. The gate-first bash block is omitted because Claude already ran it.
+
+Multi-line commit messages: always use `git commit -F -` with a heredoc on Claude's side. **Never give the user a heredoc** — if for some reason the user must drive the commit themselves (non-auto mode, or they explicitly ask), prefer either (a) `git commit -m "single short title"` plus a follow-up `git commit --amend`, or (b) write the message to a tracked temp file with the Write tool and tell them `git commit -F .git/COMMIT_MSG.tmp`.
+
+This rule modifies — does not contradict — Closing Ritual Step 5: see the **Worktree-mode override** sub-rule there for how the handoff message reshapes when this rule fires.
+
+(Ported 2026-05-15 from TradeBot's `WORKFLOW.md`, where two consecutive closing-ritual rounds wasted a multi-line `git commit -m "$(cat <<'EOF' ... EOF)"` handoff on PowerShell parse errors and a stale main-checkout branch.)
+
+---
+
 ## Red flags — stop and resync
 
 If any of these happen, pause and re-orient before continuing:
