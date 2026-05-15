@@ -1,0 +1,49 @@
+name: release-pr-autotitle
+
+# Server-side mechanical enforcement: when a PR is opened with base=main
+# and head=dev, ensure the title starts with `release:` so it satisfies
+# .github/workflows/pr-title.yml. GitHub's compare UI defaults the title
+# to the head-branch name (`Dev`), which fails the allowlist and has
+# caused three live merge-gate failures (PR #18, #20, #25).
+#
+# This is the defense-in-depth complement to:
+# - SESSION_PROTOCOL.md Closing Step 5 "Worktree-mode override sub-rule"
+# - SESSION_PROTOCOL.md Closing Step 5 "Tooling-denial fallback sub-rule"
+# - WORKFLOW.md "Worktree commit-handoff rule"
+#
+# Prose rules tell Claude to open the PR with the right title. This
+# action ensures that if any path (UI, manual gh, a different agent)
+# still ships a bad title, it gets corrected before the pr-title gate
+# runs the second time.
+
+on:
+  pull_request:
+    types: [opened, reopened, edited]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  autotitle:
+    name: Auto-title release PRs
+    if: github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'dev'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rewrite non-conforming title
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          if [[ "$PR_TITLE" =~ ^release: ]]; then
+            echo "Title already starts with 'release:' — no change."
+            exit 0
+          fi
+          NEW_TITLE="release: dev → main"
+          echo "Rewriting PR #$PR_NUMBER title:"
+          echo "  from: $PR_TITLE"
+          echo "  to:   $NEW_TITLE"
+          gh pr edit "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$NEW_TITLE"
