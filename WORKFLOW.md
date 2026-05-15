@@ -222,7 +222,14 @@ Default flow when the session ran in a worktree:
 1. Claude runs `npm run check` (and eventually `make py-check`) inside the worktree via Bash tool.
 2. Claude runs `git add ... && git commit -F -` (Bash heredoc works because Claude IS in bash) inside the worktree.
 3. Claude runs `git push -u origin <worktree-branch>` inside the worktree.
-4. Claude hands the user **only**: the canonical PR-pair compare URLs, the merge instruction, and (post-M5) the deploy one-liner. The gate-first bash block is omitted because Claude already ran it.
+4. **Claude opens the PRs via `gh pr create`**, not the user. Both legs of the pair:
+   - Feature → dev: `gh pr create --base dev --head <branch> --title "<type>(<scope>): <subject>" --body "<body from describe-from-source>"`
+   - Release dev → main: after the feature PR is merged, `gh pr create --base main --head dev --title "release: dev → main (<scope summary>)" --body "<body>"`. If a release PR is already open against `main`, Claude **does not** open a duplicate — it edits the existing one's title/body if needed via `gh pr edit <num>` and notes the existing PR number in the handoff.
+5. Claude hands the user **only**: the URLs of the now-already-open PRs (clickable links to `/pull/<N>`, not `/compare/...`), the merge instruction, and (post-M5) the deploy one-liner. The gate-first bash block is omitted because Claude already ran it.
+
+**Why Claude opens the PRs, not the user.** GitHub's compare UI defaults the PR title to the head-branch name — `Dev` for the `dev → main` release PR — which is *never* a valid conventional-commits title and *always* fails `.github/workflows/pr-title.yml`. Asking the user to manually paste the right title on every release is friction that mechanical automation eliminates. Claude already has `gh` authenticated (it pushed the branch); creating the PR is one extra command. Codified 2026-05-15 after the title failure recurred on PR #18 (`Pass 2b`) and PR #20 (the rule that was supposed to prevent PR #18) — proof that any rule which requires the user to click-paste-the-right-title on every release will eventually fail.
+
+**Body source.** PR body comes from the describe-from-source rule above: `git --no-optional-locks log --oneline <base>..HEAD` + `git --no-optional-locks diff <base>...HEAD --stat`, written into a temp file passed to `gh pr create --body-file`. Don't hand-write the body from memory of intent.
 
 Multi-line commit messages: always use `git commit -F -` with a heredoc on Claude's side. **Never give the user a heredoc** — if for some reason the user must drive the commit themselves (non-auto mode, or they explicitly ask), prefer either (a) `git commit -m "single short title"` plus a follow-up `git commit --amend`, or (b) write the message to a tracked temp file with the Write tool and tell them `git commit -F .git/COMMIT_MSG.tmp`.
 
