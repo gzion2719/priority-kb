@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-15 — Pass 2a: secret-redaction + worktree commit-handoff into WORKFLOW
+
+- Ported 2 sub-rules from TradeBot's `WORKFLOW.md` into PriorityKB: **secret-redaction** (never quote the literal you claim to have redacted) and **worktree commit-handoff** (Claude runs gate + commit + push from inside the worktree; user gets only PR links).
+- Step 7 critique caught the WORKFLOW-rule ↔ Closing Step 5 contradiction (the BLOCKING that Pass 1 deliberately deferred) and forced a same-pass resolution: Closing Step 5 gained a **Worktree-mode override** sub-rule so the gate-first user block is dropped when work lives in a worktree.
+- Adapted: `make pre-push` → `npm run check`; VPS deploy line dropped (M5-deferred); secret-redaction example reframed to a `<voyage-api-key>`/`<entra-client-secret>` scenario rather than TradeBot's account-ID story.
+- Pre-existing CRLF drift on `.claude/settings.json` surfaced and normalized via `prettier --write` to unblock the gate (line endings only, no logic change).
+- This session dogfooded the new worktree commit-handoff rule on its own closing — Claude ran gate + commit + push, the user runs only PR-merge clicks.
+- **Process improvement:** WORKFLOW.md gained two new top-level sections + SESSION_PROTOCOL.md Closing Step 5 gained the Worktree-mode override sub-rule (see `WORKFLOW.md` "Secret-redaction rule" / "Worktree commit-handoff rule" and `SESSION_PROTOCOL.md` Closing Step 5).
+- **Next session:** Pass 2b — pick the next 1–2 WORKFLOW rules from the deferred bundle (stacked PR / describe-from-source / invisible Unicode / multi-session user-visible artifact / CI debugging / web research / verify-before-asking).
+
+---
+
 ## 2026-05-15 — Protocol merge Pass 1: TradeBot patterns into opening ritual
 
 - Ported 5 sub-rules from a TradeBot project's `SESSION_PROTOCOL.md` into PriorityKB's opening ritual: trigger-examples list + mechanical pre-response self-check + skip opt-out (`CLAUDE.md` header); `git fetch` before `git status` in Step 5; reconstruct-on-drift Step 5 sub-rule with `RECONSTRUCTED` marker; verify-before-recommending Step 6 sub-rule; verify-before-finalize Step 7 sub-rule.
