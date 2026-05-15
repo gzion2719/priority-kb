@@ -6,6 +6,17 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-15 — Pass 2b + gh-pr-create automation (after PR-title rule failed live)
+
+- Pass 2b: ported 3 sub-rules from TradeBot — stacked-PR + describe-from-source (WORKFLOW.md), verify-before-asking (SESSION_PROTOCOL.md Step 7). Deferred to Pass 2c: invisible Unicode, multi-session user-visible artifact, CI debugging, web research.
+- PR-title gate failed on PR #18 (`Dev`); first attempted fix (a945e7f) added a "propose conventional title beside every PR link" rule — failed AGAIN on its own release PR #20. Mechanical fix replaced it: worktree mode now runs `gh pr create` itself for both legs of the pair, baking titles in at creation time (commit 1799b54).
+- Dogfooding caught two own-foot bullets in real time: describe-from-source surfaced a false `.claude/settings.json` claim in the commit body that introduced the rule (amended out before push); gh-pr-create was used to open PR #21 itself.
+- Key meta-lesson: prevention rules that require user behavior change ("paste the right title") will always fail eventually; mechanical automation ("Claude runs gh pr create") doesn't. Codified in WORKFLOW.md "Why Claude opens the PRs, not the user" rationale.
+- **Process improvement:** WORKFLOW.md "Worktree commit-handoff rule" Step 4 (gh pr create for both legs) + SESSION_PROTOCOL.md Step 5 worktree-mode override (handoff uses `/pull/<N>` URLs, not `/compare/`); see commit 1799b54.
+- **Next session:** M1 Foundation first slice — `create-next-app` scaffold in `.` with TypeScript + app router + ESLint; `styles/kramer-brand.css` imported in root layout; one branded landing page renders. Start a fresh chat (different archetype = code, not protocol).
+
+---
+
 ## 2026-05-15 — Pass 2a: secret-redaction + worktree commit-handoff into WORKFLOW
 
 - Ported 2 sub-rules from TradeBot's `WORKFLOW.md` into PriorityKB: **secret-redaction** (never quote the literal you claim to have redacted) and **worktree commit-handoff** (Claude runs gate + commit + push from inside the worktree; user gets only PR links).
