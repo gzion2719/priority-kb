@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-16 — PR-title mechanical floor (ADR-0004) + RED-bucket protocol slim
+
+- PR #31's title (`docs(protocol): Step 7b — ...`) failed the gate with a capital `S` in the subject — fourth instance of the same class of bug across PRs #18/#20/#25/#31. Retro identified the root cause: prose rules attempt to *describe* what `pr-title.yml`'s regex *enforces*, and they always drift.
+- Built the three-layer mechanical floor (ADR-0004): (1) `scripts/precheck-pr-title.mjs` wrapping `commitlint` against the project's existing `commitlint.config.cjs`; (2) Claude Code `PreToolUse` Bash hook (`scripts/hook-gh-pr-create-precheck.mjs`) that intercepts `gh pr create` and blocks bad titles before the call fires; (3) `.github/workflows/pr-title-normalize.yml` that lowercases leading-uppercase subjects server-side on any PR (closes the GitHub-UI / dependabot path). 14 vitest cases pin the historical failures as rejected and the autotitle output as accepted.
+- Tightened `commitlint.config.cjs` `subject-case` to also reject `sentence-case`, aligning it with `pr-title.yml`'s `^(?![A-Z]).+$` regex — single source of truth for both commit messages and PR titles.
+- RED-bucket cleanup from the mechanism audit: bug histories for PRs #18/#20/#25/#31 moved out of `SESSION_PROTOCOL.md` + `WORKFLOW.md` into ADR-0004 (~50 lines off the every-chat orientation read); dropped the Plain-English-recap Closing Step 7 (read once at close, never again); Title-allowlist sub-rule collapsed to one line pointing at script + config.
+- YELLOW items (trivial-focus carve-out for Step 7/7b; CHATLOG 3-bullet cap for routine sessions; Step 6 default-to-next-session carve-out; broader bug-history extraction sweep; move Worked example to `docs/examples/`) parked in `docs/BACKLOG.md` under a new "Protocol slimming" section.
+- **Process improvement:** Mechanical floor lands as ADR-0004 + 4 new files + `commitlint.config.cjs` sentence-case rule; rule files lose ~50 lines of bug-history narrative. Detail in [ADR-0004](docs/adr/0004-pr-title-mechanical-floor.md).
+- **Next session:** **Product, not protocol.** Next M1 acceptance item — structured JSON log helper (`lib/log.ts` emitting one JSON line per Claude/Voyage call with `tokens, latency, cost, prompt_hash, model, model_version`). Isolated, ~one session.
+
+---
+
 ## 2026-05-16 — Step 7b unbiased-review codification + release PR #30
 
 - Opened PR #30 (`release: dev → main`) to promote the 2026-05-15 M1+autotitle CHATLOG entry from `dev` to `main` — the orientation chain was missing that close entry because `main` (the lineage every worktree starts on) hadn't caught up. Docs-only diff, no `npm run check` needed (CI already green on dev via PR #29).

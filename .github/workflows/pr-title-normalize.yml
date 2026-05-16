@@ -1,0 +1,69 @@
+name: pr-title-normalize
+
+# Server-side normalizer that lowercases the first character of any PR
+# title's subject when it would fail .github/workflows/pr-title.yml's
+# `subjectPattern: ^(?![A-Z]).+$`. Sibling to release-pr-autotitle.yml,
+# which handles the special `dev → main` release-leg rewrite.
+#
+# Together with the local PreToolUse hook (scripts/hook-gh-pr-create-
+# precheck.mjs) and the commitlint commit-msg hook (.pre-commit-config.yaml),
+# this forms the three-layer mechanical floor described in
+# docs/adr/0004-pr-title-mechanical-floor.md.
+#
+# This runs on `opened|reopened|edited` events from any PR source —
+# Claude, the GitHub UI, dependabot, anything — so the GitHub-UI path
+# that defeated PRs #18 / #20 / #25 is closed regardless of how the PR
+# was opened.
+
+on:
+  pull_request:
+    types: [opened, reopened, edited]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Lowercase leading-uppercase subject (sentence-case only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          title="$PR_TITLE"
+
+          # Strip a conventional-commits prefix `type(scope)?: ` using the
+          # explicit allowlist from commitlint.config.cjs / pr-title.yml.
+          # `\s+` (not `\s`) absorbs accidental double-spaces after the colon.
+          # If the title doesn't match the conventional shape at all, leave
+          # it alone — pr-title.yml will fail it for a different reason and
+          # we shouldn't paper over that.
+          prefix_re='^((feat|fix|chore|docs|refactor|test|ci|release)(\([^)]+\))?:\s+).*$'
+          prefix="$(printf '%s' "$title" | sed -nE "s/${prefix_re}/\\1/p")"
+          if [ -z "$prefix" ]; then
+            echo "Title does not match conventional shape; leaving untouched."
+            exit 0
+          fi
+
+          subject="${title#"$prefix"}"
+
+          # Only normalize true sentence-case ([A-Z][a-z]…): a single capital
+          # followed by a lowercase letter. Preserves acronyms like
+          # "API redesign" / "SQL injection fix" — those will fail pr-title.yml
+          # loudly so the human can fix the intent, rather than getting a
+          # silent "aPI redesign" mutation.
+          if printf '%s' "$subject" | grep -qE '^[A-Z][a-z]'; then
+            first_char="${subject:0:1}"
+            rest="${subject:1}"
+            lowered="$(printf '%s' "$first_char" | tr '[:upper:]' '[:lower:]')"
+            new_title="${prefix}${lowered}${rest}"
+            echo "Normalizing: $title -> $new_title"
+            gh pr edit "$PR_NUMBER" --title "$new_title"
+          else
+            echo "Subject first-char pattern is not sentence-case; leaving untouched."
+            echo "(Acronyms and other shapes intentionally fall through to pr-title.yml.)"
+          fi

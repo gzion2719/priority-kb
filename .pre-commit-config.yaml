@@ -39,5 +39,10 @@ repos:
     hooks:
       - id: commitlint
         stages: [commit-msg]
+        # Pinned to the same version package.json resolves via
+        # @commitlint/cli / @commitlint/config-conventional. Both layers
+        # (this commit-msg hook AND scripts/precheck-pr-title.mjs) read
+        # commitlint.config.cjs, so rule semantics must match exactly.
+        # Bump in lockstep with package.json. See ADR-0004.
         additional_dependencies:
-          - "@commitlint/config-conventional@19.5.0"
+          - "@commitlint/config-conventional@19.8.1"

@@ -171,13 +171,13 @@ Compare URLs are **clickable markdown links** (`[label](url)`), never bare code 
 
 **Two-PR rule — enforced every time, no exceptions.** Every PR pair MUST include BOTH links (feature → dev AND dev → main) in the same message. Never give one without the other. If the `dev → main` promotion is being batched with a future session, say so explicitly in one line under the pair — but the link still appears.
 
-**Mechanical pre-send self-check.** Re-read the draft before sending. If `git push` appears, the draft MUST also contain (a) `npm run check` earlier in the same message, AND (b) the PR pair(s) with both clickable compare links each, AND (c) a conventional-commits-compliant `title:` proposal beside *every* PR link (including the `dev → main` link — GitHub's compare UI defaults the title to the head-branch name `Dev`, which fails the `pr-title.yml` allowlist; codified 2026-05-15 after PR #18's `Dev` title failed the gate). If any of (a)/(b)/(c) is missing, fix the draft before sending. Applies to ANY "ready to commit" handoff — closing ritual, mid-session commits, ADR-only commits, anything.
+**Mechanical pre-send self-check.** Re-read the draft before sending. If `git push` appears, the draft MUST also contain (a) `npm run check` earlier in the same message, AND (b) the PR pair(s) with both clickable compare links each, AND (c) a `type(scope)?: lowercase-subject` title proposal beside *every* PR link. If any of (a)/(b)/(c) is missing, fix the draft before sending. Applies to ANY "ready to commit" handoff. The PR-title shape is enforced mechanically by the Claude Code `PreToolUse` hook on `gh pr create` (`scripts/hook-gh-pr-create-precheck.mjs`) and the server-side normalizer (`.github/workflows/pr-title-normalize.yml`); see ADR-0004 for the design and bug history.
 
-**Title-allowlist sub-rule.** Every proposed PR title must start with a type from `.github/workflows/pr-title.yml`'s allowlist (`feat, fix, chore, docs, refactor, test, ci, release`) followed by an optional `(scope)` and a `: subject`. The `dev → main` release PR specifically uses `release: dev → main (<scope summary>)`. Bare branch names, GitHub UI defaults, or anything starting with a capital letter and no colon — `Dev`, `Update`, `Wip`, `Pass 2b` — will fail CI. If you can't think of a clean title, the work isn't ready to PR.
+**Title-allowlist sub-rule.** PR titles must satisfy `commitlint.config.cjs` (which is also the source of truth for `.github/workflows/pr-title.yml`). Run `node scripts/precheck-pr-title.mjs "<title>"` to check. The `dev → main` release PR uses `release: dev → main (<scope summary>)`; the server normalizer rewrites mismatches. See ADR-0004 for the layered design.
 
-**Worktree-mode override sub-rule.** When the session ran inside `.claude/worktrees/<name>/` (the default Claude Code setup on this project — see WORKFLOW.md "Worktree commit-handoff rule"), Claude runs the gate, the commit, the push, **and `gh pr create` for both legs of the PR pair** itself via the Bash tool from inside the worktree, **before** sending the handoff message. The user-facing message then drops the gate-first bash block entirely and leads with: a one-line confirmation that Claude ran the gate + commit + push + PR creation (with the commit SHA + branch name + PR numbers), then the PR pair as clickable links to `/pull/<N>` (the already-open PRs, not `/compare/` URLs), then (post-M5) the deploy block, then the session summary. The mechanical pre-send self-check above still applies — but vacuously for clauses (a) and (c): in worktree mode `git push` will not appear in the draft (the `npm run check` co-presence requirement is moot), and the titles were baked into the PRs at creation time (the inline `— title:` annotation may be dropped because the PR URL already carries the correct title). The two-PR clickable-links requirement remains in full force regardless of mode.
+**Worktree-mode override sub-rule.** When the session ran inside `.claude/worktrees/<name>/`, Claude runs the gate, the commit, the push, and `gh pr create` for both legs of the PR pair itself via the Bash tool from inside the worktree, before sending the handoff message. The user-facing message drops the gate-first bash block and leads with: a one-line confirmation that Claude ran gate + commit + push + PR creation (commit SHA + branch + PR numbers), then the PR pair as clickable links to `/pull/<N>` (not `/compare/` URLs), then (post-M5) the deploy block, then the session summary. The mechanical pre-send self-check above still applies — vacuously for clauses (a) and (c): in worktree mode `git push` will not appear in the draft, and titles were baked in at creation time (the inline `— title:` annotation may be dropped). Two-PR clickable-links requirement remains in full force regardless of mode.
 
-**Tooling-denial fallback sub-rule (no compare URL for `dev → main`).** If `gh pr create --base main` is denied by the auto-mode classifier, blocked by sandbox permissions, or fails for any tooling reason, Claude does **not** fall back to handing the user a GitHub `/compare/main...dev` URL. A compare URL is a regression to the head-branch-name default-title (`Dev`), which fails `pr-title.yml` — the exact failure mode the worktree-mode override exists to eliminate. Instead, when the call is denied, Claude (1) surfaces the denial in one sentence, (2) writes the intended PR body to a stable path (`/tmp/release-pr-body.md` or similar) and tells the user the path, and (3) hands the user the **exact `gh` one-liner** to paste: `gh pr create --base main --head dev --title "release: dev → main (<scope summary>)" --body-file <path>`. Compare URLs for the `feat → dev` leg are also avoided in worktree mode (the rule above already says to use `/pull/<N>` links), but the prohibition is **absolute for `dev → main`** — the head-branch-name default would always read `Dev` for that leg. Codified 2026-05-15 after PR #25 fired the same `Dev`-title failure that PR #18 and PR #20 already had, because the previous rule version's fallback path silently passed through to the broken UI default when `gh pr create` was denied.
+**Tooling-denial fallback sub-rule.** If `gh pr create --base main` is denied or fails for any tooling reason, Claude does **not** fall back to handing the user a GitHub `/compare/main...dev` URL — the UI default title (`Dev`) fails the gate. Instead Claude (1) surfaces the denial in one sentence, (2) writes the PR body to a stable path (e.g. `/tmp/release-pr-body.md`) and tells the user the path, and (3) hands the user the exact `gh` one-liner to paste: `gh pr create --base main --head dev --title "release: dev → main (<scope summary>)" --body-file <path>`. The prohibition on compare URLs is absolute for the `dev → main` leg. See ADR-0004.
 
 **Never push to `main` directly** (see ADR-0002). Feature branches PR to `dev`; `dev` is promoted to `main` via a separate `release: dev → main` PR. Hotfixes are the only exception — `hotfix/<slug>` PRs target `main`, then immediately back-merge into `dev`. If a commit was created on `main` locally by accident, rewind `main` to `origin/main` and re-point the commit to a feature branch BEFORE pushing.
 
@@ -187,20 +187,7 @@ The gate is a verbatim mirror of the project's CI job. Running it locally before
 
 One line. Match the user's register and the language pair pinned in `CLAUDE.md` (mirror the user's input language).
 
-### Step 7 — Plain-English recap + concrete example
-
-AFTER Step 6's farewell, append to the SAME message a short paragraph (3-5 sentences max) summarizing what you did this session in plain language, followed by ONE concrete example that makes the work tangible — a command we ran, a behavior we built, a decision we made. The CHATLOG bullets cover technical depth; this is the human anchor. Keep it simple, no jargon dumps. Format:
-
-```
----
-**In plain English:**
-<3-5 short sentences about what we did and why>
-
-**Example:**
-<one concrete example — a command, a behavior, a decision, or a snippet>
-```
-
-The recap mirrors the user's input language, per `CLAUDE.md`.
+(The previous "Plain-English recap" Step 7 was dropped 2026-05-16 — the CHATLOG bullets already cover what each session did, and the recap was read at close and approximately never again. Removing it keeps the closing handoff tighter.)
 
 ---
 
@@ -241,8 +228,3 @@ You produce:
 > ```
 >
 > **Step 6 — See you tomorrow.**
->
-> ---
-> **In plain English:** Today we wired up the first working ingestion path: an admin chats with the Ingestion Agent, fills in the entry fields, and the entry gets stored with its chunks, embeddings, and a hash of the prompt that produced it. We also tightened the protocol — supporting docs like `AGENTS.md` are now explicitly Step-4b reads, not Step-4 reads, so we stop pre-loading them.
->
-> **Example:** Posting `{title: "Fix duplicate customer codes", body: "...", source: "ticket #4421", last_verified_at: "2026-05-21"}` to `POST /api/ingest` now returns `{entry_id, chunks: 4, embedding_model: "voyage-3-large", embedding_version: "1"}` — and the audit row records `prompt_hash: sha256(...)`.
