@@ -6,6 +6,16 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-16 — Step 7b unbiased-review codification + release PR #30
+
+- Opened PR #30 (`release: dev → main`) to promote the 2026-05-15 M1+autotitle CHATLOG entry from `dev` to `main` — the orientation chain was missing that close entry because `main` (the lineage every worktree starts on) hadn't caught up. Docs-only diff, no `npm run check` needed (CI already green on dev via PR #29).
+- Codified the user's new durable rule into `SESSION_PROTOCOL.md` Step 7 as **Unbiased-review sub-rule (Step 7b)**: every Step 7 spawns the `review-loop` skill before "Wait for go"; reviewer sees plan + rule paths only, never reasoning; user-explicit opt-out is the only skip path.
+- Dogfooded the new rule on its own introduction — the review caught the two-PR-rule hazard (handoff must include PR #29's `/pull/29` link even though it was already merged) and the CHATLOG-on-dev-not-on-main asymmetry, both reshaping the plan before any file touched.
+- **Process improvement:** SESSION_PROTOCOL.md Step 7 gained the Unbiased-review sub-rule (see `SESSION_PROTOCOL.md` Step 7, "Unbiased-review sub-rule (Step 7b)").
+- **Next session:** next M1 item — pick between (a) structured JSON log helper (isolated, ~one session, recommended) and (b) Alembic baseline + ORM/query-builder ADR (bigger, unblocks schema work).
+
+---
+
 ## 2026-05-15 — M1 first slice + third-strike autotitle floor
 
 - Shipped first M1 DB-foundation slice (PR #24): `docker-compose.yml` + `db/init.sql` + `lib/db.ts` + `app/healthz/route.ts` + 3 vitest cases (mocked `pg`, non-negotiable #8). Independent plan review surfaced 3 BLOCKING + 7 MAJOR pre-implementation; all resolved before commit. Does NOT close M1.
