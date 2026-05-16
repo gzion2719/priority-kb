@@ -1,0 +1,302 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ERROR_MAX_LEN, logEvent, resetLogSink, setLogSink, type LogEvent } from "@/lib/log";
+
+const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+function captureLog(): {
+  lines: string[];
+  writer: (chunk: string) => boolean;
+} {
+  const lines: string[] = [];
+  return {
+    lines,
+    writer: (chunk: string) => {
+      lines.push(chunk);
+      return true;
+    },
+  };
+}
+
+afterEach(() => {
+  resetLogSink();
+});
+
+describe("logEvent — Claude variant", () => {
+  it("emits one NDJSON line with all required fields", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "claude",
+      model: "claude-sonnet-4-6",
+      model_version: "2026-01-15",
+      prompt_hash: "abc123",
+      tokens: { input: 10, output: 5, total: 15 },
+      latency_ms: 123,
+      cost_usd: 0.5,
+    });
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.endsWith("\n")).toBe(true);
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.kind).toBe("claude");
+    expect(parsed.model).toBe("claude-sonnet-4-6");
+    expect(parsed.model_version).toBe("2026-01-15");
+    expect(parsed.prompt_hash).toBe("abc123");
+    expect(parsed.tokens).toEqual({ input: 10, output: 5, total: 15 });
+    expect(parsed.latency_ms).toBe(123);
+    expect(parsed.cost_usd).toBe(0.5);
+    expect(parsed.ts).toMatch(ISO_8601);
+  });
+});
+
+describe("logEvent — Voyage variant", () => {
+  it("emits one NDJSON line without a prompt_hash field", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "voyage",
+      model: "voyage-3-large",
+      model_version: "1",
+      latency_ms: 50,
+      cost_usd: null,
+    });
+
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.kind).toBe("voyage");
+    expect("prompt_hash" in parsed).toBe(false);
+    expect(parsed.cost_usd).toBeNull();
+  });
+});
+
+describe("logEvent — cost_usd handling", () => {
+  it("preserves cost_usd: 0 (regression guard against falsy filtering)", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "voyage",
+      model: "voyage-3-large",
+      model_version: "1",
+      latency_ms: 10,
+      cost_usd: 0,
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.cost_usd).toBe(0);
+    expect("cost_usd" in parsed).toBe(true);
+  });
+
+  it("preserves cost_usd: null as null (not absent from the line)", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "voyage",
+      model: "voyage-3-large",
+      model_version: "1",
+      latency_ms: 10,
+      cost_usd: null,
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.cost_usd).toBeNull();
+    expect("cost_usd" in parsed).toBe(true);
+  });
+
+  it("throws when cost_usd is undefined-smuggled via `as any`", () => {
+    expect(() =>
+      logEvent({
+        kind: "voyage",
+        model: "voyage-3-large",
+        model_version: "1",
+        latency_ms: 1,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        cost_usd: undefined as any,
+      }),
+    ).toThrow(/cost_usd must be a number or null/);
+  });
+});
+
+describe("logEvent — sequence", () => {
+  it("two calls produce two writes with non-decreasing timestamps", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    const event: LogEvent = {
+      kind: "voyage",
+      model: "voyage-3-large",
+      model_version: "1",
+      latency_ms: 1,
+      cost_usd: null,
+    };
+
+    logEvent(event);
+    logEvent(event);
+
+    expect(lines).toHaveLength(2);
+    const ts1 = new Date(JSON.parse(lines[0] ?? "").ts).getTime();
+    const ts2 = new Date(JSON.parse(lines[1] ?? "").ts).getTime();
+    expect(ts2).toBeGreaterThanOrEqual(ts1);
+  });
+});
+
+describe("logEvent — error field hygiene", () => {
+  it("truncates error strings longer than ERROR_MAX_LEN", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    const longError = "x".repeat(ERROR_MAX_LEN * 4);
+    logEvent({
+      kind: "claude",
+      model: "claude-sonnet-4-6",
+      model_version: "2026-01-15",
+      prompt_hash: "abc",
+      latency_ms: 1,
+      cost_usd: null,
+      status: "error",
+      error: longError,
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.status).toBe("error");
+    expect(parsed.error).toHaveLength(ERROR_MAX_LEN);
+    expect(parsed.error).toBe("x".repeat(ERROR_MAX_LEN));
+  });
+
+  it("preserves error strings shorter than the cap unchanged", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "voyage",
+      model: "voyage-3-large",
+      model_version: "1",
+      latency_ms: 1,
+      cost_usd: null,
+      status: "error",
+      error: "ECONNREFUSED",
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.error).toBe("ECONNREFUSED");
+  });
+
+  it("redacts Bearer / Authorization / sk- / pa- secrets in error", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "claude",
+      model: "claude-sonnet-4-6",
+      model_version: "2026-01-15",
+      prompt_hash: "abc",
+      latency_ms: 1,
+      cost_usd: null,
+      status: "error",
+      error:
+        "401 from api — Authorization: Bearer sk-ant-abc123def456 (req used key pa-voyage-xyz789abc)",
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.error).not.toContain("sk-ant-abc123def456");
+    expect(parsed.error).not.toContain("pa-voyage-xyz789abc");
+    expect(parsed.error).toContain("[REDACTED]");
+  });
+});
+
+describe("logEvent — latency_ms guard", () => {
+  it("throws on NaN", () => {
+    expect(() =>
+      logEvent({
+        kind: "voyage",
+        model: "voyage-3-large",
+        model_version: "1",
+        latency_ms: Number.NaN,
+        cost_usd: null,
+      }),
+    ).toThrow(/finite non-negative number/);
+  });
+
+  it("throws on +Infinity", () => {
+    expect(() =>
+      logEvent({
+        kind: "voyage",
+        model: "voyage-3-large",
+        model_version: "1",
+        latency_ms: Number.POSITIVE_INFINITY,
+        cost_usd: null,
+      }),
+    ).toThrow(/finite non-negative number/);
+  });
+
+  it("throws on -Infinity", () => {
+    expect(() =>
+      logEvent({
+        kind: "voyage",
+        model: "voyage-3-large",
+        model_version: "1",
+        latency_ms: Number.NEGATIVE_INFINITY,
+        cost_usd: null,
+      }),
+    ).toThrow(/finite non-negative number/);
+  });
+
+  it("throws on negative finite values", () => {
+    expect(() =>
+      logEvent({
+        kind: "voyage",
+        model: "voyage-3-large",
+        model_version: "1",
+        latency_ms: -1,
+        cost_usd: null,
+      }),
+    ).toThrow(/finite non-negative number/);
+  });
+});
+
+describe("logEvent — sink robustness", () => {
+  it("does not propagate sink errors into the caller", () => {
+    setLogSink(() => {
+      throw new Error("sink exploded");
+    });
+
+    expect(() =>
+      logEvent({
+        kind: "voyage",
+        model: "voyage-3-large",
+        model_version: "1",
+        latency_ms: 1,
+        cost_usd: null,
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe("logEvent — sink injection", () => {
+  it("resetLogSink stops the swapped writer and resumes default", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+    resetLogSink();
+
+    const spy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    try {
+      logEvent({
+        kind: "voyage",
+        model: "voyage-3-large",
+        model_version: "1",
+        latency_ms: 1,
+        cost_usd: null,
+      });
+      expect(spy).toHaveBeenCalledTimes(1);
+      // Capture writer must NOT have been called after reset.
+      expect(lines).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
