@@ -63,6 +63,7 @@ These are tightenings that would shrink the every-chat orientation read or remov
 - **CI drift check between `pr-title.yml` allowlist and `commitlint.config.cjs` type-enum.** ADR-0004 documents these must match; nothing enforces it. Small workflow that parses both and fails if they diverge.
 - **CI drift check between `.pre-commit-config.yaml`'s `@commitlint/config-conventional` version and `package.json`'s.** Same drift risk — currently pinned by hand to 19.8.1. Small script that greps both files and fails if they don't match.
 - **Hook-script absolute path.** `.claude/settings.json` invokes `node scripts/hook-gh-pr-create-precheck.mjs` with a relative path. If Claude Code ever runs the hook from a subdirectory, the path breaks. Investigate `${CLAUDE_PROJECT_DIR}` or equivalent env var and switch when confirmed.
+- **PreToolUse hook on `gh pr merge` — mechanical floor for the auto-merge ban.** WORKFLOW.md "Worktree commit-handoff rule" now states *"Claude never merges its own PRs"*, but the rule is prose only. Mirror the `gh pr create` precheck pattern: a `PreToolUse` Bash hook that intercepts any `gh pr merge` invocation and blocks it with a one-line message ("PR merge is the user's click — paste the URL or click Merge in the UI"). Same shape as `scripts/hook-gh-pr-create-precheck.mjs` + the matcher in `.claude/settings.json`. Codified to BACKLOG 2026-05-16 after the auto-merge of PR #35 yielded a 2-PR fix slice (#36) where one cleaner PR would have sufficed.
 
 ## Protocol — pending merge passes (from 2026-05-15 Pass 1 session)
 
