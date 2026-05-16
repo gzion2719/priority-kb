@@ -6,6 +6,17 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-16 — Audit-import process additions + language policy → English (ADR-0006/0007)
+
+- Imported 5 operationally-tight rules from external YuTom audit into SESSION_PROTOCOL.md: Pre-flight step-completeness check, Closing Step 1 Session Score (3-axis 10/10), Goal-delivery verification, Goal-quantification extension under Step 7 Verify-before-finalize, Context-exhaustion early-close. Language policy flipped to always-English (operating scope only — Retrieval/Ingestion Agents stay on mirror; explicit scope in CLAUDE.md + ADR-0007).
+- Two Step 7b passes ran: plan review caught 4 BLOCKING + 8 MAJOR (shrunk 5-commit plan to 1); code review on diffs caught 2 BLOCKING + 6 MAJOR propagation gaps (Step 1 still said mirror; .claude/settings.json hook still said mirror); all fixed pre-commit. Step 7b "amplified" sub-rule worked exactly as intended — second pass was load-bearing.
+- ~40 YuTom Python sub-rules parked verbatim in docs/PYTHON_RULES_DRAFT.md with three-bucket sort discipline (adopt / adapt / reject) wired into ROADMAP M2b checklist as the first item. 12 YuTom rules skipped because already-present (e.g. Step 7b ≈ Rule 11); 6 rejected as YuTom-codebase-specific (e.g. VPS sudo, IndicatorSnapshot schema sweep).
+- Released via [PR #40](https://github.com/gzion2719/priority-kb/pull/40) (feature → dev, merge `9bbb791`) + [PR #39](https://github.com/gzion2719/priority-kb/pull/39) (release dev → main, merge `0daaf38`); 13 files +374 lines on main. PR #39 was created prematurely with stale dev state but auto-grew after PR #40 merge — Path A worked.
+- **Process improvement:** `SESSION_PROTOCOL.md` Step 5 gained the "Behind-origin blocks planning" sub-rule — when `git status` reports local-behind-origin by N>0 commits, block file-content-dependent planning until user-side `git pull --ff-only` lands (see `SESSION_PROTOCOL.md` Step 5). Origin: this session's 34-commits-behind opening that wasted one planning round.
+- **Next session:** Resume the M1 path from the prior CHATLOG — Alembic baseline + ORM/query-builder ADR (recommended; unblocks schema work), OR a bite-sized `pg_dump` cron stub. Both still open per ROADMAP M1 checklist.
+
+---
+
 ## 2026-05-16 — M1 log helper landed (after second-pass code-CR caught BLOCKING fixes I almost shipped)
 
 - M1 observability log helper shipped via PRs [#35](https://github.com/gzion2719/priority-kb/pull/35) (merged), [#36](https://github.com/gzion2719/priority-kb/pull/36) (merged), and [#37](https://github.com/gzion2719/priority-kb/pull/37) (release open): `lib/log.ts` discriminated union (`prompt_hash` required for Claude at the type level, `ts?: never` blocks input-shape collision), runtime guards on `cost_usd` and `latency_ms`, best-effort secret redaction on the `error` field, sink+stringify try/catch so observability never breaks the call path. [ADR-0005](docs/adr/0005-log-event-schema.md) captures the schema.
