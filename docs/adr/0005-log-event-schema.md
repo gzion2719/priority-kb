@@ -47,21 +47,27 @@ export type LogEvent = LogEventClaude | LogEventVoyage;
 export function logEvent(event: LogEvent): void;
 ```
 
-**Wire format.** One NDJSON line per call, written to `process.stdout`. The auto-injected ISO 8601 `ts` field is the last property emitted; the input type omits `ts` so callers cannot collide via the input shape.
+**Wire format.** One NDJSON line per call, written to `process.stdout`. The auto-injected ISO 8601 `ts` field is the last property emitted. The input type declares `ts?: never` — a caller widening through a structural cast still gets a compile error, and the spread-then-override ordering means the helper's `ts` always wins even if `any` smuggles a field through.
 
-**Iron-rule enforcement at the type level.**
+**Iron-rule enforcement at the type level (with runtime backstops).**
 
 - **#10** — `prompt_hash` is required on `LogEventClaude`. A Claude call site that forgets it fails to compile.
 - **#9** — `model + model_version` required on both variants.
-- **ROADMAP M1 `cost`** — `cost_usd: number | null` forces the caller to decide. `null` documents "unknown"; omission is a type error.
+- **ROADMAP M1 `cost`** — `cost_usd: number | null` at compile time + a runtime `TypeError` if a caller smuggles `undefined` through `as any`. The type system alone isn't enough — `cost_usd: undefined as any` would `JSON.stringify` to a dropped field, defeating the iron rule silently. The runtime guard makes the bypass loud.
+- **Latency** — `latency_ms` must be a finite non-negative number; `NaN`, `±Infinity`, and negatives all throw. Mirrors the cost guard.
 
 **Runtime guard.** When `process.stdout` is unavailable (Next.js edge runtime on Vercel / Cloudflare Workers), the default sink returns silently. The file is documented as Node-runtime-only; any edge call site is a config bug, not a logging bug.
 
-**Error field hygiene.** `error` is truncated to 500 characters before serialization. The JSDoc on the field reads: *caller MUST redact secrets before passing*. The full PII/secret-redaction pattern for the error path is parked in BACKLOG under M2b's PII scrub.
+**Sink robustness — observability never breaks the API path.** Both `JSON.stringify` and the sink call are wrapped in try/catch. A serialization failure (circular reference smuggled into `error` via `as any`) degrades to a minimal `{"ts":..,"kind":..,"status":"error","error":"log serialization failed"}` line. A sink throw is swallowed entirely — the API call path completes normally. `logEvent` is synchronous-write-by-contract: exactly one sink call per invocation, no batching, no deferral.
 
-**Latency guard.** Non-finite `latency_ms` (NaN, ±Infinity) throws synchronously rather than silently serializing to `null` and corrupting downstream metrics.
+**Error field hygiene — two-step pipeline.** The `error` field passes through:
 
-**Sink injection.** A module-level `sink` variable (default: a closure over `process.stdout.write`) with exported `setLogSink(fn)` / `resetLogSink()`. Tests swap in a capture function; no `vi.spyOn(process.stdout)` brittleness; no `LOG_SILENT` env var needed. Parallels the `globalThis.__pgPool` pattern in `lib/db.ts`.
+1. **Best-effort secret redaction** — regex pass replaces `Bearer …`, `Authorization: …`, `sk-…`, and `pa-…` patterns with `[REDACTED]`. This is a thin safety net to close the log-channel exfil surface this helper introduces; the channel didn't exist before this commit.
+2. **Truncation** — to `ERROR_MAX_LEN` (500) characters after redaction.
+
+The redaction pass is *not* a full PII scrub — it covers the highest-blast-radius patterns (live API credentials) and nothing else. Callers MUST still redact known-sensitive PII before passing. Full PII pass is M2b's responsibility (see BACKLOG, Quality & Evals).
+
+**Sink injection.** A module-level `sink` variable (default: a closure over `process.stdout.write`) with exported `setLogSink(fn)` / `resetLogSink()`. Tests swap in a capture function; no `vi.spyOn(process.stdout)` brittleness; no `LOG_SILENT` env var needed.
 
 ## Consequences
 
