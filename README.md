@@ -94,7 +94,7 @@ Pre-push gate (`npm run check` and `make py-check`) is a **verbatim local mirror
 - Build the narrowest E2E increment; defer everything else to BACKLOG.
 - Run the closing ritual on every farewell; produce a CHATLOG entry that orients next session.
 - Land one concrete protocol/rule improvement per session, in-session.
-- Mirror the user's input language (Hebrew → Hebrew, English → English).
+- Reply in English in operating sessions (this chat, file edits, ADRs, CHATLOG) per `CLAUDE.md` language convention. Retrieval Agent / Ingestion Agent product surfaces keep mirror policy for end users — see `docs/AGENTS.md`.
 
 **User commits to:**
 - Mount the project folder on a fresh chat (or let Step 2 self-heal).

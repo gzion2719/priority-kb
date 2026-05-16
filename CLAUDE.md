@@ -7,7 +7,7 @@
 > 2. Read `WORKFLOW.md`.
 > 3. Read the **last 3 entries** of `CHATLOG.md` (newest-first).
 > 4. Read `docs/ROADMAP.md`.
-> 5. Run Opening Ritual Steps 1 → 7 in order, in the user's input language (Hebrew or English — mirror).
+> 5. Run Opening Ritual Steps 1 → 7 in order; reply in English per the language convention below (updated 2026-05-16, see ADR-0007).
 > 6. **Do not generate code before Step 7 "go".**
 > 7. **Do not skip Step 6's `AskUserQuestion` for focus**, unless the user has already named the focus in their first message.
 >
@@ -31,10 +31,11 @@
 
 **User:** Gal Zilberman.
 
-**Language convention (pinned, non-negotiable):**
+**Language convention (pinned, non-negotiable — updated 2026-05-16, see ADR-0007):**
 - User input: Hebrew **or** English (per message, user's choice).
-- Agent reply: **mirrors the user's input language** (Hebrew in → Hebrew out, English in → English out).
-- Bootstrap session itself was Hebrew/English in, English out.
+- Agent reply: **always English**. No Hebrew in Claude's output, ever. Self-check every draft before sending.
+- **Scope: operating language only.** Applies to Claude↔user conversations, file edits, ADRs, CHATLOG, handoffs. Does NOT change the Retrieval Agent / Ingestion Agent end-user-facing mirror policy (see `docs/AGENTS.md`). If the product-facing language policy is also flipped, that's a separate decision recorded in a future ADR.
+- Codified 2026-05-16 at user's explicit request; supersedes the prior mirror policy in this same file.
 
 **Always read first on a new chat:**
 1. This file (`CLAUDE.md`).

@@ -7,7 +7,7 @@ The strict ritual file. The opening ritual fires on the **FIRST user message of 
 ## Opening Ritual
 
 ### Step 1 — Greet
-One line, warm, in the user's input language (Hebrew or English).
+One line, warm, in English per `CLAUDE.md` language convention (updated 2026-05-16, see ADR-0007). No Hebrew in output, ever — even when greeting a Hebrew first-message.
 
 ### Step 2 — Verify folder mount
 Confirm the working folder is mounted; the path should end with `PriorityKB/`. If NOT mounted, request it via the host's directory tool (e.g., `mcp__cowork__request_cowork_directory`) **before any other action** — file reads will fail without it. Confirm to the user **"Folder confirmed: ✅"** before proceeding. This is the self-healing fallback if the user opens a new chat without pre-mounting.
@@ -56,6 +56,8 @@ Wait for **"go"**. For trivial focuses, a one-line ack is fine; for new content 
 
 **Verify-before-finalize sub-rule.** A plan section titled "pre-coding verification" or "open assumptions to check after go" is a smell. If the plan holds N "verify later" assumptions, **answer them with greps/reads BEFORE presenting the plan** for approval — a 30-second `Read` or `Grep` is always cheaper than re-planning when the assumption turns out wrong. If the plan would benefit from a "pre-coding verification checklist," do the checklist now and bake the answers into the plan, not into a future blocker.
 
+**Goal-quantification extension (codified 2026-05-16, see ADR-0006).** Same sub-rule, applied to measurable goals: when the user states the goal in measurable terms ("save tokens", "faster", "smaller", "fewer X", "more efficient", "cheaper"), the Step 7 plan MUST quantify how the proposed approach delivers on that metric with concrete numbers BEFORE presenting for approval. "This saves ~18K tokens per session orientation" is approval-ready; "this makes the file more readable" is not — readability is a different goal. Without the quantification, a full planning round can run on a proposal that doesn't actually deliver the stated objective; the user has to push back before the design pivots. **Trigger:** user message contains a goal expressed as a measurable quantity (token count, time, file size, error rate, $ saved, etc.) → Step 7 plan presents the predicted delivery on that metric with a defensible number BEFORE the structural description.
+
 **Verify-before-asking sub-rule.** Before asking the user *any* clarifying question — whether via `AskUserQuestion`, an inline prose question, or a "let me know if…" hedge — first try to answer it yourself with `Read`, `Grep`, `Glob`, or `git log/diff`. If the answer lives in the repo, find it; don't pay the user-round-trip tax to surface what a 5-second tool call would. Ask only when the answer genuinely isn't local: a *preference* between two viable options the repo can't disambiguate, a *fact about external systems* (production state, an org decision, an in-flight conversation), or an *intent* only the user holds. This is the user-facing twin of verify-before-finalize: the same "30-second tool call beats the next round-trip" math applies to questions, not just to plan assumptions. Concrete failure mode: asking "is feature X already deployed?" when `git log origin/main` or a quick `gh pr list --state merged` would answer it without involving the user.
 
 ---
@@ -87,6 +89,10 @@ ADRs live in `docs/adr/NNNN-<slug>.md`. Number monotonically. The README at `doc
 
 **Why it exists.** The closing ritual is NOT a session diary. It exists to make the **NEXT session's first 60 seconds frictionless**: read the last 3 entries, know exactly where we left off and where to look for detail. The orientation chain reads it every chat. Each entry's job is "where we left off, what the open question is, where to look for the detail." Compounding is the whole game — one concrete improvement per session × 200 sessions = a system that runs perfectly with zero friction.
 
+### Pre-flight — step-completeness check (codified 2026-05-16, see ADR-0006)
+
+Before executing Step 1, mentally enumerate all closing-ritual steps and confirm each will fire: Pre-flight, Step 1 (retrospective + Session Score + Goal-delivery verification), Step 2 (compose CHATLOG entry), Step 3 (write to disk), Step 4 (git status), Step 5 (handoff message — gate-first or worktree-override shape per `WORKFLOW.md`), Step 6 (warm close). If any step's wording has been amended since the last firing, re-verify the wording before executing. **Trigger:** any farewell signal → enumerate before Step 1 starts.
+
 ### Step 1 — Retrospective (the most important step)
 
 Before writing anything for the record, take a structured look at the **session itself** — not the work product. Three bullets, in your head or on screen:
@@ -94,6 +100,33 @@ Before writing anything for the record, take a structured look at the **session 
 - **What worked:** moves that were efficient, decisions that paid off, friction we successfully avoided.
 - **What didn't:** protocol slips, dead ends, things we redid, places we read/wrote/checked things we didn't need, over-engineered fixes.
 - **Improvement for next session:** ONE concrete, actionable change. A protocol tweak, a habit shift, a new rule of thumb.
+
+**Session Score (codified 2026-05-16, see ADR-0006).** After the three retrospective bullets, compute and display a score. The score is a self-assessment instrument — its purpose is to make waste visible and create pressure to improve over time. A perfect session scores 10/10. Three axes, each scored independently:
+
+| Axis | Max | Scoring |
+|------|-----|---------|
+| **Code quality** | 4 | Start at 4. −1 per gate-failure round (local `npm run check` OR CI red) beyond the first. −1 if a sandbox check that should have caught a bug didn't run before handoff. Floor 0. |
+| **Protocol compliance** | 3 | Start at 3. −1 per protocol slip — Step 7b skip-without-reason, wrong gate-first commit-block shape, Two-PR rule miss, missing PR-title-precheck self-check, proactive recap without farewell, etc. Floor 0. |
+| **Efficiency** | 3 | Start at 3. −1 per wasted token cluster — unnecessary re-read of a file already in context, dead-end approach that had a known-better path, back-and-forth caused by an avoidable assumption. Floor 0. |
+
+Display format (show after the three retrospective bullets, before the improvement write-up):
+
+| Axis | Score | Deductions |
+|------|-------|------------|
+| Code quality | X/4 | reason, or — |
+| Protocol compliance | X/3 | reason, or — |
+| Efficiency | X/3 | reason, or — |
+| **Total** | **X/10** | |
+
+**Ceiling:** [one sentence — the specific change that would raise this score to 10/10 next session]
+
+Rules:
+- Be honest. Inflation makes the score useless. A 6/10 that identifies the right deductions is worth more than a 9/10 that papers over them.
+- The Ceiling line is the most actionable part — single, concrete, next-session-executable change, not a vague aspiration.
+- The score feeds the improvement: if the deductions are codifiable as a rule, write the rule. If not, the Ceiling line becomes the CHATLOG `Process improvement` bullet.
+- A score of 10/10 is rare — only when the session was genuinely clean: first-attempt code passed `npm run check`, no protocol slips, no wasted reads.
+
+**Goal-delivery verification sub-rule (codified 2026-05-16, see ADR-0006).** When the session's stated goal included a measurable target (token savings, performance improvement, file size reduction, error rate, etc.), Step 1 MUST verify actual delivery with concrete numbers BEFORE composing the CHATLOG entry. Run the measurement (`Read` for file size, benchmark, coverage diff — whatever fits), state before/after numbers, confirm whether the target was met. "Savings confirmed" without a number is not acceptable. This is the closing-leg mirror of the Goal-quantification extension under Step 7 Verify-before-finalize: if the session committed to a number at open, it verifies the number at close. **Trigger:** the session's `Step 6` focus or any user message during the session named a measurable goal → Step 1 includes a measurement block before the three retrospective bullets.
 
 The improvement is the OUTPUT, and it has two possible homes:
 
@@ -189,9 +222,19 @@ The gate is a verbatim mirror of the project's CI job. Running it locally before
 
 ### Step 6 — Close warmly
 
-One line. Match the user's register and the language pair pinned in `CLAUDE.md` (mirror the user's input language).
+One line, in English per `CLAUDE.md` language convention (updated 2026-05-16, see ADR-0007). No Hebrew in close-line, ever.
 
 (The previous "Plain-English recap" Step 7 was dropped 2026-05-16 — the CHATLOG bullets already cover what each session did, and the recap was read at close and approximately never again. Removing it keeps the closing handoff tighter.)
+
+---
+
+## Session-wide rules
+
+These fire throughout a session, not lifecycle-bound to opening or closing. Imported 2026-05-16 from external operating-rules audit (ADR-0006).
+
+### Context-exhaustion early-close
+
+When the user explicitly flags context length ("we're running out of context", "context is getting long", or unambiguous equivalent), Claude MUST: (1) STOP immediately — no new tool calls, no new work items, no new suggestions; (2) run the full closing ritual (Pre-flight + Steps 1–6) as the very next action; (3) only after CHATLOG is written and the gate-first commands + PR pair are handed off does the session end. Continuing new work after a context warning is a protocol violation. **Trigger:** any explicit context-length warning from the user.
 
 ---
 
