@@ -71,6 +71,7 @@ On the golden eval set, retrieval recall@5 ≥ 0.8 and citation precision ≥ 0.
 **Goal:** admins can attach screenshots, PDFs, and Word docs; the worker parses, OCRs, chunks, embeds.
 
 ### Checklist
+- [ ] **Review and adapt Python rules from [`docs/PYTHON_RULES_DRAFT.md`](../docs/PYTHON_RULES_DRAFT.md)** — three-bucket sort (adopt / adapt / reject) per the file's "How to use this file at M2b import time" section. Land the adopted rules in `SESSION_PROTOCOL.md` under a `Python pre-push` sub-section + write an M2b ADR documenting bucket assignments. Per [ADR-0006](adr/0006-process-alignment-with-external-audit.md).
 - [ ] Python FastAPI worker scaffolded at `api/`; `pyproject.toml` activated.
 - [ ] `pgqueuer` (or equivalent) job queue table; Next.js enqueues, worker consumes.
 - [ ] File upload endpoint → blob storage (local FS in dev, prep S3 abstraction for prod).
