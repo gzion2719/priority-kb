@@ -45,6 +45,24 @@ Categories chosen for this project's shape.
 - Prompt diff viewer: when `prompts/*.md` changes, show the eval delta vs. previous prompt version.
 - Cost dashboard: daily Claude + Voyage spend, broken down by ingestion vs. retrieval vs. evals.
 
+## Protocol slimming — YELLOW items from 2026-05-16 mechanism audit
+
+These are tightenings that would shrink the every-chat orientation read or remove ceremonial steps. Not urgent (the system works), but worth picking up when the protocol files are next touched.
+
+- **Trivial-focus carve-out for Step 7 critique + Step 7b review.** When the chosen focus is a one-step task (e.g., "land this CHATLOG branch", "merge in dependabot bump"), the full 5-question self-critique + spawned unbiased review is overhead disproportionate to risk. Define a "trivial focus" predicate (single-file edit / no architectural surface / no migration / no prompt change) and allow a one-line critique + one-line reviewer ack instead. See SESSION_PROTOCOL.md Step 7 / Step 7b.
+- **CHATLOG max-3-bullets carve-out for routine sessions.** Format currently caps at 5 content bullets; in practice every session uses all 5 and the orientation chain reads the last 3 → ~15 bullets per chat. Allow 3 bullets max for "routine execution" sessions (no decision, no new rule); reserve 5 for sessions that produce a decision or codified rule. See SESSION_PROTOCOL.md Closing Step 2.
+- **Step 6 default-to-next-session carve-out.** When the previous CHATLOG's `Next session:` line is verified-still-pending and unambiguous, the `AskUserQuestion` round-trip is ceremony. Allow Claude to state "Continuing from the previous session's `Next session:` line — say 'go' or redirect" instead of presenting 2–3 options. The redirect path covers the user changing focus. See SESSION_PROTOCOL.md Opening Step 6.
+- **Broader bug-history extraction pass.** ADR-0004 (2026-05-16) absorbed the PR-title saga's bug histories. Five to eight other rules in `SESSION_PROTOCOL.md` and `WORKFLOW.md` still carry inline "Codified DATE after PR #X" narrative paragraphs (e.g., the bootstrap CHATLOG status-update rule; the Pass 1 worktree-handoff resolution; the secret-redaction TradeBot port). Sweep all of them: imperative + one-sentence "why" stays inline, multi-paragraph history moves to an ADR.
+- **Move `SESSION_PROTOCOL.md` "Worked example" to `docs/examples/`.** ~40 lines at the end of the protocol file, consulted rarely. Extract to `docs/examples/closing-ritual-example.md` with a one-line pointer.
+
+## Tooling — follow-ups from ADR-0004 unbiased review (2026-05-16)
+
+- **Narrower hook matcher for `gh pr create`.** The `PreToolUse` Bash hook in `.claude/settings.json` fires node on every Bash call and early-exits when the command isn't a `gh pr create` segment. Overhead ~50–150ms per call on Windows. Investigate whether Claude Code supports a command-content matcher pattern so the hook only invokes node when the command actually contains `gh pr create`. If so, narrow the matcher.
+- **In-process commitlint for the test suite.** `tests/precheck-pr-title.test.ts` spawns `commitlint` per case (~2s cold each, ~40s suite total). Switch to `import { lint } from "@commitlint/lint"` to drop the suite to <1s. Only worth doing if the suite grows past ~20 cases or starts dominating CI time.
+- **CI drift check between `pr-title.yml` allowlist and `commitlint.config.cjs` type-enum.** ADR-0004 documents these must match; nothing enforces it. Small workflow that parses both and fails if they diverge.
+- **CI drift check between `.pre-commit-config.yaml`'s `@commitlint/config-conventional` version and `package.json`'s.** Same drift risk — currently pinned by hand to 19.8.1. Small script that greps both files and fails if they don't match.
+- **Hook-script absolute path.** `.claude/settings.json` invokes `node scripts/hook-gh-pr-create-precheck.mjs` with a relative path. If Claude Code ever runs the hook from a subdirectory, the path breaks. Investigate `${CLAUDE_PROJECT_DIR}` or equivalent env var and switch when confirmed.
+
 ## Protocol — pending merge passes (from 2026-05-15 Pass 1 session)
 
 - **Pass 2 (`WORKFLOW.md`, current-relevance):** worktree commit-handoff fork (Claude commits/pushes itself when running from a worktree; B3 fix from the Pass 1 review), secret-redaction rule (never quote the literal in the description), stacked-PR rule (CHATLOG.md is the canonical collision file → default to Pattern 2 trailing chore PR), describe-from-source rule (merge into CLAUDE.md's existing "ground answers in repo docs" style rule, not a separate entry), invisible Unicode literal rule (escape sequences only), multi-session user-visible-artifact rule, CI debugging — prefer CLI to action, web research rule (`WebFetch` 403 → `WebSearch`), "verify before asking" rule.
