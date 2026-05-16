@@ -22,3 +22,5 @@ For ADR-shaped focuses, the supporting reads (existing code, related ADRs, schem
 | 0003 | [CI security gates baseline](0003-ci-security-gates-baseline.md)                   | Accepted |
 | 0004 | [PR-title mechanical floor](0004-pr-title-mechanical-floor.md)                     | Accepted |
 | 0005 | [Log event schema (structured JSON observability)](0005-log-event-schema.md)       | Accepted |
+| 0006 | [Process alignment with external operating-rules audit](0006-process-alignment-with-external-audit.md) | Accepted |
+| 0007 | [Language policy: agent replies always in English](0007-language-policy-always-english.md) | Accepted |

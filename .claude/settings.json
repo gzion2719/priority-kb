@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo PriorityKB session active. Before responding to the first user message, execute SESSION_PROTOCOL.md Opening Ritual Steps 1-7 in order. Do not skip steps. Do not generate code before Step 7 go. Mirror the user's input language (Hebrew or English)."
+            "command": "echo PriorityKB session active. Before responding to the first user message, execute SESSION_PROTOCOL.md Opening Ritual Steps 1-7 in order.Do not generate code before Step 7 go. Reply in English per CLAUDE.md language convention (always English in operating sessions, see ADR-0007); no Hebrew in output."
           }
         ]
       }
