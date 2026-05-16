@@ -6,6 +6,16 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-16 — M1 log helper landed (after second-pass code-CR caught BLOCKING fixes I almost shipped)
+
+- M1 observability log helper shipped via PRs [#35](https://github.com/gzion2719/priority-kb/pull/35) (merged), [#36](https://github.com/gzion2719/priority-kb/pull/36) (merged), and [#37](https://github.com/gzion2719/priority-kb/pull/37) (release open): `lib/log.ts` discriminated union (`prompt_hash` required for Claude at the type level, `ts?: never` blocks input-shape collision), runtime guards on `cost_usd` and `latency_ms`, best-effort secret redaction on the `error` field, sink+stringify try/catch so observability never breaks the call path. [ADR-0005](docs/adr/0005-log-event-schema.md) captures the schema.
+- **Two Step 7b passes fired this session — the first on the plan (3 BLOCKING + 5 MAJOR caught), the second on the implementation (2 BLOCKING + 5 MAJOR caught).** I shipped after only the first pass and the user had to call it out before I ran the second. Plan-CR transformed the plan substantively (flat interface → discriminated union; new ADR; runtime mechanisms added) but I read "amplified plan" narrowly as "user-added scope" only. Same class of mistake as the previous session's *Step 7b dogfood failure* — different surface, same root.
+- **`gh pr merge --auto` is what turned the second-pass code-CR into a 2-PR slice instead of 1.** Set `--auto` on #35 immediately after opening; CI passed in 90s and the merge fired before I'd thought about whether the implementation deserved its own review. By the time the code-CR found 2 BLOCKING + 5 MAJOR, the unfixed code was already on `dev` and I had to open #36 to fix what should have been one cleaner commit. User flagged both this and the two-PR-rule slip explicitly.
+- **Process improvement:** `SESSION_PROTOCOL.md` Step 7b gained an "Amplified covers review-induced plan changes" sub-rule (plan-CR BLOCKING that changes types / schema / enforcement-mechanism triggers a fresh code-CR before commit); `WORKFLOW.md` worktree-commit-handoff gained *"Claude never merges its own PRs / no `--auto` ever"* + BACKLOG carries the PreToolUse-hook mechanical-floor follow-up — see `SESSION_PROTOCOL.md` Step 7b + `WORKFLOW.md` "Worktree commit-handoff rule".
+- **Next session:** next M1 item — Alembic baseline + ORM/query-builder ADR (bigger, unblocks schema work), or a bite-sized line like `pg_dump` cron stub. Recommend Alembic + ORM ADR first.
+
+---
+
 ## 2026-05-16 — PR-title mechanical floor (ADR-0004) + Step 7b dogfood failure
 
 - PR #31's title failed the gate with a capital `S` in the subject — fourth instance of the same class across PRs #18/#20/#25/#31. Root cause: prose rules describe what a regex enforces and always drift; every prior fix patched the path that broke last time without preventing the next.
