@@ -6,6 +6,17 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-17 — ADR-0008 (Drizzle replaces Alembic) + ADR-0009 (chunking strategy) — baseline migration unblocked
+
+- Shipped [ADR-0008](docs/adr/0008-orm-and-migration-ownership.md) via [PR #43](https://github.com/gzion2719/priority-kb/pull/43) → [PR #44](https://github.com/gzion2719/priority-kb/pull/44) (now on `main`): Drizzle ORM + Drizzle-Kit SQL-first migrations override ROADMAP M1's Alembic commitment. `audit_log` mechanically enforces #10 via `kind` discriminator + `CHECK`. Python's M2b worker is a downstream SQLAlchemy consumer kept honest by an integration test.
+- Shipped [ADR-0009](docs/adr/0009-chunking-strategy.md) via [PR #45](https://github.com/gzion2719/priority-kb/pull/45) (on `dev`) + [PR #46](https://github.com/gzion2719/priority-kb/pull/46) (release open): 500/60 chunks with trailing-merge, `o200k_base` proxy, embed-prefix bounded to embed-time only, post-scrub canonical `entries.body`, composite-FK `chunks(entry_id, sensitivity) → entries(id, sensitivity) ON UPDATE CASCADE` as the chunks-layer twin of ADR-0008's `audit_log` CHECK. Baseline-migration PR is now fully unblocked.
+- **Four Step 7b passes ran** (plan + code on each ADR). Code-CR on ADR-0009 caught a factual error: I'd claimed Voyage's embeddings endpoint returns per-input token counts; it returns only aggregate `usage.total_tokens`. Fix: `chunks.token_count` is the local `o200k_base` proxy, not Voyage-authoritative. The "Amplified" sub-rule fired exactly as intended both times.
+- **Session Score 9/10.** −1 for efficiency (avoidable Voyage-response factual error). Ceiling: web-verify uncertain external-API facts before baking them into ADR prose.
+- **Process improvement:** `WORKFLOW.md` "Worktree commit-handoff rule" gained a *No empty-diff `dev → main` release PR* sub-rule — open the release PR only when `git log origin/main..origin/dev` is non-empty; see `WORKFLOW.md` "Worktree commit-handoff rule". Origin: PR #44 visibly looked empty after creation until #43 merged, and the user pinged on it.
+- **Next session:** baseline-migration PR — Drizzle wire-in (`package.json` deps, `drizzle/schema.ts` with entries/entries_versions/chunks/audit_log, `drizzle/migrations/0001_baseline.sql`, `lib/db.ts` switches to Drizzle, healthz keeps passing, integration test against a Postgres service container). Code-bearing, likely a full session.
+
+---
+
 ## 2026-05-16 — Audit-import process additions + language policy → English (ADR-0006/0007)
 
 - Imported 5 operationally-tight rules from external YuTom audit into SESSION_PROTOCOL.md: Pre-flight step-completeness check, Closing Step 1 Session Score (3-axis 10/10), Goal-delivery verification, Goal-quantification extension under Step 7 Verify-before-finalize, Context-exhaustion early-close. Language policy flipped to always-English (operating scope only — Retrieval/Ingestion Agents stay on mirror; explicit scope in CLAUDE.md + ADR-0007).
