@@ -23,11 +23,11 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "drizzle-orm": "0.36.4",
+    "drizzle-orm": "0.45.2",
     "next": "16.2.6",
     "pg": "^8.20.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
@@ -39,7 +39,7 @@
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "dotenv": "16.4.7",
-    "drizzle-kit": "0.28.1",
+    "drizzle-kit": "0.31.10",
     "eslint": "^9.0.0",
     "eslint-config-next": "16.2.6",
     "eslint-config-prettier": "^9.1.0",
