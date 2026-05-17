@@ -245,6 +245,22 @@ This rule modifies — does not contradict — Closing Ritual Step 5: see the **
 
 ---
 
+## Negative-assertion tests distinguish from the regression
+
+When a test exists to prove that a constraint *rejects* something — a CHECK rejects an invalid row, a composite FK rejects a mismatched tuple, a boundary search prefers paragraph over sentence, a batch result preserves input order — the test must construct a scenario where the **constraint's absence would produce a different result**, and assert on the result that distinguishes the two worlds. "Does X work in the happy path?" is not a negative-assertion test; "Would the failing case pass if X were dropped?" is.
+
+Concrete failure modes this prevents:
+- A composite-FK rejection test that just inserts the matching row — passes even if the FK is dropped.
+- A boundary-preference test that puts the higher-rank boundary AT the natural target offset — passes even if rank is ignored, because the rank-3 winner is also the closest candidate.
+- An order-preservation test that asserts `result.length === inputs.length` — passes for any permutation.
+- A CHECK-rejection test that uses `rejects.toThrow()` with no regex — passes when a different constraint throws too.
+
+The fix is mechanical: before writing the test body, sketch the failure case ("if the FK were dropped, this insert would succeed") and assert on the property that *only* the constraint produces ("the error message names this exact constraint", "this exact char offset is in the boundaries list", "vectors[i] equals embed(texts[i]) for each i"). When the constraint's *absence* would produce an indistinguishable test pass, the test is tautological — rewrite before commit.
+
+Codified 2026-05-17 after three successive code-CRs in the M1-closure session caught weak negative-assertion tests (composite-FK rejection asserted only `rejects.toThrow()`; paragraph-vs-sentence test placed `\n\n` at the natural cut so rank was untested; `embedBatch` test asserted `vectors.length === texts.length` only). Each case was a code-CR-driven rewrite round that the discipline above would have eliminated up front.
+
+---
+
 ## Red flags — stop and resync
 
 If any of these happen, pause and re-orient before continuing:
