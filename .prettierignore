@@ -10,3 +10,4 @@ docs/**/*.md
 prompts/**/*.md
 evals/**/*.yaml
 .claude/worktrees/
+drizzle/migrations/meta/**
