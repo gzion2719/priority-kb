@@ -9,8 +9,6 @@ Categories chosen for this project's shape.
 ## Architecture & Infra
 
 - **Pin `pgvector/pgvector:pg16` image by digest** in `docker-compose.yml` (`@sha256:...`) — currently floating on the `pg16` tag, which is reproducibility debt.
-- **Migration-runner cross-runtime decision** — Alembic (Python/SQLAlchemy) is the project-pinned migration tool per README, but the Next.js app uses `pg` directly. Decide ownership before any schema-touching code lands (likely co-located with the ORM/query-builder ADR). Affects whether Alembic runs from `api/` (M2b+) or earlier.
-- **ORM / query-builder ADR** — `lib/db.ts` currently uses raw `pg.Pool` for `/healthz` only. Decide (raw `pg` / `postgres.js` / Drizzle / Prisma) before the first schema-touching route lands.
 - Multi-tenant data isolation strategy (if M6 multi-tenant happens).
 - Vector index re-tuning playbook: HNSW `ef_construction` / `m` sweep when corpus passes 50k chunks.
 - Postgres → external vector store (Qdrant / Weaviate) cutover criteria — only if pgvector recall stops being acceptable.
