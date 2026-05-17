@@ -11,18 +11,18 @@ Pacing: **milestone-by-milestone, open-ended.**
 **Goal:** the empty house is built and wired. No features yet, but every gate, guardrail, and observation channel is in place from day one.
 
 ### Checklist
-- [ ] `git init`, first commit, push to GitHub private repo (`priority-kb`).
-- [ ] Next.js app scaffolded; `styles/kramer-brand.css` imported in the root layout; one branded page renders.
-- [ ] Docker Compose: Postgres + pgvector locally; HNSW extension enabled.
+- [x] `git init`, first commit, push to GitHub private repo (`priority-kb`) — bootstrap session 2026-05-14 (see CHATLOG).
+- [x] Next.js app scaffolded; `styles/kramer-brand.css` imported in the root layout; one branded page renders — see [app/page.tsx](../app/page.tsx), [app/layout.tsx](../app/layout.tsx).
+- [x] Docker Compose: Postgres + pgvector locally; HNSW extension enabled — see [docker-compose.yml](../docker-compose.yml) (`pgvector/pgvector:pg16`) + [db/init.sql](../db/init.sql).
 - [x] **Drizzle ORM + Drizzle-Kit migrations** configured (per [ADR-0008](adr/0008-orm-and-migration-ownership.md) — supersedes the prior Alembic plan); first migration creates baseline schema (`entries`, `entries_versions`, `chunks`, `audit_log`). Waits on the chunking-strategy ADR for chunk-table shape.
 - [x] Embedding abstraction interface (`embed_text(text) → vector`) — see [lib/embedding.ts](../lib/embedding.ts). Contract: `Embedder.embed` / `embedBatch` returning `vector + model + version + tokens_used`; deterministic stub for tests; `EmbeddingUnavailableError` for non-negotiable #12 degraded-mode handoff. Voyage adapter lands with M2a.
-- [ ] Observability: structured JSON log helper (every Claude/Voyage call → `tokens, latency, cost, prompt_hash, model, model_version`).
+- [x] Observability: structured JSON log helper (every Claude/Voyage call → `tokens, latency, cost, prompt_hash, model, model_version`) — see [lib/log.ts](../lib/log.ts) + [ADR-0005](adr/0005-log-event-schema.md) (PRs #35/#36/#37).
 - [ ] `pg_dump` nightly backup cron stub (script + scheduled task; restore deferred to M5 drill).
 - [ ] Hebrew OCR spike: 1-day prototype against Azure Document Intelligence with 5 sample Priority screenshots; record quality notes in BACKLOG.
 - [x] Chunking strategy ADR — see [ADR-0009](adr/0009-chunking-strategy.md). 500-token chunks, 60-token overlap, trailing-merge rule, deterministic / model-free, `js-tiktoken` `o200k_base` local proxy for `chunks.token_count`, title+tags prefix at embed-time only, `entries.body` is post-scrub canonical, composite-FK propagates `sensitivity` from entries to chunks. (The original ADR-0004 reservation for this doc was claimed by the PR-title mechanical floor; 0008 then claimed the next slot.)
-- [ ] Chunking module implementation — `lib/chunk.ts` per ADR-0009, lands with the baseline-migration PR (which carries the schema columns) and/or M2a `/api/ingest`.
-- [ ] `evals/golden_set.yaml` skeleton with 5 placeholder Q/A pairs (Hebrew + English) — fleshed out in M3.
-- [ ] CI green on first push (`npm run check` mirrors `.github/workflows/ci.yml`).
+- [x] Chunking module implementation — see [lib/chunk.ts](../lib/chunk.ts) per [ADR-0009](adr/0009-chunking-strategy.md) (PRs #52/#53): deterministic 500/60, NFC normalization, forbidden-range detection, `buildEmbedInput`/`getRawSlice` separation.
+- [x] `evals/golden_set.yaml` skeleton with 5 placeholder Q/A pairs (Hebrew + English) — see [evals/golden_set.yaml](../evals/golden_set.yaml); fleshed out in M3 (target 15+15).
+- [x] CI green on first push (`npm run check` mirrors [.github/workflows/ci.yml](../.github/workflows/ci.yml)).
 
 ### Acceptance
 A new dev can clone the repo, run `docker compose up && npm install && npm run dev`, see the branded landing page, hit a `/healthz` endpoint that confirms Postgres + pgvector are reachable, and tail a structured log line on first request. CI is green on `main`.
