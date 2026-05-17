@@ -8,6 +8,10 @@ Categories chosen for this project's shape.
 
 ## Architecture & Infra
 
+- **App-DB-role split (ADR-0008 §10).** Add idempotent `CREATE ROLE` + `GRANT` block to `db/init.sql` for a least-privilege app user; switch `DATABASE_URL` in `docker-compose.yml` + CI to that user so Drizzle migrations no longer run as `postgres` superuser. Deferred from the baseline-migration PR to keep that diff narrow; the privilege-disjoint posture only pays rent once a non-trivial schema exists, which it now does.
+- **`lib/chunk.ts` chunking module (ROADMAP M1 line 23).** Implement the 500/60 chunker with trailing-merge + `js-tiktoken` `o200k_base` proxy per ADR-0009. Independent of baseline migration; lands as its own PR before M2a `/api/ingest`.
+- **`drizzle-zod` runtime validators for `/api/ingest`.** ADR-0008 §3 picks `drizzle-zod` as the API-boundary validator source; wire it in when M2a's ingestion route lands. Not needed for baseline migration.
+- **M2a transactional-rollback test fixture harness (ADR-0008 §9).** `beforeEach BEGIN; afterEach ROLLBACK;` pattern + `db/fixtures/*.sql`. Lands with the first ingestion test that needs more state than `tests/migration.test.ts`'s inline round-trip.
 - **Pin `pgvector/pgvector:pg16` image by digest** in `docker-compose.yml` (`@sha256:...`) — currently floating on the `pg16` tag, which is reproducibility debt.
 - Multi-tenant data isolation strategy (if M6 multi-tenant happens).
 - Vector index re-tuning playbook: HNSW `ef_construction` / `m` sweep when corpus passes 50k chunks.
