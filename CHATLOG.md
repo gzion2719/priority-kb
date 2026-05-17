@@ -6,6 +6,17 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-17 — M1 closure run: baseline migration + chunker + embedding abstraction (3 PR pairs)
+
+- Shipped baseline-migration via [#49](https://github.com/gzion2719/priority-kb/pull/49) → [#50](https://github.com/gzion2719/priority-kb/pull/50) (on `main`): Drizzle wire-in (`drizzle-orm@0.36.4` / `drizzle-kit@0.28.1` exact pins), `drizzle/schema.ts` with composite FK `chunks(entry_id, sensitivity) → entries(id, sensitivity)`, HNSW index, CHECK + UNIQUE constraints, `0001_updated_at_triggers.sql` companion migration, CI postgres service container, `tests/migration.test.ts` via `pg_catalog` introspection. Plan-CR caught 5 BLOCKING; code-CR caught 1 BLOCKING (FK introspection joined by column-name equality — rewrote with `unnest WITH ORDINALITY`).
+- Shipped chunker via [#52](https://github.com/gzion2719/priority-kb/pull/52) → [#53](https://github.com/gzion2719/priority-kb/pull/53) (on `main`): `lib/chunk.ts` deterministic 500/60 per ADR-0009, `js-tiktoken@1.0.20` `o200k_base`, NFC normalization, forbidden-range detection (unclosed fence ignored, table-row unit not table), `buildEmbedInput`/`getRawSlice` greppable separation. Code-CR caught 3 MAJOR — per-token UTF-8 decode drift (cumulative fallback), zero-token chunk guard, tautological paragraph-vs-sentence test rewritten to prove rank beats distance.
+- Shipped embedding abstraction via [#55](https://github.com/gzion2719/priority-kb/pull/55) → [#56](https://github.com/gzion2719/priority-kb/pull/56) (on `main`): `lib/embedding.ts` with `embedBatch` as the primary surface (Voyage is batch-shaped per ADR-0009 §2), `tokens_used` on batch results, fixed-1024 dimensions readonly, `EmbeddingUnavailableError` typed for #12 degraded-mode handoff, SHA-256-seeded stub namespaced as `stub-sha256`/v1. Plan-CR caught 3 BLOCKING (interface-shape decisions made 10× cheaper now than at M2a).
+- **Session Score 9/10.** −1 efficiency for the paragraph-vs-sentence test rewrite. Ceiling: codify negative-assertion test discipline.
+- **Process improvement:** `WORKFLOW.md` gained a "Negative-assertion tests distinguish from the regression" rule (see `WORKFLOW.md`). Codified after 3 successive code-CRs caught weak negative-assertion tests this session (composite-FK rejection, paragraph-vs-sentence preference, `embedBatch` order).
+- **Next session:** stale-ROADMAP-box housekeeping `docs(roadmap)` PR (M1 lines 14/15/16/19/23/25 done but not ticked) + next M1 item — recommend `evals/golden_set.yaml` skeleton (5 Hebrew + 5 English Q/A pairs, ~15 min) before opening M2a `/api/ingest`.
+
+---
+
 ## 2026-05-17 — ADR-0008 (Drizzle replaces Alembic) + ADR-0009 (chunking strategy) — baseline migration unblocked
 
 - Shipped [ADR-0008](docs/adr/0008-orm-and-migration-ownership.md) via [PR #43](https://github.com/gzion2719/priority-kb/pull/43) → [PR #44](https://github.com/gzion2719/priority-kb/pull/44) (now on `main`): Drizzle ORM + Drizzle-Kit SQL-first migrations override ROADMAP M1's Alembic commitment. `audit_log` mechanically enforces #10 via `kind` discriminator + `CHECK`. Python's M2b worker is a downstream SQLAlchemy consumer kept honest by an integration test.
