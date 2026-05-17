@@ -41,7 +41,7 @@ htmlcov/
 *.db
 pgdata/
 uploads/
-backups/
+backups/*
 !backups/.gitkeep
 
 # --- OS ---
