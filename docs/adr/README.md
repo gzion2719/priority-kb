@@ -25,3 +25,4 @@ For ADR-shaped focuses, the supporting reads (existing code, related ADRs, schem
 | 0006 | [Process alignment with external operating-rules audit](0006-process-alignment-with-external-audit.md) | Accepted |
 | 0007 | [Language policy: agent replies always in English](0007-language-policy-always-english.md) | Accepted |
 | 0008 | [ORM + migration ownership (Drizzle replaces Alembic for schema; SQL-first migrations)](0008-orm-and-migration-ownership.md) | Accepted |
+| 0009 | [Chunking strategy (sizes, boundaries, metadata, lifecycle)](0009-chunking-strategy.md) | Accepted |
