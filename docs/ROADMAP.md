@@ -14,7 +14,7 @@ Pacing: **milestone-by-milestone, open-ended.**
 - [ ] `git init`, first commit, push to GitHub private repo (`priority-kb`).
 - [ ] Next.js app scaffolded; `styles/kramer-brand.css` imported in the root layout; one branded page renders.
 - [ ] Docker Compose: Postgres + pgvector locally; HNSW extension enabled.
-- [ ] Alembic configured; first migration creates baseline schema (`entries`, `entries_versions`, `chunks`, `audit_log`).
+- [ ] **Drizzle ORM + Drizzle-Kit migrations** configured (per [ADR-0008](adr/0008-orm-and-migration-ownership.md) — supersedes the prior Alembic plan); first migration creates baseline schema (`entries`, `entries_versions`, `chunks`, `audit_log`). Waits on the chunking-strategy ADR for chunk-table shape.
 - [ ] Embedding abstraction interface (`embed_text(text) → vector`) — no implementation yet, just the contract + `embedding_model` + `embedding_version` columns on `chunks`.
 - [ ] Observability: structured JSON log helper (every Claude/Voyage call → `tokens, latency, cost, prompt_hash, model, model_version`).
 - [ ] `pg_dump` nightly backup cron stub (script + scheduled task; restore deferred to M5 drill).
