@@ -15,7 +15,7 @@ Pacing: **milestone-by-milestone, open-ended.**
 - [ ] Next.js app scaffolded; `styles/kramer-brand.css` imported in the root layout; one branded page renders.
 - [ ] Docker Compose: Postgres + pgvector locally; HNSW extension enabled.
 - [x] **Drizzle ORM + Drizzle-Kit migrations** configured (per [ADR-0008](adr/0008-orm-and-migration-ownership.md) — supersedes the prior Alembic plan); first migration creates baseline schema (`entries`, `entries_versions`, `chunks`, `audit_log`). Waits on the chunking-strategy ADR for chunk-table shape.
-- [ ] Embedding abstraction interface (`embed_text(text) → vector`) — no implementation yet, just the contract + `embedding_model` + `embedding_version` columns on `chunks`.
+- [x] Embedding abstraction interface (`embed_text(text) → vector`) — see [lib/embedding.ts](../lib/embedding.ts). Contract: `Embedder.embed` / `embedBatch` returning `vector + model + version + tokens_used`; deterministic stub for tests; `EmbeddingUnavailableError` for non-negotiable #12 degraded-mode handoff. Voyage adapter lands with M2a.
 - [ ] Observability: structured JSON log helper (every Claude/Voyage call → `tokens, latency, cost, prompt_hash, model, model_version`).
 - [ ] `pg_dump` nightly backup cron stub (script + scheduled task; restore deferred to M5 drill).
 - [ ] Hebrew OCR spike: 1-day prototype against Azure Document Intelligence with 5 sample Priority screenshots; record quality notes in BACKLOG.
