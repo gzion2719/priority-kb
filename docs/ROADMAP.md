@@ -19,7 +19,8 @@ Pacing: **milestone-by-milestone, open-ended.**
 - [ ] Observability: structured JSON log helper (every Claude/Voyage call → `tokens, latency, cost, prompt_hash, model, model_version`).
 - [ ] `pg_dump` nightly backup cron stub (script + scheduled task; restore deferred to M5 drill).
 - [ ] Hebrew OCR spike: 1-day prototype against Azure Document Intelligence with 5 sample Priority screenshots; record quality notes in BACKLOG.
-- [ ] Chunking strategy doc (M1 ADR-0004) — default ~500 token chunks with overlap, semantic boundaries where possible. (ADR-0002 and 0003 were claimed by the branching-policy + CI-security-gates work.)
+- [x] Chunking strategy ADR — see [ADR-0009](adr/0009-chunking-strategy.md). 500-token chunks, 60-token overlap, trailing-merge rule, deterministic / model-free, `js-tiktoken` `o200k_base` local proxy for `chunks.token_count`, title+tags prefix at embed-time only, `entries.body` is post-scrub canonical, composite-FK propagates `sensitivity` from entries to chunks. (The original ADR-0004 reservation for this doc was claimed by the PR-title mechanical floor; 0008 then claimed the next slot.)
+- [ ] Chunking module implementation — `lib/chunk.ts` per ADR-0009, lands with the baseline-migration PR (which carries the schema columns) and/or M2a `/api/ingest`.
 - [ ] `evals/golden_set.yaml` skeleton with 5 placeholder Q/A pairs (Hebrew + English) — fleshed out in M3.
 - [ ] CI green on first push (`npm run check` mirrors `.github/workflows/ci.yml`).
 
