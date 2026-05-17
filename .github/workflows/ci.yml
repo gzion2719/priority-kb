@@ -13,6 +13,22 @@ jobs:
   node:
     name: Node — lint, format, types, tests
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/priority_kb
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: priority_kb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d priority_kb"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +49,17 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      # Apply db/init.sql as the bootstrap superuser — mirrors what
+      # docker-entrypoint-initdb.d does in local dev (ADR-0008 §10). The service
+      # container starts before checkout, so we apply init.sql here rather than
+      # mounting it. App-DB-role split is deferred (see BACKLOG); migrations run
+      # as `postgres` for now.
+      - name: Apply db/init.sql (bootstrap)
+        run: psql "$DATABASE_URL" -f db/init.sql
+
+      - name: Run migrations
+        run: npm run db:migrate
 
       - name: Test
         run: npm test
