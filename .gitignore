@@ -44,6 +44,13 @@ uploads/
 backups/*
 !backups/.gitkeep
 
+# Hebrew OCR spike (M1 L21) — input screenshots have customer data,
+# output JSON/text contains the extracted Hebrew. Only .gitkeep anchors tracked.
+spikes/hebrew-ocr/input/*
+spikes/hebrew-ocr/output/*
+!spikes/hebrew-ocr/input/.gitkeep
+!spikes/hebrew-ocr/output/.gitkeep
+
 # --- OS ---
 .DS_Store
 Thumbs.db
