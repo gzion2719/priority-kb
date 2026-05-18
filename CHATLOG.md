@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-18 — M2a items 4+5: POST + PUT /api/ingest E2E (2 PR pairs)
+
+- Shipped M2a item 4 via [#76](https://github.com/gzion2719/priority-kb/pull/76) → [#77](https://github.com/gzion2719/priority-kb/pull/77) (on `main`): `POST /api/ingest` create-only scaffold — `withAdmin` HOF + Zod boundary, PII scrub → NFC → chunk → `embedBatch` (stub) → single tx into entries / entries_versions (version_no=1) / chunks (composite-FK sensitivity propagated) / audit_log (`kind:"ingest"`). New `lib/scrub.ts` + `lib/ingest.ts` + `tests/ingest.integration.test.ts` (real-Postgres FK + mid-tx ROLLBACK coverage).
+- Shipped M2a item 5 via [#78](https://github.com/gzion2719/priority-kb/pull/78) → [#79](https://github.com/gzion2719/priority-kb/pull/79) (on `main`): `PUT /api/ingest/[id]` update path — append version_no=MAX+1, DELETE-before-UPDATE for cascade-avoidance, `SELECT ... FOR UPDATE` serializes concurrent updaters under READ COMMITTED (real two-connection lock-contention test with ROLLBACK-in-finally so a failed assert doesn't poison the pool). Extracted shared `lib/ingest-schema.ts` (Zod) + private `deriveChunksAndEmbeddings` helper used by both create and update. ROADMAP "version history" ticked.
+- **Two-pass Step 7b on both slices was load-bearing every time.** Yesterday's `verify-before-implementing-CR-claim` sub-rule paid for itself on the second code-CR: 3 BLOCKINGs disagreed-and-verified-false (write-skew safe under READ COMMITTED, mock fit-for-purpose, trigger test correctly distinguishes), saving a real rewrite round. Plan-CRs caught PII-scrub missing, NFC/offset mismatch, mocked-db hollowness, and the original tautological "concurrent" test → real two-connection contention.
+- **Session Score 9/10.** Code 4/4, Protocol 3/3, Efficiency 2/3 (−1 for the mock-db refactor sed dance — getter destructure snapshots at destructure time, not assertion time). Ceiling: think through eager-vs-lazy access semantics before refactoring shared test helpers.
+- BACKLOG queued: `kind:"agent_ingest"` rename + prompt-hash plumbing for M2a item 2; `LogEvent` `kind:"route"` variant (route-500 path currently logs under `kind:"voyage"`); `.claude/settings.json` line-endings now ignored by prettier.
+- **Process improvement:** `.prettierignore` adds `.claude/settings.json` — pre-existing Windows CRLF was failing `format:check` every session and forcing a caveat line on every handoff (see `.prettierignore`).
+- **Next session:** M2a item 2 — `prompts/ingestion-agent.md` (versioned content) + SHA-256 hash plumbing + rename `audit_log.kind` from `"ingest"` to `"agent_ingest"` (BACKLOG queued). Lighter slice; mostly prompt content + audit-row wiring + 1 test that the CHECK constraint enforces non-null hash.
+
+---
+
 ## 2026-05-18 — M2a item 1: withAdmin HOF (stub auth) — 2 PR pairs
 
 - Shipped `withAdmin<C>(handler)` via [#70](https://github.com/gzion2719/priority-kb/pull/70) → [#71](https://github.com/gzion2719/priority-kb/pull/71) (on `main`): generic over App Router context (preserves `[id]/route.ts` `{params}`), strict 401-vs-403 split (401 = missing/invalid identity, 403 = recognized role + insufficient permission), RFC 7235-correct `WWW-Authenticate: Bearer realm="stub"` so M5 Entra swap is a value change not a shape change. 12 vitest cases including paired positive/negative (spy invoked on admin, not invoked on user), `it.each`-uniformized 401 assertions (status + body + WWW-Authenticate together), context pass-through (identity-equal), handler-throw propagation.
