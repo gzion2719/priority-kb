@@ -34,7 +34,7 @@ A new dev can clone the repo, run `docker compose up && npm install && npm run d
 **Goal:** an admin can chat with the Ingestion Agent and produce a stored, embedded, versioned entry — text only, no media.
 
 ### Checklist
-- [ ] Stub auth: `x-stub-user-role: admin | user` header parsed server-side; admin-only routes reject `user`.
+- [x] Stub auth: `x-stub-user-role: admin | user` header parsed server-side; admin-only routes reject `user` — see [lib/auth.ts](../lib/auth.ts) (`withAdmin` HOF) + [lib/auth.test.ts](../lib/auth.test.ts) (PRs #70/#71).
 - [ ] Ingestion Agent prompt at `prompts/ingestion-agent.md`; hash computed and stored on each entry's `audit_log` row.
 - [ ] Chat UI (admin) — streamed Claude responses; agent guides admin through filling `{title, category, tags, body, source, last_verified_at, sensitivity}`.
 - [ ] `POST /api/ingest` accepts the structured entry; runs validation; chunks; calls Voyage; writes `entries`, `entries_versions`, `chunks`.
