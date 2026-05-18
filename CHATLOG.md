@@ -6,6 +6,17 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-18 — ADR-0010 step 3a: SSE route + tool-use loop driver (PRs #100/#101)
+
+- Shipped via [#100](https://github.com/gzion2719/priority-kb/pull/100) → [#101](https://github.com/gzion2719/priority-kb/pull/101) (release open): `app/api/agent/ingest/route.ts` SSE handler + tool-use loop driver against the stub `AgentClient`; ordered assistant-content reconstruction; `submit_entry`/`list_categories`/`search_kb` dispatch (search_kb is the M3 stub); per-turn `logEvent` in a `finally`. 7 files +1188/-7; +20 stub-only route tests + 3 prompts tests; 201 passed / 18 skipped.
+- ADR-0010 §1 amended in the same PR (B1): `AgentEvent.tool_use_start` gains required `id: string` — verbatim `tool_use_id` round-trip needed for step 3b's real Anthropic adapter. `lib/prompts.ts` extended with `INGESTION_AGENT_PROMPT` raw text + boot-time re-hash assertion against `INGESTION_AGENT_PROMPT_HASH` — fail-closed `RangeError` on BOM / non-UTF-8 mismatch, closes an iron rule #10 provenance leak the plan-CR caught (B3).
+- Step 7b plan review caught 10 findings (5 BLOCKING + 5 MAJOR + 6 MINOR) all applied pre-commit — no code-CR pass was needed because plan-CR's effects were already structural. Verify-before-finalize caught two gaps pre-plan-presentation (missing raw-text prompt export + missing tool_use id), baked into the plan rather than surfacing as rework.
+- **Session Score 9/10.** Code 4/4, Protocol 3/3, Efficiency 2/3 (−1 for prettier-on-3-new-files retry + a `.then(readSse)` chain on `POST`'s `Response | Promise<Response>` union return that lost the typecheck). Ceiling: prettier-on-author (editor format-on-save); prefer `await` over `.then` on union-typed returns.
+- **Process improvement:** none this session (habit observations, not codifiable — see Ceiling).
+- **Next session:** ADR-0010 impl step 3b — replace the `RangeError` at [lib/agents.ts:198](lib/agents.ts) with real `@anthropic-ai/sdk` adapter behind the same `AgentClient` interface. Includes ADR §5 exact-version pin, `input_json_delta` buffering until `content_block_stop`, `stop_sequence → end_turn` translation, and `ANTHROPIC_API_KEY` iron-rule-#1 floor (already wired in `getAgent`). Fresh chat strongly recommended — first real external SDK in the project.
+
+---
+
 ## 2026-05-18 — Drift recovery: reconstruct CHATLOG for ADR-0010 steps 1+2 (PR #96)
 
 - Opened on stale `docs/session-close-2026-05-16-audit-import` with local CHATLOG missing 6 entries; `origin/main` had advanced ~30 commits including ADR-0010 step 1 ([#91](https://github.com/gzion2719/priority-kb/pull/91)) + step 2 ([#94](https://github.com/gzion2719/priority-kb/pull/94)) shipped without firing the closing ritual. Behind-origin-blocks-planning + reconstruct-on-drift sub-rules both fired exactly as designed.
