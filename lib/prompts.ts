@@ -54,3 +54,38 @@ export const INGESTION_AGENT_PROMPT_PATH = fileURLToPath(
  * backstop; this constant is the application-layer source.
  */
 export const INGESTION_AGENT_PROMPT_HASH = loadPromptHash(INGESTION_AGENT_PROMPT_PATH);
+
+/**
+ * UTF-8-decoded text of the ingestion-agent system prompt, sealed at
+ * process boot. This is the `system_prompt` value the SSE agent route
+ * (ADR-0010 §1) feeds to `AgentClient.streamMessages`.
+ *
+ * **Iron rule #10 provenance guarantee:** the hash above is computed on
+ * the raw on-disk Buffer; this constant is the UTF-8-decoded form. If
+ * the file contained a BOM or used a different newline encoding from
+ * what the bytes-to-string round-trip preserves, `sha256(string)` would
+ * differ from `INGESTION_AGENT_PROMPT_HASH` and we would silently ship a
+ * prompt whose provenance claim is wrong. The assertion at module init
+ * below proves byte-identity by re-hashing the UTF-8 encoding of the
+ * decoded string and comparing to the canonical hex; mismatch throws
+ * `RangeError` at boot, refusing to start the process.
+ *
+ * Hashing the *decoded then re-encoded* string is the symmetric check:
+ * if it equals the buffer hash, then the string we send to Anthropic is
+ * the same byte sequence we hashed for the audit log.
+ */
+export const INGESTION_AGENT_PROMPT: string = readFileSync(INGESTION_AGENT_PROMPT_PATH, "utf8");
+
+const _PROMPT_ROUNDTRIP_HASH = createHash("sha256")
+  .update(Buffer.from(INGESTION_AGENT_PROMPT, "utf8"))
+  .digest("hex");
+
+if (_PROMPT_ROUNDTRIP_HASH !== INGESTION_AGENT_PROMPT_HASH) {
+  throw new RangeError(
+    `INGESTION_AGENT_PROMPT byte-roundtrip hash mismatch: ` +
+      `buffer-hash=${INGESTION_AGENT_PROMPT_HASH} ` +
+      `string-roundtrip-hash=${_PROMPT_ROUNDTRIP_HASH}. ` +
+      `Iron rule #10 provenance would silently break — refusing to boot. ` +
+      `Likely cause: prompts/ingestion-agent.md has a BOM or non-UTF-8 bytes.`,
+  );
+}
