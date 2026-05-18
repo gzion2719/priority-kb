@@ -6,6 +6,17 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-18 — M2a item 1: withAdmin HOF (stub auth) — 2 PR pairs
+
+- Shipped `withAdmin<C>(handler)` via [#70](https://github.com/gzion2719/priority-kb/pull/70) → [#71](https://github.com/gzion2719/priority-kb/pull/71) (on `main`): generic over App Router context (preserves `[id]/route.ts` `{params}`), strict 401-vs-403 split (401 = missing/invalid identity, 403 = recognized role + insufficient permission), RFC 7235-correct `WWW-Authenticate: Bearer realm="stub"` so M5 Entra swap is a value change not a shape change. 12 vitest cases including paired positive/negative (spy invoked on admin, not invoked on user), `it.each`-uniformized 401 assertions (status + body + WWW-Authenticate together), context pass-through (identity-equal), handler-throw propagation.
+- Ticked ROADMAP M2a item 1 via [#72](https://github.com/gzion2719/priority-kb/pull/72) → [#73](https://github.com/gzion2719/priority-kb/pull/73) (on `main`): one-line tick with file pointers to `lib/auth.ts` + `lib/auth.test.ts`.
+- Two-pass Step 7b on the HOF slice was load-bearing on both legs: plan-CR caught 3 BLOCKING (drop unused `getStubRole` export, replace tautological admin-only test with paired spy-invocation assertions, switch `NextResponse | null` → HOF wrapper); code-CR caught 2 MAJOR (App Router `NextRequest` + context generic missing — would have silently broken dynamic routes; missing pass-through test). All BLOCKING+MAJOR applied; n11 subsumed, n12 deferred as premature factoring.
+- **Session Score 8/10.** Code 3/4 (−1 avoidable test rewrite on whitespace claim). Protocol 3/3 (clean two-pass Step 7b, both PR pairs handed off correctly). Efficiency 2/3 (−1 same whitespace cycle — believed reviewer's spec claim about `Headers.get` trimming without a `Read` of the Fetch spec). Ceiling: verify external-fact CR claims before implementing against them.
+- **Process improvement:** `SESSION_PROTOCOL.md` Step 7b gained a "Verify-before-implementing-CR-claim" sub-rule — when a CR finding asserts factual external behavior, verify before implementing the fix (see `SESSION_PROTOCOL.md` Step 7b).
+- **Next session:** M2a item 4 — `POST /api/ingest` as the first real `withAdmin` consumer. Touches Drizzle entries/entries_versions/chunks schema, Voyage wire-in via `lib/embedding.ts`, body validation, version-history append. Substantial — fresh session.
+
+---
+
 ## 2026-05-17 — M1 housekeeping + L20 backup stub + L21 spike scaffold (4 PR pairs)
 
 - Shipped 4 PR pairs to `main`: ROADMAP M1 tickbox housekeeping [#61](https://github.com/gzion2719/priority-kb/pull/61)/[#62](https://github.com/gzion2719/priority-kb/pull/62) (7 boxes ticked with PR/ADR/file references); pg_dump local-dev backup stub L20 [#63](https://github.com/gzion2719/priority-kb/pull/63)/[#65](https://github.com/gzion2719/priority-kb/pull/65) (script + Task Scheduler runbook with OneDrive-path quote-escaping + pre-existing `.gitignore` parent-exclusion bug fixed inline); BACKLOG park for release-PR-autocreate [#64](https://github.com/gzion2719/priority-kb/pull/64) (rode #65 release); Hebrew OCR spike scaffold L21 [#66](https://github.com/gzion2719/priority-kb/pull/66)/[#67](https://github.com/gzion2719/priority-kb/pull/67) (dual-model script + 5-strata sample + 4 pre-committed quantitative decision criteria; Phase 2 = user runs).
