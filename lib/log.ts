@@ -80,6 +80,19 @@ export interface LogEventClaude extends LogEventBase {
   kind: "claude";
   /** SHA-256 of the prompt file content. Non-negotiable #10. */
   prompt_hash: string;
+  /**
+   * Number of tool-use round-trips inside a single agent turn (ADR-0010
+   * §3). Present for the SSE-driven agent path; absent for one-shot
+   * Retrieval-Agent calls (M3). Optional so the field is omitted from
+   * the NDJSON line when unset, keeping non-agent log lines unchanged.
+   */
+  tool_iterations?: number;
+  /**
+   * `true` for the SSE-streaming agent path (ADR-0010 §1); absent for
+   * one-shot non-streaming Claude calls. Optional so the field is
+   * omitted from the NDJSON line when unset.
+   */
+  streaming?: boolean;
 }
 
 export interface LogEventVoyage extends LogEventBase {
