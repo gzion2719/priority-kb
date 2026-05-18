@@ -51,6 +51,9 @@ async function handler(req: NextRequest): Promise<Response> {
       db: getDb(),
       embedder: getEmbedder(),
       input: result.data,
+      // Direct-API ingest. The agent-chat caller (M2a item 3) passes
+      // `source: { kind: "agent" }` to flip the audit-row shape.
+      source: { kind: "direct" },
     });
     return NextResponse.json(created, { status: 201 });
   } catch (err) {

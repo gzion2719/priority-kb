@@ -35,8 +35,8 @@ A new dev can clone the repo, run `docker compose up && npm install && npm run d
 
 ### Checklist
 - [x] Stub auth: `x-stub-user-role: admin | user` header parsed server-side; admin-only routes reject `user` — see [lib/auth.ts](../lib/auth.ts) (`withAdmin` HOF) + [lib/auth.test.ts](../lib/auth.test.ts) (PRs #70/#71).
-- [ ] Ingestion Agent prompt at `prompts/ingestion-agent.md`; hash computed and stored on each entry's `audit_log` row.
-- [ ] Chat UI (admin) — streamed Claude responses; agent guides admin through filling `{title, category, tags, body, source, last_verified_at, sensitivity}`.
+- [x] Ingestion Agent prompt at [prompts/ingestion-agent.md](../prompts/ingestion-agent.md); hash sealed at process boot via [lib/prompts.ts](../lib/prompts.ts) and pinned onto every `audit_log` row written through the agent path in [lib/ingest.ts](../lib/ingest.ts) (`source:{kind:"agent"}` → `kind:"agent_ingest"` / `"agent_ingest_update"` + non-null `prompt_hash`, enforced by the DB CHECK `audit_log_prompt_hash_required_for_agent`). Caller never supplies the hash — mechanical floor for iron rule #10.
+- [ ] Chat UI (admin) — streamed Claude responses; agent guides admin through filling `{title, category, tags, body, source, last_verified_at, sensitivity}`. *Unblocked by item 2: `INGESTION_AGENT_PROMPT_HASH` constant is importable; the UI's `submit_entry` handler passes `source:{kind:"agent"}` to `createEntry`/`updateEntry`.*
 - [ ] `POST /api/ingest` accepts the structured entry; runs validation; chunks; calls Voyage; writes `entries`, `entries_versions`, `chunks`.
 - [ ] Version history: every edit appends to `entries_versions` (append-only); current view is the latest version.
 - [ ] PII scrub pass: simple regex/heuristic strip on ingest (emails, phone numbers, IDs) — full pass deferred to M2b.

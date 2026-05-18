@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 
 import { createEntry, updateEntry } from "@/lib/ingest";
 import { createStubEmbedder } from "@/lib/embedding";
+import { INGESTION_AGENT_PROMPT_HASH } from "@/lib/prompts";
 import * as schema from "@/drizzle/schema";
 
 // Integration test: exercises the real Drizzle path + real Postgres
@@ -55,6 +56,7 @@ describeIfDb("createEntry — integration against Postgres", () => {
         last_verified_at: new Date("2026-05-18T10:00:00Z"),
         sensitivity: "internal",
       },
+      source: { kind: "direct" },
     });
 
     expect(result.id).toMatch(/^[0-9a-f-]{36}$/);
@@ -96,6 +98,56 @@ describeIfDb("createEntry — integration against Postgres", () => {
     expect(audit[0].prompt_hash).toBeNull();
   });
 
+  it("agent source: writes kind:'agent_ingest' + canonical prompt_hash (CHECK satisfied)", async () => {
+    const embedder = createStubEmbedder();
+    const result = await createEntry({
+      db,
+      embedder,
+      input: {
+        title: "agent ingest happy",
+        category: "test",
+        tags: [],
+        body: "Agent-flow body content.",
+        source_pointer: "ticket://agent",
+        last_verified_at: new Date("2026-05-18T10:00:00Z"),
+        sensitivity: "internal",
+      },
+      source: { kind: "agent" },
+    });
+    const audit = await db
+      .select()
+      .from(schema.audit_log)
+      .where(eq(schema.audit_log.entry_id, result.id));
+    // Negative-assertion: exact kind-count rules out a bug that writes
+    // both 'ingest' AND 'agent_ingest' for the same call.
+    const kindCounts = audit.reduce<Record<string, number>>((acc, a) => {
+      acc[a.kind] = (acc[a.kind] ?? 0) + 1;
+      return acc;
+    }, {});
+    expect(kindCounts).toEqual({ agent_ingest: 1 });
+    expect(audit[0].kind).toBe("agent_ingest");
+    // The CHECK `audit_log_prompt_hash_required_for_agent` fires for any
+    // `kind LIKE 'agent_%'` row with a NULL prompt_hash. The row landing
+    // at all proves the constraint did NOT reject this insert; equality
+    // against the imported constant proves the row carries the canonical
+    // hash sourced from `lib/prompts`, not some caller-supplied value.
+    expect(audit[0].prompt_hash).toBe(INGESTION_AGENT_PROMPT_HASH);
+    const payload = audit[0].payload as { source: string };
+    expect(payload.source).toBe("agent");
+  });
+
+  it("CHECK rejects raw INSERT of kind:'agent_ingest' with NULL prompt_hash (negative-assertion)", async () => {
+    // Negative-assertion per WORKFLOW.md: this insert would SUCCEED in a
+    // world where the CHECK constraint were dropped. The error message
+    // must NAME the specific CHECK so the test distinguishes "this
+    // particular constraint rejected the row" from "any constraint
+    // happened to fire by coincidence". Constraint name verified in
+    // drizzle/migrations/0000_baseline.sql.
+    await expect(
+      pool.query(`INSERT INTO audit_log (kind, prompt_hash) VALUES ('agent_ingest', NULL)`),
+    ).rejects.toThrow(/audit_log_prompt_hash_required_for_agent/);
+  });
+
   it("composite FK rejects manually inserting a chunk with mismatched sensitivity", async () => {
     // First create an entry via the orchestration path so the FK target exists.
     const embedder = createStubEmbedder();
@@ -111,6 +163,7 @@ describeIfDb("createEntry — integration against Postgres", () => {
         last_verified_at: new Date("2026-05-18T10:00:00Z"),
         sensitivity: "internal",
       },
+      source: { kind: "direct" },
     });
 
     // Negative-assertion: if the composite FK (entry_id, sensitivity) →
@@ -154,6 +207,7 @@ describeIfDb("createEntry — integration against Postgres", () => {
           last_verified_at: new Date("2026-05-18T10:00:00Z"),
           sensitivity: "internal",
         },
+        source: { kind: "direct" },
       }),
       // Tight regex distinguishes the intended failure (pgvector dimension
       // rejection inside the chunks INSERT, inside the open transaction)
@@ -204,6 +258,7 @@ describeIfDb("updateEntry — integration against Postgres", () => {
         last_verified_at: new Date("2026-05-18T10:00:00Z"),
         sensitivity,
       },
+      source: { kind: "direct" },
     });
   }
 
@@ -224,6 +279,7 @@ describeIfDb("updateEntry — integration against Postgres", () => {
         last_verified_at: new Date("2026-05-18T11:00:00Z"),
         sensitivity: "internal",
       },
+      source: { kind: "direct" },
     });
     expect(r1.version_no).toBe(2);
 
@@ -240,6 +296,7 @@ describeIfDb("updateEntry — integration against Postgres", () => {
         last_verified_at: new Date("2026-05-18T12:00:00Z"),
         sensitivity: "internal",
       },
+      source: { kind: "direct" },
     });
     expect(r2.version_no).toBe(3);
 
@@ -282,6 +339,44 @@ describeIfDb("updateEntry — integration against Postgres", () => {
     }
   });
 
+  it("agent source: update writes kind:'agent_ingest_update' + canonical prompt_hash", async () => {
+    const { id } = await seed();
+    const embedder = createStubEmbedder();
+    await updateEntry({
+      db,
+      embedder,
+      id,
+      input: {
+        title: "agent update",
+        category: "test",
+        tags: [],
+        body: "Agent-flow updated body content.",
+        source_pointer: "ticket://agent-update",
+        last_verified_at: new Date("2026-05-18T11:00:00Z"),
+        sensitivity: "internal",
+      },
+      source: { kind: "agent" },
+    });
+    const audits = await db
+      .select()
+      .from(schema.audit_log)
+      .where(eq(schema.audit_log.entry_id, id));
+    // Negative-assertion: a bug that wrote both 'ingest_update' AND
+    // 'agent_ingest_update' for the same call would pass a `.find()`
+    // check but corrupt the audit trail. Asserting exact kind counts
+    // distinguishes "single agent_ingest_update written" from "agent
+    // path silently double-writes". Mirror of the direct-path test's
+    // `kindCounts` discipline above.
+    const kindCounts = audits.reduce<Record<string, number>>((acc, a) => {
+      acc[a.kind] = (acc[a.kind] ?? 0) + 1;
+      return acc;
+    }, {});
+    expect(kindCounts).toEqual({ ingest: 1, agent_ingest_update: 1 });
+    const agentRow = audits.find((a) => a.kind === "agent_ingest_update")!;
+    expect(agentRow.prompt_hash).toBe(INGESTION_AGENT_PROMPT_HASH);
+    expect((agentRow.payload as { source: string }).source).toBe("agent");
+  });
+
   it("update with sensitivity change: chunks land with NEW sensitivity (composite-FK satisfied)", async () => {
     const { id } = await seed("public");
     const embedder = createStubEmbedder();
@@ -298,6 +393,7 @@ describeIfDb("updateEntry — integration against Postgres", () => {
         last_verified_at: new Date("2026-05-18T11:00:00Z"),
         sensitivity: "restricted",
       },
+      source: { kind: "direct" },
     });
     const chunks = await db.select().from(schema.chunks).where(eq(schema.chunks.entry_id, id));
     expect(chunks.length).toBeGreaterThan(0);
@@ -333,6 +429,7 @@ describeIfDb("updateEntry — integration against Postgres", () => {
         last_verified_at: new Date("2026-05-18T11:00:00Z"),
         sensitivity: "internal",
       },
+      source: { kind: "direct" },
     });
 
     const [after] = await db.select().from(schema.entries).where(eq(schema.entries.id, id));
