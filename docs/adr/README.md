@@ -26,3 +26,4 @@ For ADR-shaped focuses, the supporting reads (existing code, related ADRs, schem
 | 0007 | [Language policy: agent replies always in English](0007-language-policy-always-english.md) | Accepted |
 | 0008 | [ORM + migration ownership (Drizzle replaces Alembic for schema; SQL-first migrations)](0008-orm-and-migration-ownership.md) | Accepted |
 | 0009 | [Chunking strategy (sizes, boundaries, metadata, lifecycle)](0009-chunking-strategy.md) | Accepted |
+| 0010 | [Admin ingestion agent chat UI: architecture](0010-admin-ingestion-agent-chat-ui.md) | Accepted |
