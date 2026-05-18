@@ -10,6 +10,7 @@ import {
   type IngestInput,
 } from "@/lib/ingest";
 import { resetLogSink, setLogSink } from "@/lib/log";
+import { INGESTION_AGENT_PROMPT_HASH } from "@/lib/prompts";
 import { scrubPii } from "@/lib/scrub";
 import * as schema from "@/drizzle/schema";
 
@@ -157,6 +158,7 @@ describe("createEntry — orchestration order is load-bearing", () => {
       db: mock.db,
       embedder,
       input: baseInput({ body: dirtyBody }),
+      source: { kind: "direct" },
     });
 
     const entryCall = mock.inserts.find((c) => c.table === "entries")!;
@@ -178,6 +180,7 @@ describe("createEntry — orchestration order is load-bearing", () => {
       db: mock.db,
       embedder,
       input: baseInput({ body: nfdBody }),
+      source: { kind: "direct" },
     });
 
     const entryCall = mock.inserts.find((c) => c.table === "entries")!;
@@ -195,14 +198,19 @@ describe("createEntry — embedder contract", () => {
     const mock = makeMockDb();
     const stub = createStubEmbedder();
     const spy = vi.spyOn(stub, "embedBatch");
-    await createEntry({ db: mock.db, embedder: stub, input: baseInput() });
+    await createEntry({
+      db: mock.db,
+      embedder: stub,
+      input: baseInput(),
+      source: { kind: "direct" },
+    });
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("propagates embedder.model + version onto every chunk row (#9)", async () => {
     const mock = makeMockDb();
     const embedder = createStubEmbedder();
-    await createEntry({ db: mock.db, embedder, input: baseInput() });
+    await createEntry({ db: mock.db, embedder, input: baseInput(), source: { kind: "direct" } });
 
     const chunkCall = mock.inserts.find((c) => c.table === "chunks");
     // Small body fits in one chunk; assert on the row that exists.
@@ -234,7 +242,7 @@ describe("createEntry — vector alignment + sensitivity propagation", () => {
     const expectedSlices = chunk(canonicalBody);
     expect(expectedSlices.length).toBeGreaterThan(1);
 
-    await createEntry({ db: mock.db, embedder, input });
+    await createEntry({ db: mock.db, embedder, input, source: { kind: "direct" } });
 
     const chunkCall = mock.inserts.find((c) => c.table === "chunks")!;
     const rows = chunkCall.rows as Array<{ embedding: number[] }>;
@@ -260,6 +268,7 @@ describe("createEntry — vector alignment + sensitivity propagation", () => {
       db: mock.db,
       embedder,
       input: baseInput({ sensitivity: "restricted" }),
+      source: { kind: "direct" },
     });
 
     const chunkCall = mock.inserts.find((c) => c.table === "chunks");
@@ -277,31 +286,64 @@ describe("createEntry — transaction + audit row", () => {
   it("opens exactly one transaction", async () => {
     const mock = makeMockDb();
     const embedder = createStubEmbedder();
-    await createEntry({ db: mock.db, embedder, input: baseInput() });
+    await createEntry({ db: mock.db, embedder, input: baseInput(), source: { kind: "direct" } });
     expect(mock.txOpened).toBe(1);
   });
 
   it("writes one audit_log row with kind:'ingest' and a non-null entry_id", async () => {
     const mock = makeMockDb();
     const embedder = createStubEmbedder();
-    await createEntry({ db: mock.db, embedder, input: baseInput() });
+    await createEntry({ db: mock.db, embedder, input: baseInput(), source: { kind: "direct" } });
 
     const auditCalls = mock.inserts.filter((c) => c.table === "audit_log");
     expect(auditCalls.length).toBe(1);
     const auditRow = auditCalls[0].rows[0] as {
       kind: string;
       entry_id: string;
+      prompt_hash: string | null;
       payload: Record<string, unknown>;
     };
     expect(auditRow.kind).toBe("ingest");
     expect(auditRow.entry_id).toBeTruthy();
+    expect(auditRow.prompt_hash).toBeNull();
+    expect(auditRow.payload.source).toBe("direct");
     expect(auditRow.payload.chunk_count).toBeGreaterThanOrEqual(1);
+  });
+
+  it("agent source: kind:'agent_ingest' + prompt_hash from lib/prompts (caller cannot override)", async () => {
+    const mock = makeMockDb();
+    const embedder = createStubEmbedder();
+    await createEntry({
+      db: mock.db,
+      embedder,
+      input: baseInput(),
+      source: { kind: "agent" },
+    });
+
+    const auditRow = mock.inserts.find((c) => c.table === "audit_log")!.rows[0] as {
+      kind: string;
+      prompt_hash: string | null;
+      payload: { source: string };
+    };
+    // Negative-assertion: if the agent branch read the hash from caller-
+    // supplied input (the rejected discriminated-union shape), this
+    // exact-equality against the imported constant would fail when a
+    // caller passed a different hex. The function takes no hash arg —
+    // there is no API surface through which to inject a wrong value.
+    expect(auditRow.kind).toBe("agent_ingest");
+    expect(auditRow.prompt_hash).toBe(INGESTION_AGENT_PROMPT_HASH);
+    expect(auditRow.payload.source).toBe("agent");
   });
 
   it("writes version_no=1 in entries_versions", async () => {
     const mock = makeMockDb();
     const embedder = createStubEmbedder();
-    const result = await createEntry({ db: mock.db, embedder, input: baseInput() });
+    const result = await createEntry({
+      db: mock.db,
+      embedder,
+      input: baseInput(),
+      source: { kind: "direct" },
+    });
     const versionCall = mock.inserts.find((c) => c.table === "entries_versions")!;
     expect((versionCall.rows[0] as { version_no: number }).version_no).toBe(1);
     expect(result.version_no).toBe(1);
@@ -318,7 +360,12 @@ describe("createEntry — edge cases", () => {
     // empty string directly — chunk() and embedder would otherwise be
     // called with empty input which is the bug we want to prevent.
     await expect(
-      createEntry({ db: mock.db, embedder, input: baseInput({ body: "" }) }),
+      createEntry({
+        db: mock.db,
+        embedder,
+        input: baseInput({ body: "" }),
+        source: { kind: "direct" },
+      }),
     ).rejects.toBeInstanceOf(EmptyBodyAfterScrubError);
   });
 
@@ -327,7 +374,12 @@ describe("createEntry — edge cases", () => {
     const failing = createStubEmbedder();
     vi.spyOn(failing, "embedBatch").mockRejectedValueOnce(new Error("voyage 503"));
     await expect(
-      createEntry({ db: mock.db, embedder: failing, input: baseInput() }),
+      createEntry({
+        db: mock.db,
+        embedder: failing,
+        input: baseInput(),
+        source: { kind: "direct" },
+      }),
     ).rejects.toThrow("voyage 503");
     // Negative-assertion: if the embedder call happened AFTER opening the
     // transaction (wrong order), txOpened would be 1. Asserting 0
@@ -346,7 +398,12 @@ describe("createEntry — edge cases", () => {
     // Use a body that produces ≥ 2 chunks so slice(0,-1) leaves a real mismatch.
     const longBody = "Priority workflow step. ".repeat(400).trim();
     await expect(
-      createEntry({ db: mock.db, embedder: wrongCount, input: baseInput({ body: longBody }) }),
+      createEntry({
+        db: mock.db,
+        embedder: wrongCount,
+        input: baseInput({ body: longBody }),
+        source: { kind: "direct" },
+      }),
     ).rejects.toThrow(/vectors for/);
     // Same negative-assertion as above: guard runs pre-transaction.
     expect(mock.txOpened).toBe(0);
@@ -355,7 +412,12 @@ describe("createEntry — edge cases", () => {
   it("accepts tags: [] (empty array) and surfaces it onto entries.tags", async () => {
     const mock = makeMockDb();
     const embedder = createStubEmbedder();
-    await createEntry({ db: mock.db, embedder, input: baseInput({ tags: [] }) });
+    await createEntry({
+      db: mock.db,
+      embedder,
+      input: baseInput({ tags: [] }),
+      source: { kind: "direct" },
+    });
     const entryCall = mock.inserts.find((c) => c.table === "entries")!;
     expect((entryCall.rows[0] as { tags: string[] }).tags).toEqual([]);
   });
@@ -371,6 +433,7 @@ describe("updateEntry — pre-tx empty-after-scrub guard", () => {
         embedder,
         id: "existing-entry-id",
         input: baseInput({ body: "" }),
+        source: { kind: "direct" },
       }),
     ).rejects.toBeInstanceOf(EmptyBodyAfterScrubError);
     // Negative-assertion: if the guard ran inside the tx, txOpened would
@@ -390,6 +453,7 @@ describe("updateEntry — 404 when entry not found", () => {
         embedder,
         id: "missing-id",
         input: baseInput(),
+        source: { kind: "direct" },
       }),
     ).rejects.toBeInstanceOf(EntryNotFoundError);
     // Negative-assertion: if the lookup-empty check were missing, the
@@ -409,6 +473,7 @@ describe("updateEntry — happy path: ordering + version increment + audit", () 
       embedder,
       id: "existing-entry-id",
       input: baseInput(),
+      source: { kind: "direct" },
     });
     expect(result.version_no).toBe(5);
     // Negative-assertion: if updateEntry hardcoded version_no=2, this
@@ -426,6 +491,7 @@ describe("updateEntry — happy path: ordering + version increment + audit", () 
       embedder,
       id: "existing-entry-id",
       input: baseInput(),
+      source: { kind: "direct" },
     });
     const deleteIdx = mock.ops.findIndex((o) => o.kind === "delete" && o.table === "chunks");
     const updateIdx = mock.ops.findIndex((o) => o.kind === "update" && o.table === "entries");
@@ -447,10 +513,38 @@ describe("updateEntry — happy path: ordering + version increment + audit", () 
       embedder,
       id: "existing-entry-id",
       input: baseInput(),
+      source: { kind: "direct" },
     });
     const auditInsert = mock.inserts.find((o) => o.table === "audit_log")!;
-    const row = auditInsert.rows[0] as { kind: string; payload: { version_no: number } };
+    const row = auditInsert.rows[0] as {
+      kind: string;
+      prompt_hash: string | null;
+      payload: { version_no: number; source: string };
+    };
     expect(row.kind).toBe("ingest_update");
+    expect(row.prompt_hash).toBeNull();
+    expect(row.payload.source).toBe("direct");
+    expect(row.payload.version_no).toBe(3);
+  });
+
+  it("agent source: kind:'agent_ingest_update' + prompt_hash from lib/prompts", async () => {
+    const mock = makeMockDb({ maxVersionNo: 2 });
+    const embedder = createStubEmbedder();
+    await updateEntry({
+      db: mock.db,
+      embedder,
+      id: "existing-entry-id",
+      input: baseInput(),
+      source: { kind: "agent" },
+    });
+    const row = mock.inserts.find((o) => o.table === "audit_log")!.rows[0] as {
+      kind: string;
+      prompt_hash: string | null;
+      payload: { source: string; version_no: number };
+    };
+    expect(row.kind).toBe("agent_ingest_update");
+    expect(row.prompt_hash).toBe(INGESTION_AGENT_PROMPT_HASH);
+    expect(row.payload.source).toBe("agent");
     expect(row.payload.version_no).toBe(3);
   });
 
@@ -462,6 +556,7 @@ describe("updateEntry — happy path: ordering + version increment + audit", () 
       embedder,
       id: "existing-entry-id",
       input: baseInput(),
+      source: { kind: "direct" },
     });
     const forUpdateOps = mock.ops.filter((o) => o.kind === "select" && o.forUpdate);
     expect(forUpdateOps).toHaveLength(1);
@@ -476,6 +571,7 @@ describe("updateEntry — happy path: ordering + version increment + audit", () 
       embedder,
       id: "existing-entry-id",
       input: baseInput({ sensitivity: "restricted" }),
+      source: { kind: "direct" },
     });
     const chunksInsert = mock.inserts.find((o) => o.table === "chunks");
     if (chunksInsert) {
