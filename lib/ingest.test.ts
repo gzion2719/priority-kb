@@ -6,7 +6,9 @@ import {
   createEntry,
   EmptyBodyAfterScrubError,
   EntryNotFoundError,
+  submitEntryFromAgent,
   updateEntry,
+  updateEntryFromAgent,
   type IngestInput,
 } from "@/lib/ingest";
 import { resetLogSink, setLogSink } from "@/lib/log";
@@ -579,5 +581,80 @@ describe("updateEntry — happy path: ordering + version increment + audit", () 
         expect(row.sensitivity).toBe("restricted");
       }
     }
+  });
+});
+
+describe("submitEntryFromAgent / updateEntryFromAgent — wrapper layer", () => {
+  // The agent-path audit-row shape is already proven for createEntry at
+  // line 313 ("agent source: kind:'agent_ingest' …") and for updateEntry
+  // at line 530 ("agent source: kind:'agent_ingest_update' …"). These
+  // tests prove that the wrapper functions exist, accept the
+  // source-less argument shape, and forward the agent discriminator —
+  // the type system (Omit<…, "source">) is the real mechanical floor
+  // against caller-supplied source, but a runtime smoke confirms the
+  // wrapper isn't a silent no-op or a misrouted call.
+
+  it("submitEntryFromAgent forwards through createEntry with source pinned to {kind:'agent'}", async () => {
+    const mock = makeMockDb();
+    const embedder = createStubEmbedder();
+    const result = await submitEntryFromAgent({
+      db: mock.db,
+      embedder,
+      input: baseInput(),
+    });
+    const audit = mock.inserts.find((o) => o.table === "audit_log")!.rows[0] as {
+      kind: string;
+      prompt_hash: string | null;
+      payload: { source: string };
+    };
+    expect(audit.kind).toBe("agent_ingest");
+    expect(audit.prompt_hash).toBe(INGESTION_AGENT_PROMPT_HASH);
+    expect(audit.payload.source).toBe("agent");
+    expect(result.version_no).toBe(1);
+  });
+
+  it("updateEntryFromAgent forwards through updateEntry with source pinned to {kind:'agent'} and lands kind:'agent_ingest_update'", async () => {
+    const mock = makeMockDb({ maxVersionNo: 7 });
+    const embedder = createStubEmbedder();
+    const result = await updateEntryFromAgent("existing-entry-id", {
+      db: mock.db,
+      embedder,
+      input: baseInput(),
+    });
+    const audit = mock.inserts.find((o) => o.table === "audit_log")!.rows[0] as {
+      kind: string;
+      prompt_hash: string | null;
+      payload: { source: string; version_no: number };
+    };
+    expect(audit.kind).toBe("agent_ingest_update");
+    expect(audit.prompt_hash).toBe(INGESTION_AGENT_PROMPT_HASH);
+    expect(audit.payload.source).toBe("agent");
+    expect(audit.payload.version_no).toBe(8);
+    expect(result.version_no).toBe(8);
+  });
+
+  it("caller cannot supply a `source` arg — compile-time guard via Omit<…, 'source'>", async () => {
+    const mock = makeMockDb();
+    const embedder = createStubEmbedder();
+    // The wrapper's job is to pin source to {kind:"agent"}; allowing a
+    // caller-supplied source would defeat iron rule #10's mechanical
+    // floor. `npm run check` runs `tsc --noEmit` so @ts-expect-error
+    // is enforced — the directive must sit on the LINE before the
+    // error-producing line (the `source` property), not before the
+    // outer statement.
+    await submitEntryFromAgent({
+      db: mock.db,
+      embedder,
+      input: baseInput(),
+      // @ts-expect-error — Omit<…, "source"> forbids this property
+      source: { kind: "direct" },
+    });
+    await updateEntryFromAgent("existing-entry-id", {
+      db: mock.db,
+      embedder,
+      input: baseInput(),
+      // @ts-expect-error — Omit<…, "source"> forbids this property
+      source: { kind: "direct" },
+    });
   });
 });
