@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  INGESTION_AGENT_PROMPT,
   INGESTION_AGENT_PROMPT_HASH,
   INGESTION_AGENT_PROMPT_PATH,
   loadPromptHash,
@@ -68,5 +69,40 @@ describe("INGESTION_AGENT_PROMPT_HASH constant", () => {
 
   it("is a 64-char lowercase hex string", () => {
     expect(INGESTION_AGENT_PROMPT_HASH).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("INGESTION_AGENT_PROMPT constant (ADR-0010 §1 system_prompt source)", () => {
+  it("is a non-empty string", () => {
+    expect(typeof INGESTION_AGENT_PROMPT).toBe("string");
+    expect(INGESTION_AGENT_PROMPT.length).toBeGreaterThan(0);
+  });
+
+  it("equals the UTF-8 decoding of prompts/ingestion-agent.md", () => {
+    const expected = readFileSync(INGESTION_AGENT_PROMPT_PATH, "utf8");
+    expect(INGESTION_AGENT_PROMPT).toBe(expected);
+  });
+
+  it("hashes (UTF-8-encoded) to INGESTION_AGENT_PROMPT_HASH — provenance round-trip", () => {
+    // Iron rule #10: the bytes we send to Anthropic must match the bytes
+    // we hash for the audit log. If the file ever gains a BOM or a
+    // non-UTF-8 byte sequence, this re-encode-and-hash check diverges and
+    // module init would have already thrown. The test pins that the
+    // currently-checked-in prompt is byte-identical between buffer-form
+    // (hashed) and string-form (sent on the wire). Negative-assertion:
+    // an impl that decoded the file with `ascii` or stripped a BOM would
+    // produce a different hash here.
+    const reencoded = Buffer.from(INGESTION_AGENT_PROMPT, "utf8");
+    const roundTripHash = createHash("sha256").update(reencoded).digest("hex");
+    expect(roundTripHash).toBe(INGESTION_AGENT_PROMPT_HASH);
+  });
+
+  it("does NOT start with a UTF-8 BOM (would have failed module init)", () => {
+    // If this assert ever flips, INGESTION_AGENT_PROMPT_HASH would still
+    // succeed (raw-Buffer hash includes the BOM) but the string form
+    // sent over the wire would too — the round-trip test above would
+    // also pass. This is a belt-and-braces invariant explicitly pinning
+    // the no-BOM convention rather than relying on roundtrip alone.
+    expect(INGESTION_AGENT_PROMPT.charCodeAt(0)).not.toBe(0xfeff);
   });
 });

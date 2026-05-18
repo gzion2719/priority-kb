@@ -37,14 +37,18 @@
  *
  * `tool_use_start.input` is the FINALIZED tool-use JSON object — the
  * adapter buffers `input_json_delta` events until `content_block_stop`
- * before emitting (ADR-0010 §1). `done.stop_reason` is the
- * route-synthesized union: Anthropic's native values minus `stop_sequence`
- * (swallowed; emitted as `end_turn`) plus the two route-synthesized caps
+ * before emitting (ADR-0010 §1). `tool_use_start.id` is the
+ * Anthropic-wire `tool_use.id` (e.g. `toolu_01XYZ...`); the loop driver
+ * MUST echo it verbatim as the next-turn `AgentContentBlock.tool_result
+ * .tool_use_id` (added in ADR-0010 step 3a — see ADR §1 Amendment
+ * 2026-05-18). `done.stop_reason` is the route-synthesized union:
+ * Anthropic's native values minus `stop_sequence` (swallowed; emitted
+ * as `end_turn`) plus the two route-synthesized caps
  * (`max_iterations`, `max_turns`).
  */
 export type AgentEvent =
   | { kind: "text_delta"; text: string }
-  | { kind: "tool_use_start"; name: string; input: unknown }
+  | { kind: "tool_use_start"; id: string; name: string; input: unknown }
   | { kind: "tool_result"; name: string; ok: true; output: unknown }
   | { kind: "tool_result"; name: string; ok: false; error: string }
   | {

@@ -57,7 +57,7 @@ describe("createStubAgent — deterministic scripted stub for #8-compliant tests
     const script: AgentEvent[] = [
       { kind: "text_delta", text: "hello " },
       { kind: "text_delta", text: "world" },
-      { kind: "tool_use_start", name: "submit_entry", input: { title: "x" } },
+      { kind: "tool_use_start", id: "toolu_test_1", name: "submit_entry", input: { title: "x" } },
       { kind: "tool_result", name: "submit_entry", ok: true, output: { id: "y" } },
       { kind: "done", stop_reason: "end_turn" },
     ];
