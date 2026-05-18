@@ -435,3 +435,28 @@ export async function updateEntry(args: {
     };
   });
 }
+
+// Agent-path wrappers (ADR-0010 §2). The agent route's `submit_entry`
+// tool handler MUST call one of these — never `createEntry` /
+// `updateEntry` directly with a hand-supplied source. The `Omit<...,
+// "source">` parameter shape is the compile-time mechanical floor:
+// a future maintainer who copies the route shape from
+// `app/api/ingest/route.ts` (which uses `source: { kind: "direct" }`)
+// can't ship the agent path through the direct audit shape — TS rejects
+// the extra `source` argument.
+//
+// Spread order matters: `source` comes LAST so even an `as any` cast
+// that smuggles a `source` field through `Omit` gets overridden.
+
+export async function submitEntryFromAgent(
+  args: Omit<Parameters<typeof createEntry>[0], "source">,
+): Promise<IngestResult> {
+  return createEntry({ ...args, source: { kind: "agent" } as const });
+}
+
+export async function updateEntryFromAgent(
+  id: string,
+  args: Omit<Parameters<typeof updateEntry>[0], "source" | "id">,
+): Promise<IngestResult> {
+  return updateEntry({ id, ...args, source: { kind: "agent" } as const });
+}
