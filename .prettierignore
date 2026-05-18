@@ -10,4 +10,5 @@ docs/**/*.md
 prompts/**/*.md
 evals/**/*.yaml
 .claude/worktrees/
+.claude/settings.json
 drizzle/migrations/meta/**
