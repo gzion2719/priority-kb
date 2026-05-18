@@ -11,6 +11,9 @@ ADRs that prescribe a test-helper / fixture signature change include the **new s
 ## ADR/design-document timing sub-rule
 For ADR-shaped focuses, the supporting reads (existing code, related ADRs, schema) happen *before* the Step 7 planning critique — not after. See `SESSION_PROTOCOL.md` Step 4b.
 
+## Context-section discipline sub-rule
+The Context section describes the world the ADR addresses (what the spec requires, what's already built, what's deferred), not the meta of how the ADR was authored. Plan-CR / code-CR findings, reviewer telemetry, "two BLOCKING issues that reshaped the plan" — all belong in the commit message or PR body, not in the ADR. Future readers consume the ADR cold; session-process narration is noise. Codified 2026-05-18 after ADR-0010's draft Context included a reshape-narrative paragraph that the code-CR correctly flagged as out of place.
+
 ---
 
 ## Index
