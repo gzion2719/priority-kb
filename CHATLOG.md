@@ -6,6 +6,17 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-18 — M2a item 2: ingestion-agent prompt hash plumbing (mechanical floor for iron rule #10)
+
+- Shipped via [#82](https://github.com/gzion2719/priority-kb/pull/82) → [#83](https://github.com/gzion2719/priority-kb/pull/83) (on `main`): `lib/prompts.ts` exposing `INGESTION_AGENT_PROMPT_HASH` (lowercase hex SHA-256 of `prompts/ingestion-agent.md` raw bytes, sealed at process boot via `import.meta.url`-relative `readFileSync`); `createEntry`/`updateEntry` take a **required** `source: {kind:"direct"} | {kind:"agent"}` discriminator; agent branch reads the constant directly so callers never inject a hash. Audit `payload.source` field added on both branches.
+- **Required vs optional was the load-bearing CR catch.** Plan-CR (M2) flagged the original `prompt_hash` caller-arg as defeating the mechanical floor → refactored to no-hash-arg design. Code-CR (M2) then flagged my optional-with-default implementation as silently degrading a forgetful future agent caller → flipped to required + updated ~25 call sites. Both passes were load-bearing exactly as the Step 7b "amplified" sub-rule predicts.
+- Negative-assertion integration test proves the DB CHECK `audit_log_prompt_hash_required_for_agent` rejects raw `INSERT (kind:'agent_ingest', prompt_hash:NULL)` by constraint name; new file-sealing unit test ties `INGESTION_AGENT_PROMPT_HASH` to the actual on-disk file bytes (rules out "constant is any 64-hex string"). BACKLOG: strikes M2a item 2 deferral, adds three forward-looking entries (Next.js standalone tracing for M5, agent-rejected audit rows for item 3, retrieval-side `lib/prompts` extension for M3).
+- **Session Score 9/10.** Code 4/4, Protocol 3/3, Efficiency 2/3 (−1: bash-script bulk-insert of `source:{kind:"direct"}` mis-targeted a closing brace inside `await expect(createEntry(...))`, cost one manual unwind). Ceiling: for ≤30-count bulk edits inside nested call/await/expect blocks, prefer N hand-Edits over regex scripts.
+- **Process improvement:** none this session (habit observation, not codifiable — see Ceiling).
+- **Next session:** M2a item 3 — admin chat UI scaffold + Claude streaming client. Now unblocked: route handler passes `source:{kind:"agent"}` and gets the canonical `prompt_hash` for free. Likely needs an ADR for streaming-route shape + a fresh session (substantial new surface).
+
+---
+
 ## 2026-05-18 — M2a items 4+5: POST + PUT /api/ingest E2E (2 PR pairs)
 
 - Shipped M2a item 4 via [#76](https://github.com/gzion2719/priority-kb/pull/76) → [#77](https://github.com/gzion2719/priority-kb/pull/77) (on `main`): `POST /api/ingest` create-only scaffold — `withAdmin` HOF + Zod boundary, PII scrub → NFC → chunk → `embedBatch` (stub) → single tx into entries / entries_versions (version_no=1) / chunks (composite-FK sensitivity propagated) / audit_log (`kind:"ingest"`). New `lib/scrub.ts` + `lib/ingest.ts` + `tests/ingest.integration.test.ts` (real-Postgres FK + mid-tx ROLLBACK coverage).
