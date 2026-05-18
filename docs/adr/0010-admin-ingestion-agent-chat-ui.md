@@ -31,7 +31,7 @@ What this ADR does **not** decide:
 // lib/agents.ts — public event surface (see §5 for AgentClient interface)
 export type AgentEvent =
   | { kind: "text_delta"; text: string }
-  | { kind: "tool_use_start"; name: string; input: unknown }
+  | { kind: "tool_use_start"; id: string; name: string; input: unknown }
   | { kind: "tool_result"; name: string; ok: true; output: unknown }
   | { kind: "tool_result"; name: string; ok: false; error: string }
   | { kind: "done"; stop_reason: "end_turn" | "tool_use" | "max_tokens" | "max_iterations" | "max_turns" }
@@ -44,7 +44,9 @@ Wire framing: each event is one SSE record (`data: <JSON-stringified AgentEvent>
 
 There is **no text streaming during tool execution.** Claude's SDK serializes turns: text deltas → `tool_use` block → stream pauses while the caller runs the tool → `tool_result` is submitted back → next assistant turn streams. The keepalive comment fills the gap so proxies don't kill the connection.
 
-The adapter buffers `input_json_delta` events server-side; **`tool_use_start` fires only after `content_block_stop` confirms the tool_use block is complete** — `input` is therefore the finalized JSON object, never partial. The `stop_reason` union narrows the Anthropic SDK's native values (`end_turn | tool_use | max_tokens | stop_sequence`) and adds two route-synthesized values (`max_iterations`, `max_turns`) for the caps in §3; the adapter swallows `stop_sequence` (we set no stop sequences) and emits `end_turn` on its behalf.
+The adapter buffers `input_json_delta` events server-side; **`tool_use_start` fires only after `content_block_stop` confirms the tool_use block is complete** — `input` is therefore the finalized JSON object, never partial. The `id` field is the Anthropic-wire `tool_use.id` (e.g. `toolu_01XYZ...`) and **must round-trip verbatim** to the next-turn `AgentContentBlock.tool_result.tool_use_id`; the loop driver in §3 echoes it without modification. The `stop_reason` union narrows the Anthropic SDK's native values (`end_turn | tool_use | max_tokens | stop_sequence`) and adds two route-synthesized values (`max_iterations`, `max_turns`) for the caps in §3; the adapter swallows `stop_sequence` (we set no stop sequences) and emits `end_turn` on its behalf.
+
+**Amendment 2026-05-18 (impl step 3a):** the originally-shipped §1 sample omitted the `id` field on `tool_use_start`. Step 3a added it as an additive (non-breaking) field bump. Without it the loop driver cannot correlate `tool_use_start` with the `tool_result` block it must echo in the next-turn `messages[]`, and the real Anthropic SDK in step 3b would reject the turn for missing `tool_use_id`. The stub-agent fixture scripts in `lib/agents.test.ts` were updated to provide a deterministic `id` (e.g. `"toolu_test_<n>"`).
 
 Response headers pinned at impl time: `Cache-Control: no-cache, no-transform`, `Content-Type: text/event-stream`, `X-Accel-Buffering: no`. The `no-transform` directive prevents Brotli / gzip framing breaks at the CDN edge; `X-Accel-Buffering: no` covers nginx-class proxies.
 
