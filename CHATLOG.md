@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-18 — M2a item 4-7 ROADMAP tick + ADR-0010 admin chat UI (2 PR pairs)
+
+- ROADMAP M2a items 4-7 ticked via [#85](https://github.com/gzion2719/priority-kb/pull/85)/[#86](https://github.com/gzion2719/priority-kb/pull/86) (on `main`): POST /api/ingest (items 4+6), PUT version history (item 5), fixture-embedding tests (item 7), all with describe-from-source PR + file pointers in the shape of already-ticked items 1+2. Plan-CR caught 3 describe-from-source slips (`lib/ingest-schema.ts` birth PR, missing `app/api/ingest/route.test.ts`, item 7 needed the `lib/embedding.test.ts:161-175` mechanical-floor citation) verified via `gh pr view` before applying.
+- ADR-0010 admin ingestion agent chat UI shipped via [#87](https://github.com/gzion2719/priority-kb/pull/87)/[#88](https://github.com/gzion2719/priority-kb/pull/88) (on `main`): SSE transport over Next.js Route Handlers, tool-use loop on server with concrete caps (8 iterations / 60s wall-clock / 20 turns / 10s keepalive), `lib/agents.ts` abstraction parallel to `lib/embedding.ts`, `submitEntryFromAgent` + `updateEntryFromAgent` wrappers as the mechanical floor for iron rule #10 (the `source: { kind: "agent" } as const` discriminator).
+- Iron-rule footprint covers 11 of 13 non-negotiables explicitly (#1, #2, #4, #6, #7, #8, #9, #10, #11, #12, #13). LogEvent extension pre-decided as additive optional fields on existing `LogEventClaude` (`tool_iterations?`, `streaming?`) — not a new `kind` variant — to keep `prompt_hash` requirement intact for every Anthropic call site.
+- Two-pass Step 7b on the ADR was load-bearing: plan-CR (2 BLOCKING + 7 MAJOR) added wrapper helpers + the four concrete caps + iron-rule #1 env-var handling + Vercel-cap claim correction; code-CR on the written ADR (3 BLOCKING + 6 MAJOR + 5 MINOR) caught PR title case (`ADR-0010` → `adr-0010`), missing README index row, missing Zod-parse step in tool-use loop driver, and iron-rule table gaps (#2 / #9 / #13 / #11).
+- **Session Score 9/10.** Code 4/4, Protocol 3/3, Efficiency 2/3 (−1 for the `/tmp`-Windows-path retry on `gh pr create --body-file` + commitlint footer-line-length retry on the ROADMAP commit). Ceiling: PR body files as repo-local `.pr-body-*.md` from the start; commit bodies pre-wrapped under 100 chars.
+- **Process improvement:** `docs/adr/README.md` gained a "Context-section discipline" sub-rule — ADR Context describes the world the ADR addresses, not the session-process meta (see `docs/adr/README.md`).
+- **Next session:** ADR-0010 impl step 1 — `lib/agents.ts` abstraction + `AgentClient` interface + `AgentEvent` discriminated union + `AgentUnavailableError` + `createStubAgent` + `getAgent` env-gated factory + tests including the source-file-no-import floor mirroring `lib/embedding.test.ts:161-175`. Recommend fresh chat (chat archetype shift: code, not protocol).
+
+---
+
 ## 2026-05-18 — M2a item 2: ingestion-agent prompt hash plumbing (mechanical floor for iron rule #10)
 
 - Shipped via [#82](https://github.com/gzion2719/priority-kb/pull/82) → [#83](https://github.com/gzion2719/priority-kb/pull/83) (on `main`): `lib/prompts.ts` exposing `INGESTION_AGENT_PROMPT_HASH` (lowercase hex SHA-256 of `prompts/ingestion-agent.md` raw bytes, sealed at process boot via `import.meta.url`-relative `readFileSync`); `createEntry`/`updateEntry` take a **required** `source: {kind:"direct"} | {kind:"agent"}` discriminator; agent branch reads the constant directly so callers never inject a hash. Audit `payload.source` field added on both branches.
