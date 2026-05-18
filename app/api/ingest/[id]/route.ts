@@ -63,6 +63,7 @@ async function handler(req: NextRequest, context: RouteContext): Promise<Respons
       embedder: getEmbedder(),
       id,
       input: result.data,
+      source: { kind: "direct" },
     });
     return NextResponse.json(updated, { status: 200 });
   } catch (err) {

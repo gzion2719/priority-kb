@@ -9,9 +9,14 @@
 //   #8  no live API calls — embedder is injected; tests pass the stub.
 //   #9  embedding_model + embedding_version columns are written from the
 //       embedder's batch result, not invented.
-//   #10 N/A this slice — kind:"ingest" does not match `agent_%` in the
-//       audit_log CHECK. The agent-prompt path (M2a item 2) will use
-//       kind:"agent_ingest" + prompt_hash; see BACKLOG.
+//   #10 covered for agent path — when `source.kind === "agent"`, the
+//       audit row carries `kind:"agent_ingest"` + `prompt_hash` read
+//       from `lib/prompts` (never accepted from the caller). The DB
+//       CHECK `audit_log_prompt_hash_required_for_agent` enforces
+//       non-null hash at the storage boundary. For the direct path
+//       (`source` omitted or `{kind:"direct"}`), kind stays `"ingest"`
+//       and the CHECK does not fire because the kind doesn't match
+//       `agent_%`.
 //
 // Ordering invariants (load-bearing; do not reorder without re-reading
 // ADR-0009 §5 + §4):
@@ -33,9 +38,38 @@ import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { CHUNKING_POLICY_VERSION, buildEmbedInput, chunk, type ChunkSlice } from "@/lib/chunk";
 import type { Embedder } from "@/lib/embedding";
 import { logEvent } from "@/lib/log";
+import { INGESTION_AGENT_PROMPT_HASH } from "@/lib/prompts";
 import { scrubPii } from "@/lib/scrub";
 import * as schema from "@/drizzle/schema";
 import type { Sensitivity } from "@/drizzle/schema";
+
+/**
+ * Discriminator for the audit-log path. Default (`{kind:"direct"}` or
+ * omitted) keeps the existing `"ingest"` / `"ingest_update"` shape with
+ * null `prompt_hash`. `{kind:"agent"}` flips to `"agent_ingest"` /
+ * `"agent_ingest_update"` and pins the audit row's `prompt_hash` to
+ * `INGESTION_AGENT_PROMPT_HASH` from `lib/prompts` — the caller never
+ * supplies the hash, which is the mechanical floor for iron rule #10
+ * (caller-supplied hash would let a stale or wrong value slip through).
+ */
+export type IngestSource = { kind: "direct" } | { kind: "agent" };
+
+type AuditKind = "ingest" | "ingest_update" | "agent_ingest" | "agent_ingest_update";
+
+/** Resolves the audit-row shape from a source discriminator. */
+function auditShapeFor(
+  source: IngestSource,
+  base: "ingest" | "ingest_update",
+): { kind: AuditKind; prompt_hash: string | null; source_kind: "direct" | "agent" } {
+  if (source.kind === "agent") {
+    return {
+      kind: base === "ingest" ? "agent_ingest" : "agent_ingest_update",
+      prompt_hash: INGESTION_AGENT_PROMPT_HASH,
+      source_kind: "agent",
+    };
+  }
+  return { kind: base, prompt_hash: null, source_kind: "direct" };
+}
 
 /** Input shape for `createEntry`. Route layer validates → passes here. */
 export type IngestInput = {
@@ -161,8 +195,19 @@ export async function createEntry(args: {
   db: NodePgDatabase<typeof schema>;
   embedder: Embedder;
   input: IngestInput;
+  /**
+   * REQUIRED. Distinguishes direct-API ingests from agent-chat ingests.
+   * Made required (vs optional with a `direct` default) so a forgetful
+   * future agent caller cannot silently degrade to the direct path and
+   * land an audit row without `prompt_hash` — that would satisfy the DB
+   * CHECK (because `kind:"ingest"` doesn't match `agent_%`) but break
+   * iron rule #10 (the agent response wouldn't be tied to its prompt).
+   * Pick at the call site, type-checker won't let you forget.
+   */
+  source: IngestSource;
 }): Promise<IngestResult> {
-  const { db, embedder, input } = args;
+  const { db, embedder, input, source } = args;
+  const audit = auditShapeFor(source, "ingest");
 
   // Steps 1–4 (scrub → NFC → chunk → embedBatch) run BEFORE the transaction
   // opens. `deriveChunksAndEmbeddings` throws `EmptyBodyAfterScrubError`
@@ -212,9 +257,11 @@ export async function createEntry(args: {
     }
 
     await tx.insert(schema.audit_log).values({
-      kind: "ingest",
+      kind: audit.kind,
       entry_id: entry.id,
+      prompt_hash: audit.prompt_hash,
       payload: {
+        source: audit.source_kind,
         chunk_count: derived.slices.length,
         embedding_model: derived.embedModel,
         embedding_version: derived.embedVersion,
@@ -242,7 +289,10 @@ export async function createEntry(args: {
  *   #6  caller is required to pass `sensitivity` from a validated enum.
  *   #8  no live API calls — embedder is injected.
  *   #9  embedding_model + embedding_version columns rewritten per chunk.
- *   #10 N/A this slice — `kind:"ingest_update"` does NOT match `agent_%`.
+ *   #10 covered for agent path — when `source.kind === "agent"`, the
+ *       audit row carries `kind:"agent_ingest_update"` + `prompt_hash`
+ *       from `lib/prompts`. Direct path keeps `kind:"ingest_update"`
+ *       + null hash (does not match `agent_%`, CHECK does not fire).
  *
  * Concurrency contract:
  *   - Under READ COMMITTED, two concurrent `updateEntry` calls both reach
@@ -287,8 +337,11 @@ export async function updateEntry(args: {
   embedder: Embedder;
   id: string;
   input: IngestInput;
+  /** REQUIRED. See `createEntry` doc-comment for the rationale. */
+  source: IngestSource;
 }): Promise<IngestResult> {
-  const { db, embedder, id, input } = args;
+  const { db, embedder, id, input, source } = args;
+  const audit = auditShapeFor(source, "ingest_update");
 
   // Pre-tx: scrub + chunk + embed. Throws `EmptyBodyAfterScrubError`
   // before any DB work happens so a 400 surfaces without a wasted BEGIN.
@@ -362,9 +415,11 @@ export async function updateEntry(args: {
 
     // Step 7: audit row.
     await tx.insert(schema.audit_log).values({
-      kind: "ingest_update",
+      kind: audit.kind,
       entry_id: id,
+      prompt_hash: audit.prompt_hash,
       payload: {
+        source: audit.source_kind,
         version_no: nextVersionNo,
         chunk_count: derived.slices.length,
         embedding_model: derived.embedModel,
