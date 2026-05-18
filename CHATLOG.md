@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-18 — Drift recovery: reconstruct CHATLOG for ADR-0010 steps 1+2 (PR #96)
+
+- Opened on stale `docs/session-close-2026-05-16-audit-import` with local CHATLOG missing 6 entries; `origin/main` had advanced ~30 commits including ADR-0010 step 1 ([#91](https://github.com/gzion2719/priority-kb/pull/91)) + step 2 ([#94](https://github.com/gzion2719/priority-kb/pull/94)) shipped without firing the closing ritual. Behind-origin-blocks-planning + reconstruct-on-drift sub-rules both fired exactly as designed.
+- Shipped reconstruct via [#96](https://github.com/gzion2719/priority-kb/pull/96) (merged to `dev`): +11 lines on `CHATLOG.md` with a `RECONSTRUCTED`-marked entry built from PR #91/#94 bodies + commits `115735b`/`b1f05233`. Source IS the unbiased check, so Step 7b formal review was explicitly named-skipped per the docs-only-from-immutable-source carve-out.
+- **Protocol slip:** initial handoff included `dev → main` release link when `git log origin/main..origin/dev` was empty (No-empty-diff sub-rule violation, codified 2026-05-17). User flagged via screenshot of empty compare page; corrected to feature-merge-first sequence.
+- **Efficiency slip:** first commit attempt used PowerShell `-m` flags with a 700-char body line → commitlint `footer-max-line-length` rejected; push ran anyway (PowerShell lacks `&&` short-circuit), creating empty branch + empty PR #96 that had to be backfilled by `git commit -F .commit-msg.tmp` on a properly-wrapped temp file.
+- **Session Score 8/10.** Code 4/4, Protocol 2/3 (−1 No-empty-diff slip), Efficiency 2/3 (−1 PowerShell commit-body retry). Ceiling: check `git log origin/main..origin/dev` BEFORE proposing any release PR link; pre-write commit bodies to `.commit-msg.tmp` from the start when handing off to PowerShell.
+- **Process improvement:** `WORKFLOW.md` gains a "Main-checkout commit-body handoff (PowerShell)" section — multi-line commit bodies go to `.commit-msg.tmp` + `git commit -F`, never chained `-m` flags (see `WORKFLOW.md`).
+- **Next session:** ADR-0010 step 3 — `app/api/agent/ingest/route.ts` SSE route + tool-use loop driver + real Anthropic adapter at the `getAgent()` `"anthropic"` swap point with ADR §3 caps (8 iterations / 60s wall / 20 turns / 10s keepalive). Fresh chat strongly recommended — substantial new surface.
+
+---
+
 ## 2026-05-18 — RECONSTRUCTED — ADR-0010 steps 1 + 2: agent abstraction + tool registry + wrappers (2 PR pairs)
 
 - Step 1 shipped via [#91](https://github.com/gzion2719/priority-kb/pull/91) → [#93](https://github.com/gzion2719/priority-kb/pull/93) (on `main`): `lib/agents.ts` (`AgentClient` / `AgentEvent` / `AgentUnavailableError` / `createStubAgent` / env-gated `getAgent` factory with `ANTHROPIC_API_KEY` iron-rule-#1 floor — loud `RangeError` on absent key, not silent `AgentUnavailableError` degradation); `LogEventClaude` extended with optional `tool_iterations?` + `streaming?` (additive, not a new `kind`); `@anthropic-ai/sdk@0.96.0` pinned exact (unused until step 3; source-file-no-import test mirrors `lib/embedding.test.ts:161-175` two-layer scan).

@@ -271,6 +271,20 @@ Codified 2026-05-17 after three successive code-CRs in the M1-closure session ca
 
 ---
 
+## Main-checkout commit-body handoff (PowerShell)
+
+When the user's shell is PowerShell and the session ran in the main checkout (not a `.claude/worktrees/<name>/` worktree), Claude writes multi-line commit bodies to `.commit-msg.tmp` in the repo root and hands the user `git commit -F .commit-msg.tmp` — never chained `-m` flags.
+
+Why: PowerShell can't run bash heredoc (`<<'EOF'`). Chained `-m "subject" -m "body"` flags collapse each value into a single line; a 700-char body paragraph becomes one 700-char line that commitlint hard-rejects via `body-max-line-length` / `footer-max-line-length` (both capped at 100). PowerShell 5.1 also has no `&&` short-circuit operator, so when commit fails the chained `git push` runs anyway — pushing the parent commit ref as an empty branch — followed by `gh pr create` opening an empty PR that has to be backfilled.
+
+Mechanics:
+1. Claude writes the wrapped message (lines ≤ 100 chars, paragraphs separated by blank lines, `Co-Authored-By:` trailer on its own line) to `.commit-msg.tmp` via the Write tool.
+2. Claude hands the user three commands: `git commit -F .commit-msg.tmp` → `git push -u origin <branch>` → `Remove-Item .commit-msg.tmp`.
+
+This is the main-checkout twin of the Worktree commit-handoff rule above: that rule has Claude running git itself in Bash with heredoc; this rule has Claude pre-writing the body so PowerShell only needs `-F`. Codified 2026-05-18 after a chained-`-m` handoff dropped a 700-char body line into commitlint, commit failed, push ran anyway, PR #96 opened empty against `dev` and required `git commit -F .commit-msg.tmp` to backfill.
+
+---
+
 ## Red flags — stop and resync
 
 If any of these happen, pause and re-orient before continuing:
