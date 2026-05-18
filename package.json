@@ -23,6 +23,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.96.0",
     "drizzle-orm": "0.36.4",
     "js-tiktoken": "1.0.20",
     "next": "16.2.6",

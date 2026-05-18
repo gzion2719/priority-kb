@@ -50,6 +50,50 @@ describe("logEvent — Claude variant", () => {
     expect(parsed.cost_usd).toBe(0.5);
     expect(parsed.ts).toMatch(ISO_8601);
   });
+
+  it("carries optional agent fields (tool_iterations + streaming) when present — ADR-0010 LogEvent extension", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "claude",
+      model: "claude-haiku-4-5-20251001",
+      model_version: "2026-05-18",
+      prompt_hash: "deadbeef",
+      tokens: { input: 100, output: 50, total: 150 },
+      latency_ms: 800,
+      cost_usd: 0.001,
+      tool_iterations: 3,
+      streaming: true,
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.tool_iterations).toBe(3);
+    expect(parsed.streaming).toBe(true);
+  });
+
+  it("omits agent fields from the raw NDJSON line when absent — assert on string, not on JSON.parse (which silently drops undefined-valued keys)", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "claude",
+      model: "claude-sonnet-4-6",
+      model_version: "2026-01-15",
+      prompt_hash: "abc123",
+      latency_ms: 100,
+      cost_usd: 0.01,
+    });
+
+    // Assert on the raw NDJSON line (the actual wire output). A regression
+    // that wrote `tool_iterations: undefined` into the spread would still
+    // produce `JSON.parse(line)` with no `tool_iterations` key (because
+    // JSON.stringify drops undefined values), but the raw line would
+    // contain the key name. The string assertion catches that drift; the
+    // `in parsed` form would not.
+    expect(lines[0]).not.toMatch(/"tool_iterations"/);
+    expect(lines[0]).not.toMatch(/"streaming"/);
+  });
 });
 
 describe("logEvent — Voyage variant", () => {
