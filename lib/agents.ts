@@ -90,7 +90,13 @@ export type AgentToolDefinitionShape = {
 export type AgentStreamInput = {
   system_prompt: string;
   messages: AgentMessage[];
-  tools: AgentToolDefinitionShape[];
+  /**
+   * `readonly` so step 2's `AGENT_TOOLS` registry (a deeply-frozen `as const`
+   * literal) is assignable here without losing variance. Mutable array
+   * literals from tests still satisfy this slot — readonly is the safe
+   * direction for input-only data the agent must not mutate.
+   */
+  tools: readonly AgentToolDefinitionShape[];
   max_tool_iterations: number;
   deadline_ms: number;
   signal: AbortSignal;
