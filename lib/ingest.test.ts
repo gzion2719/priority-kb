@@ -2,7 +2,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { buildEmbedInput, chunk } from "@/lib/chunk";
 import { createStubEmbedder } from "@/lib/embedding";
-import { createEntry, EmptyBodyAfterScrubError, type IngestInput } from "@/lib/ingest";
+import {
+  createEntry,
+  EmptyBodyAfterScrubError,
+  EntryNotFoundError,
+  updateEntry,
+  type IngestInput,
+} from "@/lib/ingest";
 import { resetLogSink, setLogSink } from "@/lib/log";
 import { scrubPii } from "@/lib/scrub";
 import * as schema from "@/drizzle/schema";
@@ -20,12 +26,25 @@ afterAll(() => resetLogSink());
 // Real-FK / CHECK / rollback semantics are exercised in
 // tests/ingest.integration.test.ts against the CI Postgres service.
 
-type InsertCall = { table: string; rows: unknown[] };
+type Op =
+  | { kind: "insert"; table: string; rows: unknown[] }
+  | { kind: "update"; table: string; values: unknown }
+  | { kind: "delete"; table: string }
+  | { kind: "select"; table: string; forUpdate: boolean };
 
-function makeMockDb() {
-  const calls: InsertCall[] = [];
+type MockOptions = {
+  /** Rows the SELECT FOR UPDATE on entries returns. Default: [{id: 'X'}]. */
+  entriesLookup?: Array<{ id: string }>;
+  /** Existing MAX(version_no); next insert will use this + 1. Default: 1. */
+  maxVersionNo?: number;
+};
+
+function makeMockDb(opts: MockOptions = {}) {
+  const ops: Op[] = [];
   let txOpened = 0;
   let entryIdCounter = 0;
+  const entriesLookup = opts.entriesLookup ?? [{ id: "existing-entry-id" }];
+  const maxVersionNo = opts.maxVersionNo ?? 1;
 
   function tableName(t: unknown): string {
     if (t === schema.entries) return "entries";
@@ -41,15 +60,57 @@ function makeMockDb() {
       return {
         values(vals: unknown) {
           const rows = Array.isArray(vals) ? vals : [vals];
-          calls.push({ table: name, rows });
+          ops.push({ kind: "insert", table: name, rows });
           const synthIds = rows.map(() => ({ id: `entry-${++entryIdCounter}` }));
-          // Returning-aware: when called with .returning(), resolve to
-          // synthetic ids; otherwise resolve to void. Drizzle's value-shape
-          // is "thenable" so it's awaitable either way.
           const promise = Promise.resolve(synthIds);
           return Object.assign(promise, {
-            returning: (_cols?: unknown) => Promise.resolve(synthIds),
+            returning: () => Promise.resolve(synthIds),
           });
+        },
+      };
+    },
+    select(cols?: unknown) {
+      return {
+        from(table: unknown) {
+          const name = tableName(table);
+          // Sniff the column shape — { max: sql<...> } means MAX-aggregate query.
+          const isMaxQuery =
+            cols !== undefined && typeof cols === "object" && cols !== null && "max" in cols;
+          return {
+            where(_w: unknown) {
+              const promise: Promise<unknown[]> = isMaxQuery
+                ? Promise.resolve([{ max: maxVersionNo }])
+                : Promise.resolve(name === "entries" ? entriesLookup : []);
+              return Object.assign(promise, {
+                for(_mode: string) {
+                  ops.push({ kind: "select", table: name, forUpdate: true });
+                  return Promise.resolve(entriesLookup);
+                },
+              });
+            },
+          };
+        },
+      };
+    },
+    update(table: unknown) {
+      const name = tableName(table);
+      return {
+        set(values: unknown) {
+          return {
+            where(_w: unknown) {
+              ops.push({ kind: "update", table: name, values });
+              return Promise.resolve();
+            },
+          };
+        },
+      };
+    },
+    delete(table: unknown) {
+      const name = tableName(table);
+      return {
+        where(_w: unknown) {
+          ops.push({ kind: "delete", table: name });
+          return Promise.resolve();
         },
       };
     },
@@ -64,7 +125,10 @@ function makeMockDb() {
 
   return {
     db,
-    calls,
+    ops,
+    get inserts() {
+      return ops.filter((o): o is Extract<Op, { kind: "insert" }> => o.kind === "insert");
+    },
     get txOpened() {
       return txOpened;
     },
@@ -86,16 +150,16 @@ function baseInput(overrides: Partial<IngestInput> = {}): IngestInput {
 
 describe("createEntry — orchestration order is load-bearing", () => {
   it("scrubs PII BEFORE storing entries.body (ADR-0009 §5)", async () => {
-    const { db, calls } = makeMockDb();
+    const mock = makeMockDb();
     const embedder = createStubEmbedder();
     const dirtyBody = "Contact gal@example.com about ticket — really.";
     await createEntry({
-      db,
+      db: mock.db,
       embedder,
       input: baseInput({ body: dirtyBody }),
     });
 
-    const entryCall = calls.find((c) => c.table === "entries")!;
+    const entryCall = mock.inserts.find((c) => c.table === "entries")!;
     const storedBody = (entryCall.rows[0] as { body: string }).body;
     // Negative-assertion: if the scrub were skipped, storedBody would
     // contain the literal email. Asserting NOT-equal-to-dirty AND
@@ -105,18 +169,18 @@ describe("createEntry — orchestration order is load-bearing", () => {
   });
 
   it("stores entries.body in NFC form so chunk offsets index correctly", async () => {
-    const { db, calls } = makeMockDb();
+    const mock = makeMockDb();
     const embedder = createStubEmbedder();
     // NFD form of "é" is "é" — two code units. Stored body must be
     // NFC ("é", one code unit) to match what `chunk()` walks internally.
     const nfdBody = "café".normalize("NFD") + " details here";
     await createEntry({
-      db,
+      db: mock.db,
       embedder,
       input: baseInput({ body: nfdBody }),
     });
 
-    const entryCall = calls.find((c) => c.table === "entries")!;
+    const entryCall = mock.inserts.find((c) => c.table === "entries")!;
     const storedBody = (entryCall.rows[0] as { body: string }).body;
     expect(storedBody).toBe(nfdBody.normalize("NFC"));
     // Negative-assertion: if NFC were skipped, storedBody.length would
@@ -128,19 +192,19 @@ describe("createEntry — orchestration order is load-bearing", () => {
 
 describe("createEntry — embedder contract", () => {
   it("calls embedBatch ONCE with all chunk inputs (not per-chunk)", async () => {
-    const { db } = makeMockDb();
+    const mock = makeMockDb();
     const stub = createStubEmbedder();
     const spy = vi.spyOn(stub, "embedBatch");
-    await createEntry({ db, embedder: stub, input: baseInput() });
+    await createEntry({ db: mock.db, embedder: stub, input: baseInput() });
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("propagates embedder.model + version onto every chunk row (#9)", async () => {
-    const { db, calls } = makeMockDb();
+    const mock = makeMockDb();
     const embedder = createStubEmbedder();
-    await createEntry({ db, embedder, input: baseInput() });
+    await createEntry({ db: mock.db, embedder, input: baseInput() });
 
-    const chunkCall = calls.find((c) => c.table === "chunks");
+    const chunkCall = mock.inserts.find((c) => c.table === "chunks");
     // Small body fits in one chunk; assert on the row that exists.
     if (chunkCall) {
       for (const row of chunkCall.rows as Array<{
@@ -161,7 +225,7 @@ describe("createEntry — vector alignment + sensitivity propagation", () => {
     // `vectors.length === slices.length` assertion would NOT — it would
     // pass for any permutation. This is the WORKFLOW.md negative-assertion
     // discipline applied to batch ordering.
-    const { db, calls } = makeMockDb();
+    const mock = makeMockDb();
     const embedder = createStubEmbedder();
     // Use a body long enough to produce ≥ 2 chunks for a meaningful test.
     const longBody = "Priority workflow step. ".repeat(400).trim();
@@ -170,9 +234,9 @@ describe("createEntry — vector alignment + sensitivity propagation", () => {
     const expectedSlices = chunk(canonicalBody);
     expect(expectedSlices.length).toBeGreaterThan(1);
 
-    await createEntry({ db, embedder, input });
+    await createEntry({ db: mock.db, embedder, input });
 
-    const chunkCall = calls.find((c) => c.table === "chunks")!;
+    const chunkCall = mock.inserts.find((c) => c.table === "chunks")!;
     const rows = chunkCall.rows as Array<{ embedding: number[] }>;
     expect(rows.length).toBe(expectedSlices.length);
 
@@ -190,21 +254,21 @@ describe("createEntry — vector alignment + sensitivity propagation", () => {
   });
 
   it("propagates parent entry.sensitivity onto every chunk row (composite FK precondition)", async () => {
-    const { db, calls } = makeMockDb();
+    const mock = makeMockDb();
     const embedder = createStubEmbedder();
     await createEntry({
-      db,
+      db: mock.db,
       embedder,
       input: baseInput({ sensitivity: "restricted" }),
     });
 
-    const chunkCall = calls.find((c) => c.table === "chunks");
+    const chunkCall = mock.inserts.find((c) => c.table === "chunks");
     if (chunkCall) {
       for (const row of chunkCall.rows as Array<{ sensitivity: string }>) {
         expect(row.sensitivity).toBe("restricted");
       }
     }
-    const versionCall = calls.find((c) => c.table === "entries_versions")!;
+    const versionCall = mock.inserts.find((c) => c.table === "entries_versions")!;
     expect((versionCall.rows[0] as { sensitivity: string }).sensitivity).toBe("restricted");
   });
 });
@@ -218,11 +282,11 @@ describe("createEntry — transaction + audit row", () => {
   });
 
   it("writes one audit_log row with kind:'ingest' and a non-null entry_id", async () => {
-    const { db, calls } = makeMockDb();
+    const mock = makeMockDb();
     const embedder = createStubEmbedder();
-    await createEntry({ db, embedder, input: baseInput() });
+    await createEntry({ db: mock.db, embedder, input: baseInput() });
 
-    const auditCalls = calls.filter((c) => c.table === "audit_log");
+    const auditCalls = mock.inserts.filter((c) => c.table === "audit_log");
     expect(auditCalls.length).toBe(1);
     const auditRow = auditCalls[0].rows[0] as {
       kind: string;
@@ -235,10 +299,10 @@ describe("createEntry — transaction + audit row", () => {
   });
 
   it("writes version_no=1 in entries_versions", async () => {
-    const { db, calls } = makeMockDb();
+    const mock = makeMockDb();
     const embedder = createStubEmbedder();
-    const result = await createEntry({ db, embedder, input: baseInput() });
-    const versionCall = calls.find((c) => c.table === "entries_versions")!;
+    const result = await createEntry({ db: mock.db, embedder, input: baseInput() });
+    const versionCall = mock.inserts.find((c) => c.table === "entries_versions")!;
     expect((versionCall.rows[0] as { version_no: number }).version_no).toBe(1);
     expect(result.version_no).toBe(1);
   });
@@ -246,7 +310,7 @@ describe("createEntry — transaction + audit row", () => {
 
 describe("createEntry — edge cases", () => {
   it("rejects body that is empty after scrub", async () => {
-    const { db } = makeMockDb();
+    const mock = makeMockDb();
     const embedder = createStubEmbedder();
     // Body is entirely an email → scrubs to "[email]", which is non-empty;
     // construct a body that scrubs to empty by using only patterns that
@@ -254,7 +318,7 @@ describe("createEntry — edge cases", () => {
     // empty string directly — chunk() and embedder would otherwise be
     // called with empty input which is the bug we want to prevent.
     await expect(
-      createEntry({ db, embedder, input: baseInput({ body: "" }) }),
+      createEntry({ db: mock.db, embedder, input: baseInput({ body: "" }) }),
     ).rejects.toBeInstanceOf(EmptyBodyAfterScrubError);
   });
 
@@ -289,10 +353,135 @@ describe("createEntry — edge cases", () => {
   });
 
   it("accepts tags: [] (empty array) and surfaces it onto entries.tags", async () => {
-    const { db, calls } = makeMockDb();
+    const mock = makeMockDb();
     const embedder = createStubEmbedder();
-    await createEntry({ db, embedder, input: baseInput({ tags: [] }) });
-    const entryCall = calls.find((c) => c.table === "entries")!;
+    await createEntry({ db: mock.db, embedder, input: baseInput({ tags: [] }) });
+    const entryCall = mock.inserts.find((c) => c.table === "entries")!;
     expect((entryCall.rows[0] as { tags: string[] }).tags).toEqual([]);
+  });
+});
+
+describe("updateEntry — pre-tx empty-after-scrub guard", () => {
+  it("throws EmptyBodyAfterScrubError BEFORE opening the transaction", async () => {
+    const mock = makeMockDb();
+    const embedder = createStubEmbedder();
+    await expect(
+      updateEntry({
+        db: mock.db,
+        embedder,
+        id: "existing-entry-id",
+        input: baseInput({ body: "" }),
+      }),
+    ).rejects.toBeInstanceOf(EmptyBodyAfterScrubError);
+    // Negative-assertion: if the guard ran inside the tx, txOpened would
+    // be 1 and the SELECT FOR UPDATE op would have been recorded.
+    expect(mock.txOpened).toBe(0);
+    expect(mock.ops).toHaveLength(0);
+  });
+});
+
+describe("updateEntry — 404 when entry not found", () => {
+  it("throws EntryNotFoundError if SELECT FOR UPDATE returns 0 rows", async () => {
+    const mock = makeMockDb({ entriesLookup: [] });
+    const embedder = createStubEmbedder();
+    await expect(
+      updateEntry({
+        db: mock.db,
+        embedder,
+        id: "missing-id",
+        input: baseInput(),
+      }),
+    ).rejects.toBeInstanceOf(EntryNotFoundError);
+    // Negative-assertion: if the lookup-empty check were missing, the
+    // orchestration would proceed to INSERT entries_versions. Asserting
+    // no inserts happened distinguishes "404 short-circuits" from
+    // "404 fires but writes still landed".
+    expect(mock.inserts).toHaveLength(0);
+  });
+});
+
+describe("updateEntry — happy path: ordering + version increment + audit", () => {
+  it("opens SELECT FOR UPDATE first, then writes version_no = MAX+1", async () => {
+    const mock = makeMockDb({ maxVersionNo: 4 });
+    const embedder = createStubEmbedder();
+    const result = await updateEntry({
+      db: mock.db,
+      embedder,
+      id: "existing-entry-id",
+      input: baseInput(),
+    });
+    expect(result.version_no).toBe(5);
+    // Negative-assertion: if updateEntry hardcoded version_no=2, this
+    // would fail for maxVersionNo=4. Asserting on the dynamic value
+    // distinguishes the MAX+1 computation from a hardcoded literal.
+    const versionInsert = mock.inserts.find((o) => o.table === "entries_versions")!;
+    expect((versionInsert.rows[0] as { version_no: number }).version_no).toBe(5);
+  });
+
+  it("deletes old chunks BEFORE updating entries (cascade-avoidance order)", async () => {
+    const mock = makeMockDb();
+    const embedder = createStubEmbedder();
+    await updateEntry({
+      db: mock.db,
+      embedder,
+      id: "existing-entry-id",
+      input: baseInput(),
+    });
+    const deleteIdx = mock.ops.findIndex((o) => o.kind === "delete" && o.table === "chunks");
+    const updateIdx = mock.ops.findIndex((o) => o.kind === "update" && o.table === "entries");
+    expect(deleteIdx).toBeGreaterThanOrEqual(0);
+    expect(updateIdx).toBeGreaterThanOrEqual(0);
+    // Negative-assertion: if the wrong order were committed (UPDATE
+    // entries first, DELETE chunks second), the composite FK CASCADE
+    // would do wasted work on the chunks rows we're about to delete.
+    // Asserting delete < update distinguishes intended order from the
+    // wasteful inverse.
+    expect(deleteIdx).toBeLessThan(updateIdx);
+  });
+
+  it("writes audit_log row with kind:'ingest_update' and the new version_no", async () => {
+    const mock = makeMockDb({ maxVersionNo: 2 });
+    const embedder = createStubEmbedder();
+    await updateEntry({
+      db: mock.db,
+      embedder,
+      id: "existing-entry-id",
+      input: baseInput(),
+    });
+    const auditInsert = mock.inserts.find((o) => o.table === "audit_log")!;
+    const row = auditInsert.rows[0] as { kind: string; payload: { version_no: number } };
+    expect(row.kind).toBe("ingest_update");
+    expect(row.payload.version_no).toBe(3);
+  });
+
+  it("calls SELECT FOR UPDATE on entries (concurrency lock)", async () => {
+    const mock = makeMockDb();
+    const embedder = createStubEmbedder();
+    await updateEntry({
+      db: mock.db,
+      embedder,
+      id: "existing-entry-id",
+      input: baseInput(),
+    });
+    const forUpdateOps = mock.ops.filter((o) => o.kind === "select" && o.forUpdate);
+    expect(forUpdateOps).toHaveLength(1);
+    expect((forUpdateOps[0] as { table: string }).table).toBe("entries");
+  });
+
+  it("propagates NEW sensitivity onto re-derived chunks (composite-FK precondition)", async () => {
+    const mock = makeMockDb();
+    const embedder = createStubEmbedder();
+    await updateEntry({
+      db: mock.db,
+      embedder,
+      id: "existing-entry-id",
+      input: baseInput({ sensitivity: "restricted" }),
+    });
+    const chunksInsert = mock.inserts.find((o) => o.table === "chunks");
+    if (chunksInsert) {
+      for (const row of chunksInsert.rows as Array<{ sensitivity: string }>) {
+        expect(row.sensitivity).toBe("restricted");
+      }
+    }
   });
 });
