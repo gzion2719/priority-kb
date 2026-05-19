@@ -30,3 +30,4 @@ The Context section describes the world the ADR addresses (what the spec require
 | 0008 | [ORM + migration ownership (Drizzle replaces Alembic for schema; SQL-first migrations)](0008-orm-and-migration-ownership.md) | Accepted |
 | 0009 | [Chunking strategy (sizes, boundaries, metadata, lifecycle)](0009-chunking-strategy.md) | Accepted |
 | 0010 | [Admin ingestion agent chat UI: architecture](0010-admin-ingestion-agent-chat-ui.md) | Accepted |
+| 0011 | [Repo visibility: public until first real KB content lands](0011-repo-visibility.md) | Accepted |
