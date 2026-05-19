@@ -25,7 +25,7 @@ jobs:
     name: gitleaks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # gitleaks needs full history on push-to-default-branch to catch
           # historical leaks; on PRs it scans the diff range only.
@@ -52,7 +52,7 @@ jobs:
   #     matrix:
   #       language: [javascript-typescript]
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v6
   #     - name: Initialize CodeQL
   #       uses: github/codeql-action/init@v3
   #       with:
