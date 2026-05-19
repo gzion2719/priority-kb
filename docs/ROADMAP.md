@@ -33,6 +33,8 @@ A new dev can clone the repo, run `docker compose up && npm install && npm run d
 
 **Goal:** an admin can chat with the Ingestion Agent and produce a stored, embedded, versioned entry — text only, no media.
 
+**Repo visibility precondition ([ADR-0011](adr/0011-repo-visibility.md)):** real Priority entries land via `POST /api/ingest` (item 4, shipped), the chat UI (item 3, shipped), or `PUT /api/ingest/[id]` (item 5, shipped) — all write to the DB even under the stub agent. **REVERT REPO TO PRIVATE** before typing any real Priority content into any ingestion path, regardless of which checklist item is next. Hard date floor: 2026-06-15.
+
 ### Checklist
 - [x] Stub auth: `x-stub-user-role: admin | user` header parsed server-side; admin-only routes reject `user` — see [lib/auth.ts](../lib/auth.ts) (`withAdmin` HOF) + [lib/auth.test.ts](../lib/auth.test.ts) (PRs #70/#71).
 - [x] Ingestion Agent prompt at [prompts/ingestion-agent.md](../prompts/ingestion-agent.md); hash sealed at process boot via [lib/prompts.ts](../lib/prompts.ts) and pinned onto every `audit_log` row written through the agent path in [lib/ingest.ts](../lib/ingest.ts) (`source:{kind:"agent"}` → `kind:"agent_ingest"` / `"agent_ingest_update"` + non-null `prompt_hash`, enforced by the DB CHECK `audit_log_prompt_hash_required_for_agent`). Caller never supplies the hash — mechanical floor for iron rule #10.
@@ -41,7 +43,7 @@ A new dev can clone the repo, run `docker compose up && npm install && npm run d
 - [x] Version history: every edit appends to `entries_versions` (append-only); current view is the latest version. `PUT /api/ingest/[id]` append path + composite-FK cascade + `SELECT ... FOR UPDATE` concurrency guard live in [lib/ingest.ts](../lib/ingest.ts) (`updateEntry`) with shared Zod schema in [lib/ingest-schema.ts](../lib/ingest-schema.ts); two-connection lock-contention test in [tests/ingest.integration.test.ts](../tests/ingest.integration.test.ts) (PRs #78/#79).
 - [x] PII scrub pass: simple regex/heuristic strip on ingest (emails, phone numbers, IDs) — see [lib/scrub.ts](../lib/scrub.ts) + [lib/scrub.test.ts](../lib/scrub.test.ts) (shipped with PR #76). Stronger pass queued at M2b line 82.
 - [x] Unit tests with fixture embeddings (no live API) — `createStubEmbedder` in [lib/embedding.ts](../lib/embedding.ts) is the deterministic fixture; consumed by [lib/ingest.test.ts](../lib/ingest.test.ts) + [tests/ingest.integration.test.ts](../tests/ingest.integration.test.ts) (test surface accumulated across PRs #76/#78/#82). Non-negotiable #8 mechanically enforced by [lib/embedding.test.ts](../lib/embedding.test.ts) lines 161–175 (source-file-no-import: rejects any `voyageai`/`@anthropic-ai`/`openai` import in `lib/embedding.ts`).
-- [ ] Manual smoke: log 3 real Priority Q&A entries end-to-end.
+- [ ] Manual smoke: log 3 real Priority Q&A entries end-to-end. **PRE-STEP:** revert repo visibility to private per [ADR-0011](adr/0011-repo-visibility.md) — this is the planned moment real content first enters the DB.
 
 ### Acceptance
 Three real entries land in the DB with chunks, embeddings, `embedding_model + embedding_version`, and a prompt hash. Pulling one back via SQL shows all required fields populated. CI green.
