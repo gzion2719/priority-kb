@@ -1,8 +1,10 @@
-// lib/agents.ts — agent abstraction (ADR-0010 impl step 1; no real adapter yet).
+// lib/agents.ts — agent abstraction (ADR-0010 impl steps 1 + 3b).
 //
-// The interface every agent adapter must satisfy. Step 1 ships only the
-// deterministic scripted stub for tests; step 3 wires the real Anthropic
-// adapter behind the same interface (ADR-0010 §5).
+// The interface every agent adapter must satisfy. Step 1 shipped the
+// deterministic scripted stub; step 3b wired the real Anthropic adapter
+// behind the same interface via the sibling `./agents-anthropic` module
+// (ADR-0010 §5). This file imports no Anthropic SDK symbols itself —
+// the source-file-no-import test below enforces the floor.
 //
 // Design notes (mirrors lib/embedding.ts):
 // - `streamMessages` is the primary surface — returns an
@@ -28,9 +30,12 @@
 //   `AgentUnavailableError` that would mask it as a degraded-mode outage
 //   (ADR-0010 §8 row #1).
 // - Mechanical floor for iron rule #8 (no live APIs in tests): this module
-//   imports no Anthropic / Voyage / OpenAI client. The companion test
-//   reads the source file and rejects any such reference, mirroring
-//   lib/embedding.test.ts:161-175.
+//   imports no Anthropic / Voyage / OpenAI client directly. The companion
+//   test reads the source file and rejects any such reference, mirroring
+//   lib/embedding.test.ts:161-175. The `./agents-anthropic` sibling owns
+//   the SDK import; this file only sees a local-path import.
+
+import { createAnthropicAgent } from "./agents-anthropic";
 
 /**
  * Streaming event emitted by an agent during a turn.
@@ -179,9 +184,8 @@ declare global {
  * - unset or `"stub"` → deterministic scripted stub with an empty script.
  * - `"anthropic"` → reads `process.env.ANTHROPIC_API_KEY`. Missing key
  *   throws `RangeError "missing ANTHROPIC_API_KEY"` (iron rule #1 floor:
- *   misconfig is loud, not silently degraded). Key present throws
- *   `RangeError` naming "ADR-0010 impl step 3" — step 3 replaces this
- *   branch with the real adapter.
+ *   misconfig is loud, not silently degraded). Key present resolves the
+ *   real Anthropic adapter via `./agents-anthropic` (ADR-0010 step 3b).
  * - any other value → throws `RangeError` (fail-loud, no silent fallback).
  *
  * Cached on `globalThis.__agent` after first call. Use
@@ -198,9 +202,7 @@ export function getAgent(): AgentClient {
           `missing ANTHROPIC_API_KEY — required when AGENT_PROVIDER=anthropic (iron rule #1)`,
         );
       }
-      throw new RangeError(
-        `AGENT_PROVIDER=anthropic adapter lands in ADR-0010 impl step 3; not wired yet`,
-      );
+      globalThis.__agent = createAnthropicAgent({ apiKey: process.env.ANTHROPIC_API_KEY });
     } else {
       throw new RangeError(
         `unknown AGENT_PROVIDER=${provider}; expected "stub" or (post-step-3) "anthropic"`,
