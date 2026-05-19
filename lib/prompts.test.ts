@@ -106,3 +106,54 @@ describe("INGESTION_AGENT_PROMPT constant (ADR-0010 §1 system_prompt source)", 
     expect(INGESTION_AGENT_PROMPT.charCodeAt(0)).not.toBe(0xfeff);
   });
 });
+
+describe("INGESTION_AGENT_PROMPT v0.2.0 content (ADR-0010 §Prompt v0.2.0)", () => {
+  // Negative-assertion tests per WORKFLOW.md "Negative-assertion tests
+  // distinguish from the regression": each case constructs an assertion
+  // that would fail if the v0.2.0 rewrite were silently reverted to the
+  // v0.1.0 wording. A "present" assertion alone would pass any prompt
+  // that happens to mention the substring; pairing with "old line absent"
+  // proves the rewrite actually landed.
+
+  it("bumps the version header to 0.2.0 (and removes the v0.1.0 header)", () => {
+    expect(INGESTION_AGENT_PROMPT).toContain(
+      '**Version:** 0.2.0 (M2a chat UI ride-along; see ADR-0010 §"Prompt v0.2.0")',
+    );
+    expect(INGESTION_AGENT_PROMPT).not.toContain(
+      "**Version:** 0.1.0 (M2a stub — to be tightened during M2a implementation)",
+    );
+  });
+
+  it("rewrites PII handling as 'heads-up, not a vote' and drops the orphan audit-metadata line", () => {
+    // scrubPii in lib/ingest.ts:127 is unconditional; the v0.1.0 "If
+    // admin says no, proceed unchanged but log the decision in the audit
+    // metadata" line was contra-factual prose (no audit-metadata channel
+    // exists). v0.2.0 reframes as a heads-up.
+    expect(INGESTION_AGENT_PROMPT).toContain(
+      "I'll strip these before storage — flagging so you know what's being removed. (Stripping happens server-side regardless of your answer; this is a heads-up, not a vote.)",
+    );
+    expect(INGESTION_AGENT_PROMPT).not.toContain(
+      "If admin says no, proceed unchanged but log the decision in the audit metadata.",
+    );
+  });
+
+  it("adds the search_kb empty-result fallback and fixes the call signature to match SEARCH_KB_INPUT_SCHEMA", () => {
+    // SEARCH_KB_INPUT_SCHEMA in lib/agents-tools.ts accepts only
+    // {query: string} — the v0.1.0 two-arg `search_kb(..., k=3)` call
+    // was wrong against the actual tool schema. v0.2.0 fixes the call
+    // shape and adds the ADR-0010 §Prompt v0.2.0 empty-result fallback.
+    expect(INGESTION_AGENT_PROMPT).toContain(
+      'call `search_kb({query: title + " " + first 200 chars of body})`',
+    );
+    expect(INGESTION_AGENT_PROMPT).toContain("retrieval_unavailable_m2a");
+    expect(INGESTION_AGENT_PROMPT).not.toContain("search_kb(title + first 200 chars of body, k=3)");
+  });
+
+  it("aligns the Final confirmation summary with unconditional server-side scrub", () => {
+    // After v0.2.0 the admin no longer has a yes/no PII choice, so the
+    // confirmation summary reports what was flagged rather than the
+    // admin's (non-existent) decision.
+    expect(INGESTION_AGENT_PROMPT).toContain("PII flagged for strip: <what>");
+    expect(INGESTION_AGENT_PROMPT).not.toContain("PII stripped: <yes/no, what>");
+  });
+});
