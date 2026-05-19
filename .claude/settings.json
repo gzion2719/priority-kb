@@ -22,6 +22,17 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hook-prettier-write.mjs"
+          }
+        ]
+      }
     ]
   }
 }
