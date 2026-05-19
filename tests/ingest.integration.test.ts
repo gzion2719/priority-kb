@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Pool } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { eq } from "drizzle-orm";
+import { DrizzleQueryError, eq } from "drizzle-orm";
 
 import { createEntry, updateEntry } from "@/lib/ingest";
 import { createStubEmbedder } from "@/lib/embedding";
@@ -187,39 +187,102 @@ describeIfDb("createEntry — integration against Postgres", () => {
     // wrong dimension so pgvector rejects them at insert time. This
     // exercises the actual transaction.rollback path on the server.
     const embedder = createStubEmbedder();
-    vi.spyOn(embedder, "embedBatch").mockImplementationOnce(async (texts) => ({
+    // mockImplementation (not …Once) — every embedBatch call within this
+    // test gets the broken vectors. Sibling-test pattern uses long bodies
+    // that produce exactly one chunk today, but if a future refactor adds
+    // a probe call the …Once flavor would silently burn the broken impl
+    // on the probe and pass real-stub vectors to the actual chunks
+    // INSERT, hiding the rollback path. Defended below by asserting
+    // toHaveBeenCalledTimes(1).
+    const embedSpy = vi.spyOn(embedder, "embedBatch").mockImplementation(async (texts) => ({
       vectors: texts.map(() => new Array(512).fill(0)), // wrong dimension (need 1024)
       model: embedder.model,
       version: embedder.version,
       tokens_used: 0,
     }));
 
-    await expect(
-      createEntry({
+    // Long body matching the sibling pattern in lib/ingest.test.ts L241,
+    // L401 — produces ≥1 chunk under any plausible chunker tuning. A
+    // tiny body that produced zero chunks would skip the chunks INSERT
+    // entirely (lib/ingest.ts gates on slices.length > 0), the tx would
+    // COMMIT successfully, and the rollback assertion below would flip
+    // to failure — but with a misleading "entries.length === 1" signal
+    // that points away from the actual cause (no chunks to insert, not
+    // rollback broken). Constructing the failure case deliberately, per
+    // WORKFLOW.md "Negative-assertion tests distinguish from the
+    // regression."
+    const longBody = "Priority workflow step. ".repeat(400);
+
+    // Sentinel survives only when createEntry unexpectedly RESOLVES — in
+    // that world the subsequent toBeInstanceOf assertion fails loudly
+    // with "expected 'createEntry resolved unexpectedly' to be instance
+    // of DrizzleQueryError", which is a clearer pointer to the actual
+    // breakage than a generic resolved-value mismatch. drizzle-orm 0.44+
+    // wraps driver errors raised inside the QueryBuilder's execute path
+    // in DrizzleQueryError(query, params, cause) — the original pgvector
+    // dimension-mismatch error is on `.cause`, not on `.message`.
+    let captured: unknown = "createEntry resolved unexpectedly";
+    try {
+      await createEntry({
         db,
         embedder,
         input: {
           title: "rollback test",
           category: "test",
           tags: [],
-          body: "small body",
+          body: longBody,
           source_pointer: "ticket://rollback",
           last_verified_at: new Date("2026-05-18T10:00:00Z"),
           sensitivity: "internal",
         },
         source: { kind: "direct" },
-      }),
-      // Tight regex distinguishes the intended failure (pgvector dimension
-      // rejection inside the chunks INSERT, inside the open transaction)
-      // from a hypothetical client-side pre-validation that would fail
-      // BEFORE the tx opens — in that world rollback wouldn't be tested.
-    ).rejects.toThrow(/dimension|expected 1024|vector/i);
+      });
+    } catch (e) {
+      captured = e;
+    }
+
+    // Wrapper-class assertion distinguishes "Drizzle's tx wrapper fired
+    // on the chunks INSERT" from "function threw before the tx opened"
+    // (a hypothetical client-side pre-validation that would fail before
+    // any INSERT runs — in that world rollback wouldn't be tested).
+    // Anchoring on the class instead of the wrapper's message string
+    // keeps the test stable across future Drizzle patch/minor bumps that
+    // may reword `Failed query: …`.
+    expect(captured).toBeInstanceOf(DrizzleQueryError);
+    // Type-narrowing guard: ensures the next `.cause` access compiles
+    // under TS strict mode AND fails loudly if a future refactor weakens
+    // the assertion above (e.g. someone replaces toBeInstanceOf with
+    // toBeTruthy and the cast silently becomes a footgun).
+    if (!(captured instanceof DrizzleQueryError)) {
+      throw new Error(`expected DrizzleQueryError, got: ${String(captured)}`);
+    }
+
+    // .cause carries the pgvector dimension-mismatch error from the
+    // server. Asserting instanceof Error before .message both narrows
+    // for TS and ensures the cause-chain wiring isn't silently dropped
+    // in a future Drizzle release.
+    expect(captured.cause).toBeInstanceOf(Error);
+
+    // Tight regex on the wrapped cause distinguishes the intended
+    // failure (pgvector dimension rejection — "expected 1024 dimensions,
+    // not 512" from pgvector's ereport) from any other constraint that
+    // could fire inside the chunks INSERT (a future CHECK or NOT NULL).
+    // The /dimension/ branch matches pgvector's wording; /expected 1024/
+    // is the precision fallback if the wording changes. Dropped the
+    // earlier /vector/ alternation as too broad.
+    expect((captured.cause as Error).message).toMatch(/dimension|expected 1024/i);
+
+    // Pins the single-batch contract of deriveChunksAndEmbeddings — if a
+    // future refactor splits into multiple embedBatch calls, this fires
+    // and B1's rationale (sibling above) gets re-evaluated.
+    expect(embedSpy).toHaveBeenCalledTimes(1);
 
     // Negative-assertion: if transaction.rollback weren't invoked on the
     // chunks-insert throw, the entries row from the earlier statement
     // would have been COMMITted and entries.length would be 1. Asserting
-    // 0 distinguishes "tx rolls back on failure" from "writes are auto-
-    // committed per statement".
+    // 0 on BOTH entries and entries_versions distinguishes "tx rolls
+    // back on failure" from "we only rolled back chunks/versions but
+    // kept entries via some misconfigured savepoint".
     const entries = await db.select().from(schema.entries);
     expect(entries).toHaveLength(0);
     const versions = await db.select().from(schema.entries_versions);
