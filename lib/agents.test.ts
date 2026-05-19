@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AgentUnavailableError,
@@ -11,9 +11,28 @@ import {
   createStubAgent,
   getAgent,
   resetAgentForTests,
+  type AgentClient,
   type AgentEvent,
   type AgentStreamInput,
 } from "./agents";
+
+// Mock the sibling adapter module so this test file never loads the real
+// SDK (iron rule #8). The mock returns a sentinel AgentClient that lets
+// the factory-wiring assertions verify (a) the branch was taken and (b)
+// the apiKey was forwarded.
+vi.mock("./agents-anthropic", () => {
+  const sentinel: AgentClient = {
+    model: "mocked-anthropic-model",
+    model_version: "mocked-sdk-version",
+    streamMessages: async function* () {},
+  };
+  return {
+    createAnthropicAgent: vi.fn((opts: { apiKey: string }) => {
+      // Return a per-call object so tests can distinguish identity.
+      return { ...sentinel, _apiKey: opts.apiKey } as AgentClient;
+    }),
+  };
+});
 
 function makeInput(overrides?: Partial<AgentStreamInput>): AgentStreamInput {
   const ac = new AbortController();
@@ -135,11 +154,14 @@ describe("getAgent — env-driven factory", () => {
     expect(() => getAgent()).toThrow(/missing ANTHROPIC_API_KEY/);
   });
 
-  it("throws RangeError naming ADR-0010 impl step 3 when AGENT_PROVIDER=anthropic with key present — adapter ships in step 3", () => {
+  it("AGENT_PROVIDER=anthropic with key present resolves the real adapter (step 3b wiring)", async () => {
     process.env.AGENT_PROVIDER = "anthropic";
     process.env.ANTHROPIC_API_KEY = "sk-ant-test-not-real";
-    expect(() => getAgent()).toThrow(RangeError);
-    expect(() => getAgent()).toThrow(/anthropic adapter lands in ADR-0010 impl step 3/);
+    const agent = getAgent();
+    expect(agent.model).toBe("mocked-anthropic-model");
+    expect(agent.model_version).toBe("mocked-sdk-version");
+    const adapter = await import("./agents-anthropic");
+    expect(adapter.createAnthropicAgent).toHaveBeenCalledWith({ apiKey: "sk-ant-test-not-real" });
   });
 
   it("throws RangeError for an unknown provider — fail-loud, no silent fallback", () => {
@@ -160,12 +182,14 @@ describe("getAgent — env-driven factory", () => {
     resetAgentForTests();
     process.env.AGENT_PROVIDER = "anthropic";
     process.env.ANTHROPIC_API_KEY = "sk-ant-test-not-real";
-    expect(() => getAgent()).toThrow(/anthropic adapter lands in ADR-0010 impl step 3/);
+    const second = getAgent();
+    expect(second.model).toBe("mocked-anthropic-model");
     resetAgentForTests();
     delete process.env.AGENT_PROVIDER;
     delete process.env.ANTHROPIC_API_KEY;
     const third = getAgent();
     expect(third).not.toBe(first);
+    expect(third).not.toBe(second);
   });
 });
 
