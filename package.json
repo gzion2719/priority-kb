@@ -23,7 +23,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.96.0",
+    "@anthropic-ai/sdk": "0.97.1",
     "drizzle-orm": "^0.45.2",
     "js-tiktoken": "^1.0.21",
     "next": "16.2.6",
@@ -37,10 +37,10 @@
     "@commitlint/config-conventional": "^19.8.1",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.20.0",
-    "@types/react": "^19.0.0",
+    "@types/react": "^19.2.15",
     "@types/react-dom": "^19.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.4",
+    "@typescript-eslint/parser": "^8.59.4",
     "dotenv": "16.4.7",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.0.0",

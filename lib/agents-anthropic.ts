@@ -57,7 +57,7 @@ export const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
  * (ADR-0010 §5). Surfaced via `AgentClient.model_version` for LogEvent
  * attribution. Drift is caught by the synced-pin test in agents-anthropic.test.ts.
  */
-export const ANTHROPIC_SDK_VERSION = "0.96.0";
+export const ANTHROPIC_SDK_VERSION = "0.97.1";
 
 /**
  * Default `max_tokens` for an assistant turn. ADR-0010 doesn't pin a value;
