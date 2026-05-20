@@ -31,3 +31,4 @@ The Context section describes the world the ADR addresses (what the spec require
 | 0009 | [Chunking strategy (sizes, boundaries, metadata, lifecycle)](0009-chunking-strategy.md) | Accepted |
 | 0010 | [Admin ingestion agent chat UI: architecture](0010-admin-ingestion-agent-chat-ui.md) | Accepted |
 | 0011 | [Repo visibility: public until first real KB content lands](0011-repo-visibility.md) | Accepted |
+| 0012 | [Retrieval pipeline architecture (M3 item 3)](0012-retrieval-pipeline.md)           | Accepted |
