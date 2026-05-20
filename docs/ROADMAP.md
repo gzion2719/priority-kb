@@ -59,7 +59,7 @@ Three real entries land in the DB with chunks, embeddings, `embedding_model + em
 - [ ] Query UI (user) — single text box, streamed answer with inline citation links.
 - [ ] Retrieval pipeline: query embedding → pgvector HNSW search top-K → Voyage `rerank-2` → top-N to Claude (Sonnet) → answer with citation IDs.
 - [ ] Hybrid search: combine pgvector ANN scores with Postgres `tsvector` keyword match (Hebrew via `simple` config + `unaccent`).
-- [ ] Citations resolve to entry detail page (read-only for `user` role).
+- [x] Citations resolve to entry detail page (read-only for `user` role) — see [app/entries/[id]/page.tsx](../app/entries/[id]/page.tsx) + [app/entries/[id]/not-found.tsx](../app/entries/[id]/not-found.tsx) + [lib/entries.ts](../lib/entries.ts) (`findEntryForRole` enforces iron-rule #6 in SQL WHERE; UUID regex pre-check + null-collapse closes the existence-leak side channel — auth-failure / malformed-id / missing-id / sensitivity-mismatch all return the same `null` and render the same `notFound()` page). Citation cards in [app/query/page.tsx](../app/query/page.tsx) link via `next/link` to `/entries/[id]`. `kind:"entry_view"` audit row on both served and denied paths. `resolveRoleFromHeader` extracted to [lib/auth.ts](../lib/auth.ts) as the canonical stub-auth parser shared by `withAdmin`/`withUserOrAdmin` and the page.
 - [ ] `evals/golden_set.yaml` filled in: 30+ Q/A pairs (15 Hebrew + 15 English), each with expected `source_ids[]`.
 - [ ] Eval runner (`npm run eval` or `pytest evals/`) reports recall@5, citation precision; CI runs it on PR.
 - [ ] Degraded mode: keyword-only fallback when Claude or Voyage 5xx for >X seconds; UI banner.
