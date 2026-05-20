@@ -56,6 +56,13 @@ Categories chosen for this project's shape.
 
 ## Retrieval
 
+- **ADR-0013 — Hybrid search + RRF fusion + Hebrew tsvector tokenization (ROADMAP M3 item 4).** Add a Postgres `tsvector` keyword lane (top-K=20) parallel to ADR-0012's ANN lane (top-K=20), fuse via RRF (`k` constant tuned to top-K=20 regime, not Cormack's k=60 default which assumes thousands per lane). Resolve Hebrew tokenization: `simple` + `unaccent` does not handle Hebrew morphology / prefix-clitics (ב/ל/מ/ש/ה/ו/כ); decide between custom dict, `pg_trgm` substring fallback, or English-only keyword lane with Hebrew routing to ANN-only. ADR-0013 is the home for the M3 item 8 full keyword-only degraded fallback (ADR-0012 §Context notes the dependency).
+- **Query rewrite / HyDE before stage A** (ADR-0012 §9 deferred). Short Hebrew queries (2-4 words like `איך לסגור הזמנה`) retrieve poorly as raw embeddings. M4 polish candidate.
+- **Identical-query memoization** `(query_hash, role, sensitivity_allowed, prompt_hash) → answer` for N minutes (ADR-0012 §9 deferred). Cuts Claude spend on eval demos and repeated user queries. M4 polish.
+- **Pagination / "show more results"** in `/api/retrieve` response (ADR-0012 §9 deferred). Out of v1 scope; M4 polish.
+- **Per-entry ACL / team-scoped restriction** beyond the three sensitivity tiers (ADR-0012 §9 deferred). Post-M5 hosting.
+- **Multi-instance circuit-breaker state** promotion to a shared store (Redis / Postgres advisory locks) (ADR-0012 §9 deferred). Per-process breaker desyncs at horizontal scale. Post-M5 hosting.
+- **`LogEvent` discriminant for retrieval pipeline** — decide at M3 implementation time whether to add `kind:"retrieval_pipeline"` or reuse existing kinds (ADR-0012 §8). Cross-ref existing `kind:"route"` BACKLOG entry above in Architecture & Infra.
 - **Stale-entry "is this still true?" agent** — periodic re-verification pass (M6 candidate).
 - Multi-turn retrieval: clarifying questions when the query is ambiguous, instead of guessing.
 - Personalized retrieval: user's recent queries weight the search slightly toward their working context.
