@@ -147,6 +147,8 @@ Naming: title the child PR with `(stacked on feat/A)` so reviewers know not to m
 
 **Limit stack depth to 2.** Three-deep stacks (`C` on `B` on `A`) almost always mean the work should have been split differently — pause and re-scope rather than stacking deeper.
 
+**Child-retarget-before-merge sub-rule (codified 2026-05-21).** When the stacked parent (`feat/A`) merges to `dev`, retarget the child (`feat/B`) via `gh pr edit <B> --base dev` AND rebase `feat/B` onto `origin/dev` BEFORE the child's merge UI is allowed to fire. If the child merges while its `baseRefName` still points at the (now-deleted) parent branch, GitHub merges the child into the *stale parent ref* — the child's diff never reaches `dev`, and recovery requires opening a fresh child-to-dev PR plus a follow-up `dev → main` release PR. **Trigger:** parent's merge notification (PR state → MERGED, branch deleted). Claude's handoff after a parent merge MUST surface the retarget command line as the first user-facing action, before any "ready to merge child" framing. **Origin:** 2026-05-21 M3 item 2 session — #158 merged to `dev`; #159 (stacked) was merged into the parent branch's now-stale state instead of being retargeted first; #159's content ended up orphaned and required #160 (re-target) + #161 (release for #158-only) + #162 (release for #160) — three PRs where one combined release would have sufficed.
+
 (Ported 2026-05-15 from TradeBot's `WORKFLOW.md`; adapted to PriorityKB's `dev` integration branch in place of TradeBot's `develop`.)
 
 ---
