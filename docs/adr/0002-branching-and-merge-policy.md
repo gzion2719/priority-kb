@@ -42,6 +42,20 @@ Two-pass rollout to avoid the chicken-and-egg of required-checks referencing wor
 - **Pass 1** (apply on day one, both `main` and `dev`): `allow_force_pushes: false`, `allow_deletions: false`, `required_pull_request_reviews: null` (no required approvals — would self-lock a solo repo since GitHub blocks self-approval), `required_linear_history: false`, `enforce_admins: false`, `restrictions: null`.
 - **Pass 2** (apply after the first ci-hardening PR merges green, both `main` and `dev`): add `required_status_checks` with contexts `Node — lint, format, types, tests`, `gitleaks`, `Validate PR title`. CodeQL and `npm audit` are advisory — NOT in required-checks (they're path-filtered or non-blocking by design).
 
+### Required-checks `strict` policy (amended 2026-05-20)
+
+`required_status_checks.strict` is **`false`** on both `main` and `dev` — i.e., a PR does NOT need to be merged against the tip of the target branch before merging; it just needs the required checks (Node CI, gitleaks, PR-title) green.
+
+**Why:** the project's merge-commit-on-all-PRs policy (above) means every `dev → main` release leaves a merge commit on `main` that isn't on `dev`. With `strict: true`, the *next* release PR would surface as "branch out-of-date" and require an "Update branch" click to merge `main`'s merge commit back into `dev` before each release. Per-release ceremony with zero protective value in a single-developer repo: the up-to-date requirement defends against multi-developer races that don't exist here, and the required-checks gate (CI green, gitleaks clean, PR title valid) already enforces "this diff was tested at this commit."
+
+**When to revisit:** if a second admin joins the repo and concurrent PRs against `dev` become a real possibility, flip `strict` back to `true` on `main` (race-free guarantee on the deployable line). `dev`'s `strict` can stay `false` indefinitely — integration races on `dev` are caught by the per-PR CI signal, not by linearization.
+
+Applied via:
+```
+gh api -X PATCH repos/<owner>/<repo>/branches/main/protection/required_status_checks -F strict=false
+```
+(Initial `gh api -X PUT .../protection` payload from ADR-0011's branch-protection execution did not pin `strict`; GitHub's default at protection-application time was `true`, which is what produced the friction this amendment removes.)
+
 ### What this is NOT
 
 - **Not GitFlow.** No `release/*` branches, no `support/*` branches. The `dev → main` promotion PR plays the role of GitFlow's release branch without the long-lived overhead.
