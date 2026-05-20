@@ -20,6 +20,7 @@
 //     down" so users know what they're getting.
 //   - #13 Kramer brand: chat-banner classes from styles/kramer-brand.css.
 
+import Link from "next/link";
 import { useCallback, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import { parseSseStream, SseStreamError } from "@/lib/sse-parse";
@@ -249,33 +250,51 @@ export default function QueryPage(): React.ReactNode {
                     style={{
                       border: "1px solid #555",
                       borderRadius: "0.375rem",
-                      padding: "0.5rem 0.75rem",
                     }}
                   >
-                    <div
-                      style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}
+                    {/*
+                      Whole card is the click target — M3 item 5. The
+                      detail page enforces iron-rule #6 sensitivity
+                      independently (lib/entries.ts), so a card surfaced
+                      to a user-role requester may still 404 on click if
+                      the candidate set ever races ahead of the role
+                      mapping (shouldn't, but the page is the gate).
+                    */}
+                    <Link
+                      href={`/entries/${c.entry_id}`}
+                      data-testid="citation-link"
+                      style={{
+                        display: "block",
+                        padding: "0.5rem 0.75rem",
+                        color: "inherit",
+                        textDecoration: "none",
+                      }}
                     >
-                      <strong>{c.title}</strong>
-                      <span
-                        style={{
-                          fontSize: "0.75rem",
-                          padding: "0.125rem 0.375rem",
-                          borderRadius: "999px",
-                          border: "1px solid #555",
-                        }}
+                      <div
+                        style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}
                       >
-                        {c.sensitivity}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: "0.75rem", color: "#aaa", marginTop: "0.25rem" }}>
-                      <span>category: {c.category}</span>
-                      <span style={{ marginLeft: "0.75rem" }}>
-                        verified: {c.last_verified_at.slice(0, 10)}
-                      </span>
-                      <span style={{ marginLeft: "0.75rem", fontFamily: "monospace" }}>
-                        {c.entry_id.slice(0, 8)}…
-                      </span>
-                    </div>
+                        <strong>{c.title}</strong>
+                        <span
+                          style={{
+                            fontSize: "0.75rem",
+                            padding: "0.125rem 0.375rem",
+                            borderRadius: "999px",
+                            border: "1px solid #555",
+                          }}
+                        >
+                          {c.sensitivity}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: "0.75rem", color: "#aaa", marginTop: "0.25rem" }}>
+                        <span>category: {c.category}</span>
+                        <span style={{ marginLeft: "0.75rem" }}>
+                          verified: {c.last_verified_at.slice(0, 10)}
+                        </span>
+                        <span style={{ marginLeft: "0.75rem", fontFamily: "monospace" }}>
+                          {c.entry_id.slice(0, 8)}…
+                        </span>
+                      </div>
+                    </Link>
                   </li>
                 ))}
               </ul>

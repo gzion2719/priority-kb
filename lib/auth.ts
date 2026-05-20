@@ -53,7 +53,33 @@ export type RouteHandler<C = unknown> = (
 
 // Lowercase; `Headers.get()` is case-insensitive on lookup, so this
 // matches `X-Stub-User-Role` and any other casing on the wire.
-const HEADER_NAME = "x-stub-user-role";
+export const STUB_ROLE_HEADER = "x-stub-user-role";
+
+/**
+ * Canonical role parser. Single source of truth for stub-auth header
+ * interpretation — both the route-handler wrappers below and the
+ * server-component entry-detail page at app/entries/[id]/page.tsx
+ * call this, so a future M5 swap to Entra ID only edits one function.
+ *
+ * Returns the recognized `Role` for exact-match `"admin"` or `"user"`,
+ * else `null`. Anything-else collapses to `null` indistinguishably:
+ *   - missing header (`raw === null`)
+ *   - empty string
+ *   - wrong case (`"Admin"`)
+ *   - unknown roles (`"superuser"`)
+ *   - comma-joined duplicate headers (`"admin, user"` from
+ *     Headers.append spec)
+ *
+ * The wrappers below add their own 401-vs-403 semantics on top of
+ * this null/admin/user trichotomy; the page uses `null` directly to
+ * collapse all auth-failure cases into the same `notFound()` shape
+ * (existence-leak defense for iron rule #6 — see lib/entries.ts).
+ */
+export function resolveRoleFromHeader(raw: string | null): Role | null {
+  if (raw === "admin") return "admin";
+  if (raw === "user") return "user";
+  return null;
+}
 
 const UNAUTHORIZED_HEADERS = {
   "content-type": "application/json",
@@ -94,9 +120,9 @@ function forbidden(): Response {
  */
 export function withAdmin<C>(handler: RouteHandler<C>): RouteHandler<C> {
   return (req, context) => {
-    const raw = req.headers.get(HEADER_NAME);
-    if (raw === "admin") return handler(req, context);
-    if (raw === "user") return forbidden();
+    const role = resolveRoleFromHeader(req.headers.get(STUB_ROLE_HEADER));
+    if (role === "admin") return handler(req, context);
+    if (role === "user") return forbidden();
     return unauthorized();
   };
 }
@@ -137,10 +163,9 @@ export type AuthenticatedRouteHandler<C = unknown> = (
  */
 export function withUserOrAdmin<C>(handler: AuthenticatedRouteHandler<C>): RouteHandler<C> {
   return (req, context) => {
-    const raw = req.headers.get(HEADER_NAME);
-    if (raw === "admin") return handler(req, context, "admin");
-    if (raw === "user") return handler(req, context, "user");
-    return unauthorized();
+    const role = resolveRoleFromHeader(req.headers.get(STUB_ROLE_HEADER));
+    if (role === null) return unauthorized();
+    return handler(req, context, role);
   };
 }
 
