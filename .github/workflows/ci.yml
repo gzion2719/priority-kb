@@ -69,67 +69,13 @@ jobs:
       - name: npm audit (advisory)
         run: npm audit --audit-level=high || true
 
-  # Python lane — activated when M2b adds the FastAPI worker under api/.
-  # Until api/ exists, this job is a no-op skip.
-  python:
-    name: Python — ruff, black, mypy, pytest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Check for Python project
-        id: detect
-        run: |
-          if [ -d "api" ] && [ -f "pyproject.toml" ] && grep -q '"fastapi"' pyproject.toml; then
-            echo "active=true" >> $GITHUB_OUTPUT
-          else
-            echo "active=false" >> $GITHUB_OUTPUT
-            echo "Python lane not yet active (M2b will activate)."
-          fi
-
-      - name: Setup Python
-        if: steps.detect.outputs.active == 'true'
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install
-        if: steps.detect.outputs.active == 'true'
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Ruff
-        if: steps.detect.outputs.active == 'true'
-        run: ruff check api/
-
-      - name: Black
-        if: steps.detect.outputs.active == 'true'
-        run: black --check api/
-
-      - name: Mypy
-        if: steps.detect.outputs.active == 'true'
-        run: mypy --strict api/
-
-      - name: Pytest
-        if: steps.detect.outputs.active == 'true'
-        run: pytest api/ --cov
-
-  evals:
-    name: Retrieval evals (M3+)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Check for eval set
-        id: detect
-        run: |
-          if [ -f "evals/golden_set.yaml" ] && grep -q "expected_source_ids: \[.*[a-zA-Z0-9]" evals/golden_set.yaml; then
-            echo "active=true" >> $GITHUB_OUTPUT
-          else
-            echo "active=false" >> $GITHUB_OUTPUT
-            echo "Eval set not yet populated (M3 will activate)."
-          fi
-
-      # Eval runner wiring lands in M3 — keeps the job structure visible from day one.
+  # Python lane removed 2026-05-21 per ADR-0011 BACKLOG cost-trim entry.
+  # Reintroduce when ROADMAP M2b line "Python FastAPI worker scaffolded at api/;
+  # pyproject.toml activated" lands. The prior block ran an unconditional
+  # checkout + detect step that consumed ~1 billed minute per CI run despite
+  # all real work being gated off by steps.detect.outputs.active.
+  #
+  # Eval lane removed 2026-05-21 per the same entry. Reintroduce when ROADMAP M3
+  # line "Eval runner (npm run eval or pytest evals/) reports recall@5, citation
+  # precision; CI runs it on PR" lands and evals/golden_set.yaml is populated
+  # past the placeholder skeleton.
