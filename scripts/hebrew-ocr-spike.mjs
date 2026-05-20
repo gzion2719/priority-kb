@@ -20,9 +20,25 @@
 //                            NO text preview column — Priority screenshots have customer data; the
 //                            summary is git-trackable signal-only.
 
-import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
+import { readFile, readdir, writeFile, mkdir, stat } from "node:fs/promises";
 import { join, basename, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// F0 free tier rate limit is ~5 calls/min; pace at 12s between calls to stay under it.
+// Override via AZURE_DOCINTEL_SLEEP_MS for paid-tier runs (set to 0 to disable).
+const INTER_CALL_SLEEP_MS = process.env.AZURE_DOCINTEL_SLEEP_MS
+  ? Number.parseInt(process.env.AZURE_DOCINTEL_SLEEP_MS, 10)
+  : 12_000;
+
+async function fileExists(path) {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, "..");
@@ -172,11 +188,30 @@ async function main() {
     const stem = basename(file, ext);
     for (const model of MODELS) {
       const modelTag = model.replace(/^prebuilt-/, "");
+      const rawPath = join(OUTPUT_DIR, `${stem}.${modelTag}.raw.json`);
+      const txtPath = join(OUTPUT_DIR, `${stem}.${modelTag}.txt`);
+
+      // Skip-if-exists: re-runs after a rate-limit failure pick up where they
+      // left off without re-spending tokens on already-completed (image × model)
+      // calls. The cached .raw.json is the source of truth; we re-summarize it
+      // so the _summary.md row is consistent on every run.
+      if (await fileExists(rawPath)) {
+        try {
+          const cached = JSON.parse(await readFile(rawPath, "utf8"));
+          const row = summarize(cached, file, model);
+          rows.push(row);
+          console.log(
+            `${file} × ${model}... cached — ${row.chars} chars, ${row.lineCount} lines, mean word confidence ${row.meanWordConfidence.toFixed(3)}`,
+          );
+          continue;
+        } catch {
+          // Stale or malformed cache; fall through and re-run.
+        }
+      }
+
       process.stdout.write(`${file} × ${model}... `);
       try {
         const result = await analyzeOne(endpoint, key, model, imagePath, contentType);
-        const rawPath = join(OUTPUT_DIR, `${stem}.${modelTag}.raw.json`);
-        const txtPath = join(OUTPUT_DIR, `${stem}.${modelTag}.txt`);
         await writeFile(rawPath, JSON.stringify(result, null, 2), "utf8");
         await writeFile(txtPath, (result.analyzeResult?.content ?? "") + "\n", "utf8");
         const row = summarize(result, file, model);
@@ -197,6 +232,10 @@ async function main() {
           pageCount: 0,
           error: err.message.split("\n")[0].replace(/\|/g, "\\|"),
         });
+      }
+
+      if (INTER_CALL_SLEEP_MS > 0) {
+        await sleep(INTER_CALL_SLEEP_MS);
       }
     }
   }
