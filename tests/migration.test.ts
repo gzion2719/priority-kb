@@ -174,4 +174,178 @@ describeIfDb("baseline migration (0000) + updated_at triggers (0001)", () => {
       client.release();
     }
   });
+
+  // ─── ADR-0013 migrations 0002 + 0003: tsv column + trigger + GIN ───────────
+
+  it("entries.tsv exists as a NOT NULL tsvector column with default ''::tsvector", async () => {
+    const res = await pool.query<{
+      column_name: string;
+      data_type: string;
+      is_nullable: string;
+      column_default: string | null;
+    }>(
+      `SELECT column_name, data_type, is_nullable, column_default
+       FROM information_schema.columns
+       WHERE table_name = 'entries' AND column_name = 'tsv'`,
+    );
+    expect(res.rows).toHaveLength(1);
+    expect(res.rows[0].data_type).toBe("tsvector");
+    expect(res.rows[0].is_nullable).toBe("NO");
+    expect(res.rows[0].column_default).toMatch(/tsvector/);
+  });
+
+  it("entries.tsv has a GIN index entries_tsv_gin_idx", async () => {
+    const res = await pool.query<{ indexname: string; indexdef: string }>(
+      `SELECT indexname, indexdef FROM pg_indexes
+       WHERE tablename = 'entries' AND indexname = 'entries_tsv_gin_idx'`,
+    );
+    expect(res.rows).toHaveLength(1);
+    expect(res.rows[0].indexdef).toMatch(/USING gin/i);
+    expect(res.rows[0].indexdef).toMatch(/\btsv\b/);
+  });
+
+  it("entries_tsv_refresh_trigger is BEFORE INSERT OR UPDATE OF (title, tags, body) only", async () => {
+    const res = await pool.query<{ event_manipulation: string; action_timing: string }>(
+      `SELECT event_manipulation, action_timing
+       FROM information_schema.triggers
+       WHERE event_object_table = 'entries'
+         AND trigger_name = 'entries_tsv_refresh_trigger'
+       ORDER BY event_manipulation`,
+    );
+    // Two rows: INSERT + UPDATE (column-scoped UPDATE shows up once in this view).
+    const ops = res.rows.map((r) => `${r.action_timing}/${r.event_manipulation}`);
+    expect(ops).toContain("BEFORE/INSERT");
+    expect(ops).toContain("BEFORE/UPDATE");
+  });
+
+  it("trigger populates tsv on INSERT with the expected lexemes (negative-assertion: not empty)", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<{ tsv: string }>(
+        `INSERT INTO entries (title, category, tags, body, source_pointer, last_verified_at, sensitivity)
+         VALUES ('Invoice workflow', 'cat', ARRAY['inv','billing']::text[], 'invoice approval body text',
+                 'src://x', now(), 'public')
+         RETURNING tsv::text`,
+      );
+      expect(rows).toHaveLength(1);
+      // Without the trigger, tsv would be the DEFAULT ''::tsvector → empty string.
+      expect(rows[0].tsv).not.toBe("");
+      // Specific lexemes from title/tags/body must be present (proves all three
+      // sources feed the trigger — single-source bugs would pass a "not empty"
+      // check but fail this).
+      expect(rows[0].tsv).toMatch(/'invoice'/);
+      expect(rows[0].tsv).toMatch(/'workflow'/);
+      expect(rows[0].tsv).toMatch(/'billing'/);
+      expect(rows[0].tsv).toMatch(/'approval'/);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
+
+  it("UPDATE of last_verified_at does NOT invoke entries_tsv_refresh; UPDATE of title DOES (EXPLAIN ANALYZE Triggers)", async () => {
+    // The byte-identical-tsv assertion alone is tautological: under a
+    // hypothetical "BEFORE UPDATE" (no column list) trigger, the refresh
+    // function would still re-fire and re-compute the same tsv (the function
+    // is deterministic on title/tags/body), producing identical bytes. To
+    // truly distinguish "trigger did not fire" from "trigger fired and
+    // recomputed identically", we ask Postgres directly: EXPLAIN ANALYZE's
+    // JSON output lists which triggers executed under "Triggers".
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: inserted } = await client.query<{ id: string }>(
+        `INSERT INTO entries (title, category, tags, body, source_pointer, last_verified_at, sensitivity)
+         VALUES ('Original title', 'cat', '{}'::text[], 'original body',
+                 'src://x', now(), 'public')
+         RETURNING id`,
+      );
+      const id = inserted[0].id;
+
+      type TriggerEntry = { "Trigger Name": string };
+      type PlanRoot = { Triggers?: TriggerEntry[] };
+
+      // Update an unrelated column → refresh trigger MUST NOT appear in Triggers.
+      const lvaPlan = await client.query<{ "QUERY PLAN": PlanRoot[] }>(
+        `EXPLAIN (ANALYZE, FORMAT JSON) UPDATE entries SET last_verified_at = now() + interval '1 day' WHERE id = $1`,
+        [id],
+      );
+      const lvaTriggers = lvaPlan.rows[0]["QUERY PLAN"][0]?.Triggers ?? [];
+      const lvaNames = lvaTriggers.map((t) => t["Trigger Name"]);
+      expect(lvaNames).not.toContain("entries_tsv_refresh_trigger");
+
+      // Update title → refresh trigger MUST appear.
+      const titlePlan = await client.query<{ "QUERY PLAN": PlanRoot[] }>(
+        `EXPLAIN (ANALYZE, FORMAT JSON) UPDATE entries SET title = 'Completely different title' WHERE id = $1`,
+        [id],
+      );
+      const titleTriggers = titlePlan.rows[0]["QUERY PLAN"][0]?.Triggers ?? [];
+      const titleNames = titleTriggers.map((t) => t["Trigger Name"]);
+      expect(titleNames).toContain("entries_tsv_refresh_trigger");
+
+      // Sanity: tsv content reflects the new title.
+      const after = await client.query<{ tsv: string }>(
+        `SELECT tsv::text AS tsv FROM entries WHERE id = $1`,
+        [id],
+      );
+      expect(after.rows[0].tsv).toMatch(/'differ/);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
+
+  it("direct UPDATE of tsv is rejected by entries_tsv_no_direct_write guard trigger", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO entries (title, category, tags, body, source_pointer, last_verified_at, sensitivity)
+         VALUES ('Guarded', 'cat', '{}'::text[], 'body', 'src://x', now(), 'public')
+         RETURNING id`,
+      );
+      const id = rows[0].id;
+      await expect(
+        client.query(`UPDATE entries SET tsv = ''::tsvector WHERE id = $1`, [id]),
+      ).rejects.toThrow(/direct UPDATE of entries\.tsv is forbidden/);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
+
+  it("unaccent collapses Hebrew niqqud at index time", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<{ tsv: string }>(
+        `INSERT INTO entries (title, category, tags, body, source_pointer, last_verified_at, sensitivity)
+         VALUES ('שָׁלוֹם', 'cat', '{}'::text[], '', 'src://x', now(), 'public')
+         RETURNING tsv::text`,
+      );
+      // Niqqud (combining marks) stripped → 'שלום' is the indexed lexeme.
+      expect(rows[0].tsv).toMatch(/'שלום'/);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
+
+  it("unaccent collapses Latin diacritics at index time", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<{ tsv: string }>(
+        `INSERT INTO entries (title, category, tags, body, source_pointer, last_verified_at, sensitivity)
+         VALUES ('Café notes', 'cat', '{}'::text[], '', 'src://x', now(), 'public')
+         RETURNING tsv::text`,
+      );
+      expect(rows[0].tsv).toMatch(/'cafe'/);
+      expect(rows[0].tsv).not.toMatch(/'café'/);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
 });
