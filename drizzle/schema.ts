@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  customType,
   foreignKey,
   index,
   integer,
@@ -12,6 +13,14 @@ import {
   uuid,
   vector,
 } from "drizzle-orm/pg-core";
+
+// `tsvector` is not a built-in Drizzle column type. customType lets us reference
+// it in the schema for drift-detection + query-builder use; the column itself is
+// maintained by a trigger declared in drizzle/migrations/0002_unaccent_tsv_trigger.sql
+// per ADR-0013 §2.1.
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType: () => "tsvector",
+});
 
 export const sensitivityEnum = ["public", "internal", "restricted"] as const;
 export type Sensitivity = (typeof sensitivityEnum)[number];
@@ -32,6 +41,12 @@ export const entries = pgTable(
     sensitivity: text("sensitivity", { enum: sensitivityEnum }).notNull(),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    // Trigger-maintained hybrid keyword-lane index (ADR-0013 §2.1). Computed in
+    // Postgres from to_tsvector('simple', unaccent(title || tags || body));
+    // direct writes are blocked by entries_tsv_no_direct_write_trigger.
+    tsv: tsvector("tsv")
+      .notNull()
+      .default(sql`''::tsvector`),
   },
   (t) => ({
     sensitivityCheck: check(
@@ -39,6 +54,7 @@ export const entries = pgTable(
       sql`${t.sensitivity} IN ('public', 'internal', 'restricted')`,
     ),
     idSensitivityUnique: unique("entries_id_sensitivity_uq").on(t.id, t.sensitivity),
+    tsvGin: index("entries_tsv_gin_idx").using("gin", t.tsv),
   }),
 );
 

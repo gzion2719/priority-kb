@@ -80,12 +80,29 @@ CREATE TRIGGER entries_tsv_refresh_trigger
   FOR EACH ROW EXECUTE FUNCTION entries_tsv_refresh();
 
 -- Backfill existing rows so DEFAULT '' is replaced by the real tsvector.
-UPDATE entries SET tsv = tsv WHERE TRUE;
+-- Errata 2026-05-21 — see note at end of §2.1: the original snippet was
+-- `UPDATE entries SET tsv = tsv WHERE TRUE;`, which does NOT fire the
+-- trigger above (trigger is scoped to `UPDATE OF title, tags, body`, not
+-- `tsv`). The canonical Postgres idiom is to update a watched column to
+-- itself, which fires the trigger and recomputes `tsv`:
+UPDATE entries SET title = title WHERE TRUE;
 
 CREATE INDEX entries_tsv_gin_idx ON entries USING gin (tsv);
 ```
 
 Note: `array_to_string(NEW.tags,' ')` doesn't need `coalesce` — the `tags` column has `NOT NULL DEFAULT '{}'::text[]` (see `drizzle/schema.ts:25-28`), and `array_to_string` on an empty array returns `''`, not NULL.
+
+**Errata 2026-05-21** — Four corrections found during M3 item 4 implementation review + gate run (see CHATLOG 2026-05-21 entry); applied in-place above and listed here for traceability:
+
+1. **Backfill snippet (`UPDATE entries SET tsv = tsv WHERE TRUE;`)** does not fire the trigger. The trigger is declared `BEFORE INSERT OR UPDATE OF title, tags, body` — column `tsv` is not in that list, so writing to it bypasses the recompute path. The canonical Postgres backfill idiom for column-list triggers is to write a watched column to itself: `UPDATE entries SET title = title WHERE TRUE;`. Applied above.
+2. **`CREATE EXTENSION IF NOT EXISTS unaccent;`** belongs in `db/init.sql`, not in the Drizzle migration, per ADR-0008 §10 (extension installs run as the bootstrap superuser; Drizzle migrations run as the least-privilege app user — a future role split would make a migration-level `CREATE EXTENSION` fail). Migration 0002 assumes the extension is pre-installed.
+3. **`CREATE INDEX CONCURRENTLY`** is unsupported by `drizzle-kit migrate` (single-transaction per file, see ADR-0008 §12). The implementation ships plain `CREATE INDEX` in migration 0003 — safe because the M3-era corpus is empty pre-M5. The M5+ obligation to ship a `CREATE INDEX CONCURRENTLY` re-creation alongside the production-data backfill is added to §"Deferred (BACKLOG)" below.
+
+Implementation also adds a defensive `BEFORE UPDATE OF tsv` guard trigger that raises an exception on any direct `UPDATE entries SET tsv = ...` (admin SQL, future migration, etc.) — defense-in-depth against silently storing a stale tsvector that diverges from the title/tags/body that should have generated it.
+
+4. **`unaccent()` does NOT strip Hebrew niqqud.** §2.2 claimed `unaccent()` collapses `שָׁלוֹם` and `שלום` to the same indexed token. Empirically refuted on `pgvector/pgvector:pg16` (the project's pinned image): `SELECT unaccent('שָׁלוֹם')` returns `שָׁלוֹם` unchanged — Postgres's default `unaccent.rules` ships Latin-only mappings, no Hebrew-character coverage. Fix: compose `regexp_replace(text, '[֑-ׇ]', '', 'g')` (Unicode U+0591..U+05C7 — Hebrew vowel points + cantillation marks) BEFORE `unaccent` at both index and query time. Trigger function in migration 0002 and `keywordCandidates` SQL in `lib/retrieval-keyword.ts` both apply the composition `to_tsvector('simple', unaccent(regexp_replace(text, '[֑-ׇ]', '', 'g')))`. The Latin-diacritic claim (`café` ↔ `cafe`) remains correct — only the Hebrew claim was wrong.
+
+The Hebrew niqqud miss is the kind of factual error that the verify-before-implementing-CR-claim sub-rule (`SESSION_PROTOCOL.md` Step 7b) catches when applied to CR findings; this same discipline now extends symmetrically to ADR claims about external behavior — verify with a `SELECT` before relying on an unverified spec statement.
 
 Drizzle declaration mirrors the HNSW pattern from `drizzle/schema.ts:109-112`:
 
@@ -102,7 +119,7 @@ tsvGin: index("entries_tsv_gin_idx").using("gin", t.tsv),
 
 **Text search config:** `simple`. Postgres has no built-in Hebrew text-search configuration. `simple` tokenizes by word boundaries without stemming or stopword removal, which is the correct floor for a language without a packaged stemmer — better to under-collapse (`לסגור` and `סגירה` remain distinct tokens) than to apply a wrong-language stemmer.
 
-**Accent normalization:** `unaccent()` strips Hebrew niqqud (vowel marks) and Latin diacritics, so `שָׁלוֹם` and `שלום` collapse to the same indexed token, and `cafe` matches `café`. Without `unaccent`, niqqud-vs-no-niqqud is two distinct words in `simple`, and source-doc-with-niqqud-vs-user-query-without-niqqud silently fails to match.
+**Accent normalization:** the pipeline applies (a) `regexp_replace(text, '[֑-ׇ]', '', 'g')` to strip Hebrew niqqud (U+0591..U+05C7 — vowel points + cantillation marks), then (b) `unaccent()` to strip Latin diacritics. Result: `שָׁלוֹם` and `שלום` collapse to the same indexed token, and `cafe` matches `café`. Without the regex strip step, niqqud-vs-no-niqqud is two distinct words in `simple` and source-doc-with-niqqud-vs-user-query-without-niqqud silently fails to match — Postgres's default `unaccent.rules` only covers Latin characters, not Hebrew (see §2.1 Errata 2026-05-21 item 4).
 
 **Query side:** `websearch_to_tsquery('simple', unaccent($1))`. `websearch_to_tsquery` tolerates quotes (`"phrase match"`), `OR`, and `-term` (negation) in user input without throwing on malformed syntax — `plainto_tsquery` would throw on edge characters. Empty / whitespace-only / all-punctuation input is handled at the route layer (see §M5 in §3, below) with a 400 response, not silently routed to the keyword lane.
 
@@ -316,6 +333,7 @@ CI must install the `unaccent` extension in the test database (the migration doe
 - **Per-lane weighting beyond symmetric RRF**. Trigger: eval surfaces systematic asymmetry where one lane consistently outranks the other on the golden set.
 - **Composite `(sensitivity, tsv)` partial index or partial GIN indexes per sensitivity tier**. Trigger: eval or production profiling shows the full GIN scan is slow under tight sensitivity filtering.
 - **IMMUTABLE `unaccent` wrapper** to migrate from trigger-maintained to GENERATED-STORED. Trigger: M5+ profiling shows trigger overhead on bulk re-ingest is real.
+- **`CREATE INDEX CONCURRENTLY` re-creation for the GIN index.** M3 implementation (migration 0003) ships plain `CREATE INDEX` because `drizzle-kit migrate` wraps each file in a transaction and the corpus is empty pre-M5 (transactional `CREATE INDEX` is acceptable when no concurrent writes exist). Trigger: before the first production data backfill, drop + re-create the GIN index with `CONCURRENTLY` in a hand-applied DDL step outside the Drizzle migration runner, OR adopt a non-transactional migration mechanism (e.g., `node-pg-migrate` for select files, or a separate raw-`psql` deploy step). Recorded against ADR-0008 §12 transactional-wrap caveat.
 - **RRF `k` sweep**. Trigger: golden eval. The env knob is already in place.
 
 ---
