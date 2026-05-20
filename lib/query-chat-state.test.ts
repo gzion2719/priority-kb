@@ -1,0 +1,183 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  applyEvent,
+  initialQueryState,
+  markStreamError,
+  markUnavailable,
+  reset,
+  startStream,
+  type QueryCandidate,
+  type QueryEvent,
+  type QueryState,
+} from "@/lib/query-chat-state";
+
+const seedCandidate = (id: string, title: string): QueryCandidate => ({
+  entry_id: id,
+  title,
+  category: "howto",
+  sensitivity: "public",
+  last_verified_at: "2026-01-01T00:00:00Z",
+});
+
+describe("query-chat-state — initial state", () => {
+  it("starts idle with empty accumulators", () => {
+    expect(initialQueryState).toEqual({
+      status: "idle",
+      query: "",
+      candidates: [],
+      answer: "",
+      citations: [],
+    });
+  });
+});
+
+describe("startStream — records query and resets accumulators", () => {
+  it("transitions idle → streaming and pins the query", () => {
+    const next = startStream(initialQueryState, "what is FormStart");
+    expect(next.status).toBe("streaming");
+    expect(next.query).toBe("what is FormStart");
+    expect(next.candidates).toEqual([]);
+    expect(next.answer).toBe("");
+    expect(next.citations).toEqual([]);
+  });
+
+  it("resets stale answer/candidates when restarting on a done state", () => {
+    const stale: QueryState = {
+      status: "done",
+      query: "prev",
+      candidates: [seedCandidate("aaaaaaaa-0000-4000-8000-000000000001", "prev title")],
+      answer: "old answer",
+      citations: ["aaaaaaaa-0000-4000-8000-000000000001"],
+    };
+    const next = startStream(stale, "new query");
+    expect(next.status).toBe("streaming");
+    expect(next.candidates).toEqual([]);
+    expect(next.answer).toBe("");
+    expect(next.citations).toEqual([]);
+  });
+});
+
+describe("applyEvent — full happy-path event sequence", () => {
+  it("candidates → answer_delta (×2) → done lands in done with concatenated answer", () => {
+    let s = startStream(initialQueryState, "q");
+
+    s = applyEvent(s, {
+      kind: "candidates",
+      entries: [
+        seedCandidate("aaaaaaaa-0000-4000-8000-000000000001", "one"),
+        seedCandidate("bbbbbbbb-0000-4000-8000-000000000002", "two"),
+      ],
+    });
+    expect(s.candidates).toHaveLength(2);
+    expect(s.status).toBe("streaming"); // candidates is not terminal
+
+    s = applyEvent(s, { kind: "answer_delta", text: "Hello " });
+    s = applyEvent(s, { kind: "answer_delta", text: "world." });
+    expect(s.answer).toBe("Hello world.");
+    expect(s.status).toBe("streaming");
+
+    s = applyEvent(s, {
+      kind: "done",
+      citation_ids: ["aaaaaaaa-0000-4000-8000-000000000001"],
+    });
+    expect(s.status).toBe("done");
+    expect(s.citations).toEqual(["aaaaaaaa-0000-4000-8000-000000000001"]);
+    // Candidates and answer preserved at terminal:
+    expect(s.candidates).toHaveLength(2);
+    expect(s.answer).toBe("Hello world.");
+  });
+});
+
+describe("applyEvent — terminal no_content path", () => {
+  it("no_content lands without candidates and without answer", () => {
+    let s = startStream(initialQueryState, "q with no match");
+    s = applyEvent(s, { kind: "no_content" });
+    expect(s.status).toBe("no_content");
+    expect(s.candidates).toEqual([]);
+    expect(s.answer).toBe("");
+    expect(s.citations).toEqual([]);
+    expect(s.error).toBeUndefined();
+  });
+});
+
+describe("applyEvent — terminal error event from server", () => {
+  it.each([
+    { code: "db" as const, expectedMatch: /Database error/i },
+    { code: "synth_unavailable" as const, expectedMatch: /unavailable/i },
+    { code: "internal" as const, expectedMatch: /something went wrong/i },
+  ])("error code=$code sets status=error with a coded message", ({ code, expectedMatch }) => {
+    let s = startStream(initialQueryState, "q");
+    s = applyEvent(s, { kind: "error", code });
+    expect(s.status).toBe("error");
+    expect(s.error).toMatch(expectedMatch);
+  });
+
+  it("emits DISTINCT error messages per code (negative-assertion: not a generic shared string)", () => {
+    // A regression that returned the same message for all codes would
+    // hide which path failed in UI logs / screenshots. This test pins
+    // distinguishability per ADR-0005 log-event-schema spirit.
+    const s = startStream(initialQueryState, "q");
+    const dbMsg = applyEvent(s, { kind: "error", code: "db" }).error;
+    const synthMsg = applyEvent(s, { kind: "error", code: "synth_unavailable" }).error;
+    const internalMsg = applyEvent(s, { kind: "error", code: "internal" }).error;
+    expect(new Set([dbMsg, synthMsg, internalMsg]).size).toBe(3);
+  });
+});
+
+describe("markUnavailable / markStreamError — client-side terminal transitions", () => {
+  it("markUnavailable transitions to unavailable without touching answer/candidates", () => {
+    let s = startStream(initialQueryState, "q");
+    s = applyEvent(s, { kind: "candidates", entries: [seedCandidate("aa", "t")] });
+    s = applyEvent(s, { kind: "answer_delta", text: "partial" });
+    s = markUnavailable(s);
+    expect(s.status).toBe("unavailable");
+    // Preserves pre-failure context so the UI can still show what
+    // came through before the 503 was observed.
+    expect(s.candidates).toHaveLength(1);
+    expect(s.answer).toBe("partial");
+  });
+
+  it("markStreamError sets status=error with the provided message (transport-level)", () => {
+    let s = startStream(initialQueryState, "q");
+    s = markStreamError(s, "Network failed: ECONNRESET");
+    expect(s.status).toBe("error");
+    expect(s.error).toBe("Network failed: ECONNRESET");
+  });
+});
+
+describe("reset — returns to initial state", () => {
+  it("clears all fields back to initial", () => {
+    const fresh = reset();
+    expect(fresh).toEqual(initialQueryState);
+  });
+});
+
+describe("applyEvent — pure / deterministic", () => {
+  it("does not mutate input state", () => {
+    const before: QueryState = {
+      ...initialQueryState,
+      status: "streaming",
+      query: "q",
+      answer: "a",
+    };
+    const snapshot = JSON.stringify(before);
+    applyEvent(before, { kind: "answer_delta", text: "b" });
+    expect(JSON.stringify(before)).toBe(snapshot);
+  });
+
+  it("forward-compatible: unknown event types return state UNCHANGED (no undefined leak)", () => {
+    // Without the default branch, an unknown event would fall through
+    // the switch and return undefined — feeding setState(undefined) into
+    // React. The default-returns-state pattern is the runtime safety
+    // net; this test pins it. Distinguishes from "throws on unknown"
+    // (would crash the page) and from "returns undefined" (would crash
+    // the next render). Both regressions detected.
+    const s = startStream(initialQueryState, "q");
+    const snapshot = JSON.stringify(s);
+    const bogus = { kind: "future_unknown" } as unknown as QueryEvent;
+    const next = applyEvent(s, bogus);
+    expect(next).toBeDefined();
+    expect(JSON.stringify(next)).toBe(snapshot);
+  });
+});
