@@ -1,7 +1,7 @@
 # ADR-0012 — Retrieval pipeline architecture (M3 item 3)
 
 **Status:** Accepted
-**Date:** 2026-05-21
+**Date:** 2026-05-20
 **Scope:** ROADMAP M3 item 3 — `query embedding → pgvector HNSW top-K → Voyage rerank-2 → top-N to Claude → answer with citation IDs`. ROADMAP M3 item 4 (hybrid `tsvector` keyword lane + score fusion) is **out of scope** and reserved for ADR-0013.
 
 ---
