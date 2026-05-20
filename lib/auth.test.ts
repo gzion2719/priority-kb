@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
-import { sensitivityAllowedForRole, withAdmin, withUserOrAdmin } from "@/lib/auth";
+import {
+  resolveRoleFromHeader,
+  sensitivityAllowedForRole,
+  withAdmin,
+  withUserOrAdmin,
+} from "@/lib/auth";
 import type { AuthenticatedRouteHandler, Role } from "@/lib/auth";
 
 function makeReq(headers?: Record<string, string>): NextRequest {
@@ -206,6 +211,47 @@ describe("withUserOrAdmin — admits both recognized roles, rejects everything e
 
     expect(userRes.status).toBe(200);
     expect(userRes.status).not.toBe(403);
+  });
+});
+
+describe("resolveRoleFromHeader — single canonical role parser", () => {
+  // The page surface (app/entries/[id]/page.tsx) consumes this directly
+  // and the route wrappers (withAdmin, withUserOrAdmin) defer to it.
+  // A regression that admitted "Admin" or "admin " here would silently
+  // weaken iron rule #6 on BOTH surfaces, so we pin the parser's
+  // semantics independently of the wrapper tests below.
+
+  it("admits exact 'admin'", () => {
+    expect(resolveRoleFromHeader("admin")).toBe("admin");
+  });
+
+  it("admits exact 'user'", () => {
+    expect(resolveRoleFromHeader("user")).toBe("user");
+  });
+
+  it.each([
+    { label: "null (header absent)", value: null },
+    { label: "empty string", value: "" },
+    { label: "wrong case 'Admin'", value: "Admin" },
+    { label: "wrong case 'USER'", value: "USER" },
+    { label: "unknown role 'superuser'", value: "superuser" },
+    { label: "unknown role 'guest'", value: "guest" },
+    { label: "comma-joined 'admin, user'", value: "admin, user" },
+    { label: "padded 'admin '", value: "admin " },
+    { label: "padded ' user'", value: " user" },
+    { label: "JSON-ish '\"admin\"'", value: '"admin"' },
+  ])("returns null for $label", ({ value }) => {
+    expect(resolveRoleFromHeader(value)).toBeNull();
+  });
+
+  it("never admits a value outside the Role union (negative-assertion)", () => {
+    // If a future regression added `if (raw.startsWith("admin")) return "admin"`,
+    // this case would pass when it shouldn't. The literal-comparison contract
+    // is what keeps the existence-leak defense in lib/entries.ts watertight.
+    const sneaky = ["admin\n", "admin\t", "admin/x", "admin;DROP TABLE", "ADMIN"];
+    for (const v of sneaky) {
+      expect(resolveRoleFromHeader(v)).toBeNull();
+    }
   });
 });
 
