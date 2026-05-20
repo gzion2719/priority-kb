@@ -36,6 +36,8 @@
 
 import type { NextRequest } from "next/server";
 
+import type { Sensitivity } from "@/drizzle/schema";
+
 export type Role = "admin" | "user";
 
 /**
@@ -97,4 +99,67 @@ export function withAdmin<C>(handler: RouteHandler<C>): RouteHandler<C> {
     if (raw === "user") return forbidden();
     return unauthorized();
   };
+}
+
+/**
+ * Route-handler signature with the authenticated `Role` injected as the
+ * third arg. Used by `withUserOrAdmin` so handlers can derive the
+ * `sensitivity_allowed[]` array from a known-good role without re-reading
+ * the header (and without risking a casing mismatch between auth and the
+ * downstream SQL).
+ */
+export type AuthenticatedRouteHandler<C = unknown> = (
+  req: NextRequest,
+  context: C,
+  role: Role,
+) => Promise<Response> | Response;
+
+/**
+ * Wraps an App Router route handler so it only runs for authenticated
+ * requests (either `admin` or `user`), injecting the resolved `Role` as
+ * the third handler arg. The retrieval surface uses this — admins and
+ * end users both query the KB; iron-rule #6 is enforced downstream by
+ * mapping `role → sensitivity_allowed[]` and compiling it into SQL
+ * WHERE (never as a post-hoc filter).
+ *
+ * Role-recognition semantics:
+ *   - `x-stub-user-role: admin` → handler runs with role="admin".
+ *   - `x-stub-user-role: user`  → handler runs with role="user".
+ *   - Anything else → 401 (same shape as `withAdmin`'s unauthorized
+ *                    path: WWW-Authenticate Bearer realm="stub").
+ *
+ * There is no 403 path here by construction: both recognized roles are
+ * authorized to query. Per-row authorization is the SQL's job.
+ *
+ * The wrapper does NOT log the resolved role — observability lives in
+ * the route's `finally{}` audit-row write, where the role is part of
+ * the audit payload.
+ */
+export function withUserOrAdmin<C>(handler: AuthenticatedRouteHandler<C>): RouteHandler<C> {
+  return (req, context) => {
+    const raw = req.headers.get(HEADER_NAME);
+    if (raw === "admin") return handler(req, context, "admin");
+    if (raw === "user") return handler(req, context, "user");
+    return unauthorized();
+  };
+}
+
+/**
+ * Maps an authenticated role to the iron-rule-#6 sensitivity allow-list.
+ *
+ *   - admin → ['public', 'internal', 'restricted']
+ *   - user  → ['public']
+ *
+ * The mapping is total over the `Role` union; any handler that calls this
+ * has already passed `withUserOrAdmin`'s gate, so there is no fallback
+ * branch and no `[]` default — an empty allow-list would silently degrade
+ * retrieval to "no content" instead of failing the auth layer.
+ */
+export function sensitivityAllowedForRole(role: Role): Sensitivity[] {
+  // Returns a fresh mutable array per call so downstream consumers (e.g.
+  // keywordCandidates(pool, query, sensitivity, limit)) can pass it as
+  // Sensitivity[] without a readonly cast. The mapping itself is total
+  // and immutable; we just avoid forcing readonly into the public type.
+  if (role === "admin") return ["public", "internal", "restricted"];
+  return ["public"];
 }

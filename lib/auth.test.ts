@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
-import { withAdmin } from "@/lib/auth";
+import { sensitivityAllowedForRole, withAdmin, withUserOrAdmin } from "@/lib/auth";
+import type { AuthenticatedRouteHandler, Role } from "@/lib/auth";
 
 function makeReq(headers?: Record<string, string>): NextRequest {
   // App Router's `NextRequest` is structurally a `Request` for our purposes
@@ -137,5 +138,104 @@ describe("withAdmin — context arg and error propagation", () => {
     });
 
     await expect(wrapped(makeReq({ "x-stub-user-role": "admin" }), {})).rejects.toThrow("boom");
+  });
+});
+
+describe("withUserOrAdmin — admits both recognized roles, rejects everything else", () => {
+  // Twin of the withAdmin paired-positive/negative discipline. The
+  // load-bearing distinguisher is the THIRD handler arg (role) — a broken
+  // impl that always passed role="admin" would let users see restricted
+  // entries via the downstream sensitivityAllowedForRole mapping. The
+  // tests check role propagation, not just status code.
+
+  it("invokes handler with role='admin' when x-stub-user-role: admin", async () => {
+    // Typed spy signature so mock.calls[0] is the 3-tuple (req, ctx, role)
+    // rather than vi.fn's default empty-tuple inference. Without this the
+    // role-propagation assertion below would fail to type-check.
+    const spy = vi.fn<AuthenticatedRouteHandler<unknown>>(
+      async () => new Response("ok", { status: 200 }),
+    );
+    const wrapped = withUserOrAdmin(spy);
+
+    const res = await wrapped(makeReq({ "x-stub-user-role": "admin" }), {});
+
+    expect(res.status).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[2]).toBe("admin");
+  });
+
+  it("invokes handler with role='user' when x-stub-user-role: user", async () => {
+    const spy = vi.fn<AuthenticatedRouteHandler<unknown>>(
+      async () => new Response("ok", { status: 200 }),
+    );
+    const wrapped = withUserOrAdmin(spy);
+
+    const res = await wrapped(makeReq({ "x-stub-user-role": "user" }), {});
+
+    expect(res.status).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[2]).toBe("user");
+  });
+
+  it.each([
+    { label: "missing header", build: () => makeReq() },
+    { label: "empty-string value", build: () => makeReq({ "x-stub-user-role": "" }) },
+    { label: "wrong case", build: () => makeReq({ "x-stub-user-role": "Admin" }) },
+    { label: "unknown role", build: () => makeReq({ "x-stub-user-role": "superuser" }) },
+    { label: "comma-joined", build: () => makeReq({ "x-stub-user-role": "admin, user" }) },
+  ])("returns 401 and does NOT invoke handler for $label", async ({ build }) => {
+    const spy = vi.fn(async () => new Response("ok"));
+    const wrapped = withUserOrAdmin(spy);
+
+    const res = await wrapped(build(), {});
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe('Bearer realm="stub"');
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("has no 403 path by construction (both recognized roles authorized)", async () => {
+    // Distinguishes from withAdmin: a hypothetical regression that copied
+    // withAdmin's "user → forbidden" branch into withUserOrAdmin would fail
+    // because user requests would return 403 instead of 200.
+    const spy = vi.fn(async () => new Response("ok", { status: 200 }));
+    const wrapped = withUserOrAdmin(spy);
+
+    const userRes = await wrapped(makeReq({ "x-stub-user-role": "user" }), {});
+
+    expect(userRes.status).toBe(200);
+    expect(userRes.status).not.toBe(403);
+  });
+});
+
+describe("sensitivityAllowedForRole — iron-rule #6 mapping is total over Role", () => {
+  it("admin → public, internal, restricted", () => {
+    expect(sensitivityAllowedForRole("admin")).toEqual(["public", "internal", "restricted"]);
+  });
+
+  it("user → public only", () => {
+    expect(sensitivityAllowedForRole("user")).toEqual(["public"]);
+  });
+
+  it("never returns an empty array for a valid Role", () => {
+    // Negative-assertion: a regression that returned [] would silently
+    // degrade retrieval to "no_content" via keywordCandidates' empty-
+    // allow-list short-circuit, instead of failing at the auth layer.
+    // Distinguishes from "user can't see restricted" — that's the SQL's
+    // job; this test pins the mapping's totality.
+    const roles: Role[] = ["admin", "user"];
+    for (const role of roles) {
+      expect(sensitivityAllowedForRole(role).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("user mapping omits 'internal' AND 'restricted' (negative-assertion)", () => {
+    // A regression that returned ['public', 'internal'] for user would
+    // expose internal entries via the keyword lane's SQL WHERE. The flip-
+    // positive companion lives at tests/retrieval-keyword.integration.test.ts.
+    const userAllowed = sensitivityAllowedForRole("user");
+    expect(userAllowed).not.toContain("internal");
+    expect(userAllowed).not.toContain("restricted");
   });
 });
