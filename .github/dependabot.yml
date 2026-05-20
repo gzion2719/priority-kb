@@ -30,6 +30,11 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    groups:
+      actions-all:
+        applies-to: version-updates
+        patterns:
+          - "*"
     commit-message:
       prefix: "chore(ci)"
       include: "scope"
