@@ -6,6 +6,9 @@
 *.pem
 secrets/
 
+# --- Eval runner artifact (regenerated per run) ---
+evals/last-run.json
+
 # --- Node ---
 node_modules/
 .next/

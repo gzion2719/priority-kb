@@ -16,7 +16,9 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "check": "node scripts/check-repo-public-banner.mjs && npm run lint && npm run format:check && npm run typecheck && npm test",
+    "eval": "tsx evals/run.ts",
+    "eval:lint": "tsx evals/run.ts --lint-only",
+    "check": "node scripts/check-repo-public-banner.mjs && npm run lint && npm run format:check && npm run typecheck && npm run eval:lint && npm test",
     "pre-push": "npm run check"
   },
   "engines": {
@@ -47,7 +49,9 @@
     "eslint-config-next": "16.2.6",
     "eslint-config-prettier": "^9.1.0",
     "prettier": "^3.3.0",
+    "tsx": "^4.22.3",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "yaml": "^2.9.0"
   }
 }
