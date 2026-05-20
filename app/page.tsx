@@ -18,6 +18,11 @@ export default function Home() {
       <p>
         <span style={{ color: "var(--kramer-mint)" }}>M1 — Foundation</span>
       </p>
+      <p style={{ marginTop: "1.5rem" }}>
+        <a href="/query" style={{ color: "var(--kramer-mint)" }}>
+          Ask the KB →
+        </a>
+      </p>
     </main>
   );
 }

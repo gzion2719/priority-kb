@@ -252,7 +252,7 @@ Eight `(embed × rerank × synth)` outcome combinations. This table is the new s
 | fail  | ok     | ok    | Keyword-only → rerank → synth → cited answer | `true`  | `embed_unavailable_keyword_fallback` |
 | fail  | fail   | ok    | Keyword-only → skip rerank → top-5 from keyword → synth → answer | `true`  | `embed_and_rerank_unavailable_keyword_fallback` |
 | fail  | ok     | fail  | Keyword-only → rerank → top-5 chunk snippets + citations | `true`  | `embed_and_synth_unavailable_keyword_bare` |
-| fail  | fail   | fail  | Keyword-only → top-5 by ts_rank_cd + citations | `true`  | `embed_rerank_synth_unavailable_keyword_bare` |
+| fail  | fail   | fail  | Keyword-only → top-5 by ts_rank_cd + citations | `true`  | `embed_rerank_synth_unavailable_keyword_bare` **(implemented in M3 item 2 slice, PR stacked on #158; rows 1-7 deferred to M3 item 3 full slice)** |
 
 Special case: **keyword lane returns zero rows while embed is down** (any of the four `fail × * × *` rows above): respond `{degraded: true, reason_code: "no_keyword_match_under_embed_outage", answer: "", citations: []}`. Explicit "we couldn't find anything" per AGENTS.md retrieval non-negotiable ("If retrieval returns nothing high-confidence, say so explicitly").
 
