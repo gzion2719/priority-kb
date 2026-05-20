@@ -71,6 +71,7 @@ Categories chosen for this project's shape.
 
 ## Quality & Evals
 
+- **Positive-control regex tests for `lib/embedding.test.ts` source-file-no-import block.** The block at [lib/embedding.test.ts:161-175](../lib/embedding.test.ts#L161-L175) is the precedent for the new `lib/retrieval.test.ts` source-file-no-import floor, but it lacks positive-control tests proving each regex would actually catch a synthetic offending import. Without the positive control, regex-rot from a future edit would silently pass the suite on an empty/wrongly-patterned file. `lib/retrieval.test.ts` ships the positive-control pattern (PR feat/m3-item-3-foundation, 2026-05-20); carry it back to the embedding test in a cheap follow-up PR.
 - **Fixture-recording hook on `logEvent`** — at M2a, when real Claude/Voyage call sites land, tee each `logEvent` call to a fixture file under test mode (env-gated). Lets test suites replay recorded API responses without re-hitting live APIs (non-negotiable #8). The injectable sink in `lib/log.ts` already supports this; just needs an env-gated tee wrapper. See ADR-0005.
 - Expand `evals/golden_set.yaml` to 100+ pairs across all major Priority modules.
 - Adversarial eval set: queries with subtle wording, mixed Hebrew/English, typos, outdated terminology.
