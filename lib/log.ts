@@ -111,7 +111,7 @@ const SECRET_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bpa-[A-Za-z0-9_-]{8,}/g, "pa-[REDACTED]"],
 ];
 
-function redactSecrets(input: string): string {
+export function redactSecrets(input: string): string {
   let out = input;
   for (const [pattern, replacement] of SECRET_PATTERNS) {
     out = out.replace(pattern, replacement);
