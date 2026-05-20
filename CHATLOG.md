@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-21 — M3 item 5 entry detail page + citation links (1 PR pair)
+
+- Shipped M3 item 5 via [#165](https://github.com/gzion2719/priority-kb/pull/165) → [#166](https://github.com/gzion2719/priority-kb/pull/166) (on `main`): new `lib/entries.ts` (`findEntryForRole` with UUID regex pre-check + SQL `WHERE sensitivity = ANY($2)` — auth-failure / malformed-id / missing-id / sensitivity-mismatch all collapse to indistinguishable `null`); `app/entries/[id]/page.tsx` (async RSC with `force-dynamic`, `kind:"entry_view"` audit row with `entry_id` always NULL to eliminate the FK-lookup timing oracle); branded segment-level `not-found.tsx` (also `force-dynamic` as belt-and-suspenders); `app/query/page.tsx` citation cards wrap content in `next/link`.
+- `resolveRoleFromHeader` extracted to `lib/auth.ts` as the single canonical stub-auth parser; `withAdmin` and `withUserOrAdmin` now delegate to it, and the page consumes it directly — M5's Entra ID swap is now a one-function edit.
+- **Step 7b two-pass discipline both load-bearing.** Plan-CR pivoted test strategy off RTL (vitest env=node has no jsdom), added UUID regex (Postgres' uuid-syntax 500 was a 500-vs-404 discriminator), forced `force-dynamic`, added audit rows, extracted `resolveRoleFromHeader`. Code-CR caught the audit-row `entry_id` set-vs-null timing oracle, missing `force-dynamic` on `not-found.tsx`, and `internal` pill foreground breaking brand-tint parity. M2/M3 page-surface HTTP-status tests deferred to BACKLOG (needs Next test runtime).
+- Test count → **454 passed / 49 skipped** (+24 new: 18 `lib/entries.test.ts` unit including the "does NOT post-hoc filter sensitivity in JS" architecture pin, 6 `tests/entries.integration.test.ts` flip-positive sensitivity proof against real Postgres, ~12 `resolveRoleFromHeader` cases). Gate clean first try.
+- **Session Score 9/10.** Code 4/4, Protocol 3/3, Efficiency 2/3 (−1 commit-msg footer-max-line-length retry on one 112-char body line). Ceiling: pre-flight `awk '{ print length }' .commit-msg.tmp | sort -rn | head -3` before any `git commit -F`. 2nd recurrence of commitlint footer-max-line-length class; 3rd recurrence triggers a `scripts/precheck-commit-msg.mjs` mechanical floor.
+- **Process improvement:** none codifiable this session — 2nd recurrence of commitlint footer-max-line-length is observation territory per `feedback_prefer_mechanical_over_prose` (3rd recurrence builds the script). Discipline note carried in the Ceiling line above.
+- **Next session:** M3 item 3 adapter scaffold against stubs (path #2 from this session's no-cost discussion — extends the existing env-gated factory pattern, `RETRIEVAL_PROVIDER=stub` default, real Voyage + Anthropic flip deferred to M2a item 8 / M5), OR hold pending API-key cost decision. Alternative: M4 polish (admin entry browser unlocks the SensitivityPill shared-primitive BACKLOG entry naturally), or M2a item 8 manual smoke if ADR-0011 revert + 3 real Priority Q&A samples are ready.
+
+---
+
 ## 2026-05-21 — M3 item 4 phase 1 (keyword lane) + M3 item 2 query UI (5 PRs total)
 
 - **M3 item 4 phase 1** via [#158](https://github.com/gzion2719/priority-kb/pull/158)→[#161](https://github.com/gzion2719/priority-kb/pull/161): `unaccent` ext (`db/init.sql`) + migration 0002 (trigger-maintained `entries.tsv` + niqqud-strip regex + guard trigger) + 0003 (GIN) + `lib/retrieval-keyword.ts` (keywordCandidates with iron-rule-#6 SQL WHERE) + pure `rrfFuse` + `DEGRADED_REASON_CODES`/`RetrievalAuditPayload` types. ADR-0013 §2.1 gained 4-item Errata (incl. empirically-refuted niqqud claim on pgvector/pg16). `vitest.config.ts` `fileParallelism:false` defused TRUNCATE deadlock.
