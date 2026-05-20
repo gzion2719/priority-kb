@@ -227,3 +227,156 @@ export function resetRerankerForTests(): void {
 export function resetSynthesizerForTests(): void {
   globalThis.__synthesizer = undefined;
 }
+
+// ─── ADR-0013: hybrid keyword lane + RRF + degraded-matrix types ───────────────
+
+/**
+ * Reciprocal Rank Fusion outcome codes — extends ADR-0012's degraded-reason set
+ * with the four embed-down → keyword-fallback variants from ADR-0013 §2.5.
+ *
+ * Slice 1 ships the enum + the audit payload type only. The route-layer
+ * branching across the 8-row matrix (ADR-0013 §3) is Slice 2 / M3-item-3
+ * route territory.
+ */
+export const DEGRADED_REASON_CODES = [
+  // ADR-0012:
+  "synth_unavailable",
+  "rerank_unavailable",
+  "rerank_and_synth_unavailable",
+  "citation_validation_failed",
+  // ADR-0013 — embed-down → keyword fallback variants:
+  "embed_unavailable_keyword_fallback",
+  "embed_and_rerank_unavailable_keyword_fallback",
+  "embed_and_synth_unavailable_keyword_bare",
+  "embed_rerank_synth_unavailable_keyword_bare",
+  "no_keyword_match_under_embed_outage",
+] as const;
+export type DegradedReasonCode = (typeof DEGRADED_REASON_CODES)[number];
+
+/**
+ * Audit-row payload shape after ADR-0013. Extends ADR-0012 §E with lane-id
+ * arrays, the RRF k constant used at request time, and the keyword-only
+ * derived flag.
+ *
+ * Iron rule #9 note: `embedding_model` + `embedding_version` are recorded
+ * even on requests where the embedder call failed and stage A never produced
+ * a vector. Semantics: "the embedder configured at request time" — preserves
+ * shape stability so analytics SUM-by-embedder-version queries don't need
+ * null-handling for the keyword-fallback path.
+ */
+export type RetrievalAuditPayload = {
+  query: string;
+  role: string;
+  sensitivity_allowed: string[];
+  /** Configured embedder model — recorded even if the call failed. Iron rule #9. */
+  embedding_model: string;
+  /** Configured embedder version — recorded even if the call failed. */
+  embedding_version: string;
+  /** Post-collapse entry_ids from ANN lane (replaces ADR-0012's flat candidate_ids). */
+  ann_candidate_ids: string[];
+  /** Entry_ids from stage B′ keyword lane. */
+  keyword_candidate_ids: string[];
+  /** Post-RRF entry_ids; up to 20 per ADR-0013 §2.4. */
+  fused_ids: string[];
+  /** RETRIEVAL_RRF_K env-knob value at request time, for retrospective tuning. */
+  rrf_k: number;
+  /** Post stage-C rerank, top-N=5. Subset of fused_ids on the healthy path. */
+  reranked_ids: string[];
+  /** Entry_ids cited by synth; subset of reranked_ids. */
+  citation_ids: string[];
+  /** True when stage A failed and B′ carried the request. */
+  keyword_only: boolean;
+  tokens: {
+    embed: number;
+    /** Always 0 — Postgres is local. Field exists for shape symmetry. */
+    keyword: number;
+    rerank_input: number;
+    synth_input: number;
+    synth_output: number;
+  };
+  latencies_ms?: Record<string, number>;
+  degraded: boolean;
+  degraded_reason?: DegradedReasonCode;
+};
+
+/** Internal-only retrieval result for the evals runner (ADR-0012 §7, ADR-0013 §2.5). */
+export type EvalRetrieveResult = {
+  ann_candidate_ids: string[];
+  keyword_candidate_ids: string[];
+  fused_candidate_ids: string[];
+  reranked_ids: string[];
+};
+
+/** Input to `rrfFuse` — one entry per fusion lane, in caller-defined order. */
+export type RrfLane = {
+  /** Human-readable lane name for tie-break determinism + audit traceability. */
+  name: string;
+  /** Entry IDs in rank order, 1-indexed by position in the array. */
+  rankedEntryIds: string[];
+};
+
+/** Per-entry fusion output. */
+export type RrfFusedEntry = {
+  entry_id: string;
+  /** Sum of `1 / (k + rank_lane)` across all lanes the entry appeared in. */
+  score: number;
+};
+
+/**
+ * Reciprocal Rank Fusion (Cormack, Clarke, Buettcher 2009; tuned for top-K=20
+ * lanes per Bruch et al. 2023 — see ADR-0013 §2.4). Score:
+ *
+ *   RRF(d) = Σ_lane  1 / (k + rank_lane(d))
+ *
+ * with rank_lane(d) the 1-indexed position of d in lane.rankedEntryIds, or
+ * the term omitted if d is absent from the lane.
+ *
+ * Tie-break: equal-score entries are ordered by (1) first lane the entry
+ * appears in (in the input `lanes` array order), then (2) the entry's rank
+ * within that lane. This makes ordering deterministic and dependency-free
+ * (no UUID sort, no `Math.random`).
+ *
+ * Throws RangeError on `k` outside [1, 1000] (matches the env-knob bound
+ * declared in ADR-0013 §2.4) or `limit` outside [1, 1000]. Empty input lanes
+ * are allowed; a missing entry from a lane contributes 0 to its score.
+ */
+export function rrfFuse(lanes: RrfLane[], k: number, limit = 20): RrfFusedEntry[] {
+  if (!Number.isInteger(k) || k < 1 || k > 1000) {
+    throw new RangeError(`rrfFuse: k must be an integer in [1, 1000]; got ${k}`);
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+    throw new RangeError(`rrfFuse: limit must be an integer in [1, 1000]; got ${limit}`);
+  }
+
+  type Acc = { score: number; firstLaneIdx: number; firstLaneRank: number };
+  const acc = new Map<string, Acc>();
+
+  for (let laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
+    const ids = lanes[laneIdx]!.rankedEntryIds;
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i]!;
+      const rank = i + 1;
+      const contribution = 1 / (k + rank);
+      const prev = acc.get(id);
+      if (prev) {
+        prev.score += contribution;
+      } else {
+        acc.set(id, { score: contribution, firstLaneIdx: laneIdx, firstLaneRank: rank });
+      }
+    }
+  }
+
+  const fused = Array.from(acc.entries()).map(([entry_id, v]) => ({
+    entry_id,
+    score: v.score,
+    _firstLaneIdx: v.firstLaneIdx,
+    _firstLaneRank: v.firstLaneRank,
+  }));
+
+  fused.sort(
+    (a, b) =>
+      b.score - a.score || a._firstLaneIdx - b._firstLaneIdx || a._firstLaneRank - b._firstLaneRank,
+  );
+
+  return fused.slice(0, limit).map((e) => ({ entry_id: e.entry_id, score: e.score }));
+}

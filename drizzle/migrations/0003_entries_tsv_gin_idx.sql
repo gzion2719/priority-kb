@@ -1,0 +1,14 @@
+-- ADR-0013 §2.1 — GIN index on entries.tsv for keyword-lane search.
+--
+-- Plain `CREATE INDEX` (not `CONCURRENTLY`) because `drizzle-kit migrate` wraps
+-- every migration file in a single transaction (ADR-0008 §12) and `CREATE INDEX
+-- CONCURRENTLY` cannot run inside a transaction. Safe at M3 because the corpus
+-- is empty pre-M5 — transactional CREATE INDEX is acceptable when there are no
+-- concurrent writers competing for the lock.
+--
+-- M5+ obligation: before the first production data backfill (real Priority
+-- entries arriving via items 4/5 of M2a + ADR-0011's repo-private revert), drop
+-- and re-create this index using `CREATE INDEX CONCURRENTLY` in a hand-applied
+-- DDL step outside `drizzle-kit migrate`, OR adopt a non-transactional migration
+-- mechanism. Recorded in ADR-0013 §"Deferred (BACKLOG)".
+CREATE INDEX IF NOT EXISTS "entries_tsv_gin_idx" ON "entries" USING gin ("tsv");
