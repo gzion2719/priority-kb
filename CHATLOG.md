@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-20 — CI cost-trim wave 1 + ADR-0012 retrieval pipeline + M3 item 3 foundation (3 PR pairs)
+
+- **CI cost-trim wave 1** via [#139](https://github.com/gzion2719/priority-kb/pull/139)→[#140](https://github.com/gzion2719/priority-kb/pull/140): deleted no-op `python`+`evals` jobs from `.github/workflows/ci.yml`; added `groups: actions-all` (with `applies-to: version-updates`) to dependabot github-actions ecosystem. Honest reframe from BACKLOG's 40-50% to ~25-35% after Step 7b math review caught node-job billing dominance; wave-2 follow-ups (security.yml cron, pr-title workflow merge, post-revert 7-day billing measurement) captured in BACKLOG.
+- **ADR-0012 retrieval pipeline architecture** via [#144](https://github.com/gzion2719/priority-kb/pull/144)→[#145](https://github.com/gzion2719/priority-kb/pull/145): 5-stage pipeline (embed→ANN→rerank→synth→audit) scoped to M3 item 3 ONLY after Step 7b BLOCKING caught items-3-vs-4 conflation; item 4 (hybrid+RRF+Hebrew tsvector) deferred to ADR-0013. Required trailing `Sources: [uuid,...]` block with retry-once + internal `evalRetrieve()` (no HTTP mode knob — closed enumeration-oracle path).
+- **M3 item 3 foundation** via [#146](https://github.com/gzion2719/priority-kb/pull/146)→[#147](https://github.com/gzion2719/priority-kb/pull/147): [lib/retrieval.ts](lib/retrieval.ts) (~210 lines) + [lib/retrieval.test.ts](lib/retrieval.test.ts) (+32 tests, 337/18 total). `Reranker` + `Synthesizer` interfaces with deterministic stubs and env-driven factories mirroring `getEmbedder()`; 5-SDK source-file-no-import scan with **positive-control regex tests** (closes the regex-rot gap that lib/embedding.test.ts:161-175 still has — BACKLOG-queued port-back).
+- **Step 7b was load-bearing on every focus.** Reviewer caught: cost-trim 40-50% overstatement, ADR-0012 scope conflation, foundation ADR-shape drift (B1 result-types + B2 filename), and a real forward-dated ADR-0012 date bug shipped to main on #144/#145 (fixed drive-by in #146). Verify-before-implementing-CR-claim refuted one reviewer claim ("embedding test is two-layer scan" — actually single-layer).
+- **Session Score 9/10.** Code 3/4 (−1 forward-dated ADR shipped to main). Protocol 3/3 (Step 7b every focus; active-runner from Bash on all three commits/pushes/PR-creates). Efficiency 3/3. Ceiling: at ADR write time, set `Date:` from env context, not feel.
+- **Process improvement:** none codifiable this session — Step 7b functioned as designed catching three distinct planner drifts. ADR forward-date is a single-occurrence quality issue, not yet a class warranting a rule.
+- **Next session:** ADR-0013 (M3 item 4 — hybrid search + RRF + Hebrew tsvector — doc-only, smaller surface) OR M3 item 3 Voyage rerank-2 adapter (**fresh chat strongly recommended** per ADR-0010 step 3b precedent — first real Voyage API surface; needs `VOYAGE_API_KEY`).
+
+---
+
 ## 2026-05-20 — M1 closed + M3 starter + 4 deps PR pairs (5 release PRs to main)
 
 - **M1 closed** via [#135](https://github.com/gzion2719/priority-kb/pull/135)→[#136](https://github.com/gzion2719/priority-kb/pull/136): Hebrew OCR spike (L21) PASSED all 4 criteria — Azure DI v4.0 prebuilt-read/layout against 5 stratified Priority screenshots, best conf 0.986 (report), worst 0.815 (dialog, spot-checked 9/9 substrings exact). M2b commits to Azure DI `prebuilt-layout` default (~$10/1000 pages, single-digit USD/month at realistic volumes). `scripts/hebrew-ocr-spike.mjs` gained skip-if-cached + `INTER_CALL_SLEEP_MS` (12s default) to survive F0's ~5-calls/min budget.
