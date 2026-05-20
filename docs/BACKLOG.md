@@ -30,7 +30,24 @@ Categories chosen for this project's shape.
 
 ## Ingestion
 
-- **Stronger Hebrew OCR**: evaluate Google Document AI alongside Azure DI on a 30-image Hebrew Priority screenshot set; pick winner by accuracy + cost.
+- **Stronger Hebrew OCR — Azure DI spike (M1 L21) PASSED 2026-05-20.** Ran [scripts/hebrew-ocr-spike.mjs](../scripts/hebrew-ocr-spike.mjs) against api-version `2024-11-30` on 5 stratified Priority screenshots (form, report, error dialog, toolbar, mixed Heb+En+nums) × 2 models (`prebuilt-read` + `prebuilt-layout`). Auto-detect locale (Microsoft's recommended default). Scoring per the 4 criteria in [docs/spikes/hebrew-ocr-spike.md](spikes/hebrew-ocr-spike.md):
+
+  ```
+  Image 1 (form/order):  recall=PASS  conf=0.950  rtl=PASS  label-assoc=PASS
+  Image 2 (report):      recall=PASS  conf=0.986  rtl=N/A   label-assoc=N/A
+  Image 3 (error):       recall=PASS  conf=0.815  rtl=N/A   label-assoc=N/A   ← spot-checked 9/9 substrings exact
+  Image 4 (toolbar):     recall=PASS  conf=0.963  rtl=N/A   label-assoc=N/A
+  Image 5 (mixed/item):  recall=PASS  conf=0.929  rtl=PASS  label-assoc=N/A
+  PASS / FAIL: PASS    Notes: see below
+  ```
+
+  **Per-criterion observations.** Confidence ≥ 0.85 clears on 4 of 5 images (criterion-2 bar = 4/5); 03-error's 0.815 is dragged down by tiny UI glyphs (icons interpreted as low-confidence single characters) + a couple of bottom-toolbar substitutions (`ביצוע`→`רוצוע`, `סלי`→`חלי` — character-shape confusions on small text). All human-intent text — dialog body, form labels, field values — extracted exactly. RTL inversion test on image #5 (item card): every LTR substring (`OEM-ZWIDE-TK`, `KC-VIRTUALBRAIN1(GEN2)`, `Made in China`, `Allways available`, `Sec.Location`, numeric IDs, dates) intact. One minor bidi quirk on image #1: trailing period of `Kramer Electronics Ltd.` flipped to the start (`.Kramer Electronics Ltd`) — character-level intact, just bidi punctuation reordering. Form-label adjacency (criterion #4) confirmed via paragraph segmentation in `01-form.layout.raw.json` — labels and values in adjacent paragraphs for most fields (`* קוד מס` → `001`, `שער בסיס` → `0.000000`). Azure's automatic `keyValuePairs` extractor returned 0 entries — non-issue, paragraph-proximity pairing in our downstream pipeline is the working strategy.
+
+  **Decision for M2b.** Use `prebuilt-layout` as default (slightly higher confidence on every image; adds tables + paragraphs that `prebuilt-read` doesn't; ~6.7× the per-page cost — $10 vs $1.50 per 1,000 — but still single-digit dollars/month at realistic Priority KB volumes). Reserve `prebuilt-read` for re-runs where layout structure isn't needed (e.g., re-OCR of plain dialogs where M2b's text-only chunker is sufficient).
+
+- **M2b OCR pipeline wiring (follow-up to the spike above).** When M2b lands the Python FastAPI worker, wire `prebuilt-layout` per the spike's PASS verdict. Reuse the spike script's per-call shape: api-version `2024-11-30`, auto-detect locale, 12-second inter-call pacing if running on F0, no pacing on S0. The Python adapter should parse `analyzeResult.paragraphs` (not just `content`) so the chunker can use paragraph boundaries as natural cut points, mirroring the spike's evidence that paragraphs preserve label/value adjacency. Pin the dependency version when chosen; record per-call cost in `audit_log` for ongoing budget visibility.
+
+- **Stronger Hebrew OCR — fallback bench (deferred).** If Azure DI cost or quality regresses post-M2b, the next bench is Google Document AI on the same 5 images first, then a 30-image expanded set across all three providers (Azure / Google / Tesseract+heb) per the original BACKLOG entry. Triggered only if M2b shows a real problem; otherwise this stays parked.
 - Bulk import from existing sources: email threads, Teams export, old Confluence dump.
 - Auto-suggest tags from existing taxonomy during ingestion chat.
 - Inline duplicate detection: when admin starts an entry, retrieve top-3 similar existing entries and offer "edit existing" instead of "create new".
