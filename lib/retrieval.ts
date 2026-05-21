@@ -32,6 +32,7 @@
 import { createHash } from "node:crypto";
 
 import { createVoyageReranker } from "./retrieval-voyage-rerank";
+import { createAnthropicSynthesizer } from "./retrieval-anthropic-synth";
 
 /** Output of a single rerank call. Provenance via the `Reranker` instance, not here. */
 export type RerankResult = {
@@ -213,20 +214,41 @@ export function getReranker(): Reranker {
   return globalThis.__reranker;
 }
 
-/** Synth twin of `getReranker`. Reads `process.env.SYNTH_PROVIDER`. */
+/**
+ * Synth twin of `getReranker`. Reads `process.env.SYNTH_PROVIDER`:
+ * - unset or `"stub"` → deterministic stub.
+ * - `"anthropic"` → reads `process.env.ANTHROPIC_API_KEY`. Missing key
+ *   throws `RangeError` (iron rule #1 floor: misconfig surfaces loud at the
+ *   factory boundary, never as transient `SynthUnavailableError` that
+ *   would mask it as a degraded-mode outage). The empty-key constructor
+ *   guard inside `createAnthropicSynthesizer` provides a second floor for
+ *   direct callers that bypass this factory.
+ * - any other value → throws `RangeError` (fail-loud, no silent fallback).
+ *
+ * Cached on `globalThis.__synthesizer`. Use `resetSynthesizerForTests()`
+ * between tests that need a fresh resolution.
+ *
+ * The Anthropic SDK bare-package-name string is forbidden in THIS file by
+ * the source-file scan at lib/retrieval.test.ts:317 (iron rule #8 floor).
+ * The adapter file `./retrieval-anthropic-synth` owns the SDK-namespace
+ * literals; this file imports the factory function only.
+ */
 export function getSynthesizer(): Synthesizer {
   if (!globalThis.__synthesizer) {
     const provider = process.env.SYNTH_PROVIDER ?? "stub";
     if (provider === "stub") {
       globalThis.__synthesizer = createStubSynthesizer();
     } else if (provider === "anthropic") {
-      throw new RangeError(
-        `SYNTH_PROVIDER=anthropic is not wired yet; the Anthropic Sonnet adapter lands with the M3 item 3 route slice`,
-      );
+      if (!process.env.ANTHROPIC_API_KEY) {
+        throw new RangeError(
+          `missing ANTHROPIC_API_KEY — required when SYNTH_PROVIDER=anthropic (iron rule #1)`,
+        );
+      }
+      globalThis.__synthesizer = createAnthropicSynthesizer({
+        apiKey: process.env.ANTHROPIC_API_KEY,
+      });
     } else {
-      throw new RangeError(
-        `unknown SYNTH_PROVIDER=${provider}; expected "stub" or (post-M3-item-3) "anthropic"`,
-      );
+      throw new RangeError(`unknown SYNTH_PROVIDER=${provider}; expected "stub" or "anthropic"`);
     }
   }
   return globalThis.__synthesizer;
