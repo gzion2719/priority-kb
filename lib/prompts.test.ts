@@ -203,12 +203,12 @@ describe("RETRIEVAL_AGENT_PROMPT constant (M3 item 3 system_prompt source)", () 
   });
 });
 
-describe("RETRIEVAL_AGENT_PROMPT v0.1.0 content (M3 item 1 — pinned non-negotiables)", () => {
+describe("RETRIEVAL_AGENT_PROMPT v0.2.0 content (M3 item 3 stage E — Sources block contract pinned)", () => {
   // Negative-assertion tests per WORKFLOW.md "Negative-assertion tests
   // distinguish from the regression": each pairs a "present" check with
-  // an "alternative-absent" check. Pinning v0.1.0's canonical wording
-  // means a future v0.2.0 (or accidental edit) breaks loudly here rather
-  // than at the route layer when M3 item 3 wires up the consumer.
+  // an "alternative-absent" check. v0.2.0 pins the ADR-0012 §D + §5
+  // output contract; a future v0.3.0 (or accidental relaxation) breaks
+  // loudly here.
 
   it("uses the canonical header (and not a partial-prefix variant)", () => {
     expect(RETRIEVAL_AGENT_PROMPT).toContain("# Retrieval Agent — System Prompt");
@@ -219,12 +219,16 @@ describe("RETRIEVAL_AGENT_PROMPT v0.1.0 content (M3 item 1 — pinned non-negoti
     expect(RETRIEVAL_AGENT_PROMPT).not.toMatch(/^# Retrieval Agent\n/);
   });
 
-  it("declares v0.1.0 (M3 stub) and is NOT yet at a tightened later version", () => {
-    expect(RETRIEVAL_AGENT_PROMPT).toContain("**Version:** 0.1.0");
+  it("declares v0.2.0 with the full M3 item 3 stage E parenthetical and is NOT v0.1.0", () => {
+    // Pin the FULL parenthetical, not just the version number — a future
+    // edit that bumps the version but forgets to update the explanatory
+    // suffix would pass a substring-only check.
+    expect(RETRIEVAL_AGENT_PROMPT).toContain(
+      "**Version:** 0.2.0 (M3 item 3 stage E — Sources block contract pinned)",
+    );
     // If M3 item 3 ever bumps the prompt to a new version, this test
-    // fails and the bumper is forced to update the assertion explicitly,
-    // re-reading the new content.
-    expect(RETRIEVAL_AGENT_PROMPT).not.toContain("**Version:** 0.2.0");
+    // fails and the bumper is forced to update the assertion explicitly.
+    expect(RETRIEVAL_AGENT_PROMPT).not.toContain("**Version:** 0.1.0");
   });
 
   it("pins the no-synthesis-from-training-data non-negotiable (iron rule #12 + AGENTS.md)", () => {
@@ -253,5 +257,107 @@ describe("RETRIEVAL_AGENT_PROMPT v0.1.0 content (M3 item 1 — pinned non-negoti
     // English-only rule that CLAUDE.md scopes to Claude↔user
     // conversations (not retrieval).
     expect(RETRIEVAL_AGENT_PROMPT).not.toContain("always respond in English");
+  });
+
+  // ── v0.2.0 Sources-block contract assertions (ADR-0012 §D + §5) ─────────
+
+  it("pins the trailing Sources: block as a required output element with UUID-v4-shaped examples", () => {
+    // The literal "Sources:" + block-example token must appear in the
+    // prompt body. ADR-0012 §5 server-side regex is
+    // /^Sources:\s*\[([^\]]*)\]\s*$/m and step 3 requires UUID v4 — the
+    // prompt's example IDs must therefore be UUID-v4-shaped, not the
+    // short 6-hex-char shapes that a literal regression to v0.1.0 style
+    // would produce.
+    expect(RETRIEVAL_AGENT_PROMPT).toMatch(
+      /Sources:\s*\[[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/,
+    );
+    expect(RETRIEVAL_AGENT_PROMPT).toContain("trailing `Sources:` block");
+    // Negative-assertion: the v0.1.0-era short-hex example shape would
+    // teach the model a shape §5 rejects. Forbid its return.
+    expect(RETRIEVAL_AGENT_PROMPT).not.toMatch(/Sources:\s*\[[a-f0-9]{6},/);
+  });
+
+  it("pins inline-citations ↔ Sources-block set equality (audit-row honesty)", () => {
+    // Without equality, model can emit [a][b] inline and Sources: [c] —
+    // ADR-0012 §5 validation passes (c ∈ reranked_ids) but the audit
+    // row's citation_ids diverges from what the user actually saw.
+    expect(RETRIEVAL_AGENT_PROMPT).toContain("set of IDs you cited inline");
+    expect(RETRIEVAL_AGENT_PROMPT).toMatch(/Not a subset, not a superset.*equal/i);
+  });
+
+  it("forbids duplicate IDs in the Sources block (set semantics)", () => {
+    // ADR-0012 §5 doesn't say, but the audit row's citation_ids[] is a
+    // set in spirit; duplicates inflate the count without adding
+    // information. Pin the contiguous phrase via a single regex so the
+    // test doesn't silently pass on a prompt that mentions "each ID
+    // appears" and "exactly once" in unrelated sentences.
+    expect(RETRIEVAL_AGENT_PROMPT).toMatch(/each ID appears\s+\*\*exactly once\*\*/);
+    expect(RETRIEVAL_AGENT_PROMPT).toContain("no duplicates");
+  });
+
+  it("pins the Sources block as the AUTHORITATIVE citation list (matches ADR-0012 §E audit semantics)", () => {
+    // The audit row pulls citation_ids[] from the Sources block. If the
+    // prompt fails to pin this, models may treat inline as authoritative
+    // and the audit log diverges.
+    expect(RETRIEVAL_AGENT_PROMPT).toContain("authoritative citation list");
+  });
+
+  it("pins the route-contract assumption that retrieved_entries[] is non-empty", () => {
+    // The empty-Sources fail-mode is avoided by route-layer short-circuit
+    // BEFORE invoking synth. The prompt documents this assumption so the
+    // model doesn't try to guard against an impossible empty-array case.
+    expect(RETRIEVAL_AGENT_PROMPT).toContain("guaranteed non-empty");
+  });
+
+  it("rewrites the no-relevant-content branch to inline-cite every considered entry_id (preserves set-equality)", () => {
+    // v0.1.0's no-content branch emitted just a stock template with no
+    // Sources — would have failed §5 step 1 (missing block). v0.2.0
+    // requires inline citations of all considered IDs in the canned
+    // sentence so set-equality with Sources holds trivially and iron
+    // rule #3 is upheld. Pin the contiguous instruction via a single
+    // regex — `toContain("every")` alone is a tautology (the word
+    // "every" appears multiple times in unrelated prompt sections).
+    expect(RETRIEVAL_AGENT_PROMPT).toMatch(
+      /Inline-cite\s+\*\*every\*\*\s+`entry_id`\s+from\s+`retrieved_entries\[\]`/,
+    );
+    // Pin the example sentence shape so a future edit doesn't drop the
+    // inline-citation markers from the canned no-content template.
+    expect(RETRIEVAL_AGENT_PROMPT).toMatch(/I considered \[id1\]\[id2\]\[id3\] but none of them/);
+  });
+
+  it("forbids characterizing Sources as optional or omittable (defense-in-depth against weakening rewrites)", () => {
+    // Hash-roundtrip tests catch file drift; these substring checks catch
+    // semantic drift in a rewrite that bumps the version + edits prose.
+    expect(RETRIEVAL_AGENT_PROMPT).not.toContain("Sources block is optional");
+    expect(RETRIEVAL_AGENT_PROMPT).not.toContain("you may omit Sources");
+    expect(RETRIEVAL_AGENT_PROMPT).not.toContain("Sources is recommended");
+    expect(RETRIEVAL_AGENT_PROMPT).not.toMatch(/Sources.*encouraged/i);
+  });
+
+  it("explicitly requires the Sources block even on long-reasoning responses (ADR-0012 §9 mitigation at model layer)", () => {
+    // ADR-0012 §9 Negative: "Models occasionally drop trailing blocks
+    // under heavy multi-step reasoning; the retry-once policy mitigates
+    // but does not eliminate." Restate the mitigation at the model layer
+    // so the retry path is the second line of defense, not the first.
+    // Flexible regex tolerates hyphenation drift ("long-reasoning" vs
+    // "long reasoning"); the semantic claim is what matters.
+    expect(RETRIEVAL_AGENT_PROMPT).toMatch(/long[-\s]reasoning/);
+  });
+
+  it("pins iron rule #6 — restricted entries are filtered out before the prompt sees them", () => {
+    // Defense-in-depth pin: if a future edit silently deletes this
+    // assurance, the prompt looks safe to hand restricted content to
+    // (it isn't — the filter is route-side per ADR-0012 §6, but the
+    // prompt's worldview is upstream of that). Keep the prose linked.
+    expect(RETRIEVAL_AGENT_PROMPT).toMatch(/filtered out before this prompt/);
+  });
+
+  it("pins the on-its-own-line constraint matching the §5 multiline-anchored regex", () => {
+    // ADR-0012 §5 regex `/^Sources:\s*\[([^\]]*)\]\s*$/m` anchors `^`/`$`
+    // to line boundaries. Prompt teaches "on its own line" — not "must be
+    // the LAST line" (which the regex doesn't actually enforce).
+    expect(RETRIEVAL_AGENT_PROMPT).toContain("on its own line");
+    // Defend against a future rewrite that overclaims regex strictness.
+    expect(RETRIEVAL_AGENT_PROMPT).not.toMatch(/must be the LAST line/);
   });
 });
