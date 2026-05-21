@@ -26,6 +26,7 @@ afterEach(() => {
   delete process.env.RERANK_PROVIDER;
   delete process.env.SYNTH_PROVIDER;
   delete process.env.VOYAGE_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
 });
 
 describe("createStubReranker — deterministic ranking for #8-compliant tests", () => {
@@ -238,8 +239,9 @@ describe("getSynthesizer — env-driven singleton factory", () => {
     expect(s.model).toBe(STUB_SYNTH_MODEL);
   });
 
-  it('throws RangeError naming "M3 item 3" when SYNTH_PROVIDER="anthropic"', () => {
+  it('throws RangeError naming ANTHROPIC_API_KEY when SYNTH_PROVIDER="anthropic" and key is absent', () => {
     process.env.SYNTH_PROVIDER = "anthropic";
+    delete process.env.ANTHROPIC_API_KEY;
     let err: unknown;
     try {
       getSynthesizer();
@@ -247,8 +249,19 @@ describe("getSynthesizer — env-driven singleton factory", () => {
       err = e;
     }
     expect(err).toBeInstanceOf(RangeError);
-    expect((err as Error).message).toMatch(/M3 item 3/);
-    expect((err as Error).message).toMatch(/anthropic/i);
+    expect((err as Error).message).toMatch(/missing ANTHROPIC_API_KEY/);
+    expect((err as Error).message).toMatch(/iron rule #1/i);
+  });
+
+  it('resolves the Anthropic adapter when SYNTH_PROVIDER="anthropic" and ANTHROPIC_API_KEY is set', () => {
+    process.env.SYNTH_PROVIDER = "anthropic";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test-key-not-real";
+    try {
+      const s = getSynthesizer();
+      expect(s.model).toBe("claude-sonnet-4-6");
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
   });
 
   it("throws RangeError naming the bad value when SYNTH_PROVIDER is unknown", () => {
