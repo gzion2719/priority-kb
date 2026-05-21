@@ -31,6 +31,8 @@
 
 import { createHash } from "node:crypto";
 
+import { createVoyageReranker } from "./retrieval-voyage-rerank";
+
 /** Output of a single rerank call. Provenance via the `Reranker` instance, not here. */
 export type RerankResult = {
   ranking: { index: number; score: number }[];
@@ -175,11 +177,22 @@ declare global {
 /**
  * Env-driven reranker factory. Reads `process.env.RERANK_PROVIDER`:
  * - unset or `"stub"` → deterministic stub.
- * - `"voyage"` → throws `RangeError` (M3 item 3 route slice will wire the adapter).
+ * - `"voyage"` → reads `process.env.VOYAGE_API_KEY`. Missing key throws
+ *   `RangeError` (iron rule #1 floor: misconfig surfaces loud at the
+ *   factory boundary, never as transient `RerankUnavailableError` that
+ *   would mask it as a degraded-mode outage). VOYAGE_API_KEY is the
+ *   SAME key Voyage uses for embeddings — when the embedder voyage
+ *   branch wires (M2a follow-up), both factories read it. A future
+ *   rename would need to update both sites.
  * - any other value → throws `RangeError` (fail-loud, no silent fallback).
  *
  * Cached on `globalThis.__reranker`. Use `resetRerankerForTests()` between
  * tests that need a fresh resolution. Mirrors `getEmbedder()`.
+ *
+ * The bare-package-name string for the Voyage SDK is forbidden in THIS
+ * file by the source-file scan at lib/retrieval.test.ts:298 (iron rule #8
+ * floor). The adapter file `./retrieval-voyage-rerank` owns the Voyage URL
+ * and the SDK-namespace literals.
  */
 export function getReranker(): Reranker {
   if (!globalThis.__reranker) {
@@ -187,13 +200,14 @@ export function getReranker(): Reranker {
     if (provider === "stub") {
       globalThis.__reranker = createStubReranker();
     } else if (provider === "voyage") {
-      throw new RangeError(
-        `RERANK_PROVIDER=voyage is not wired yet; the Voyage rerank-2 adapter lands with the M3 item 3 route slice`,
-      );
+      if (!process.env.VOYAGE_API_KEY) {
+        throw new RangeError(
+          `missing VOYAGE_API_KEY — required when RERANK_PROVIDER=voyage (iron rule #1)`,
+        );
+      }
+      globalThis.__reranker = createVoyageReranker({ apiKey: process.env.VOYAGE_API_KEY });
     } else {
-      throw new RangeError(
-        `unknown RERANK_PROVIDER=${provider}; expected "stub" or (post-M3-item-3) "voyage"`,
-      );
+      throw new RangeError(`unknown RERANK_PROVIDER=${provider}; expected "stub" or "voyage"`);
     }
   }
   return globalThis.__reranker;
