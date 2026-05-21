@@ -6,6 +6,17 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-21 — Stage-C reconstruction + stage-D handoff prep (PR #174)
+
+- Reconstructed missing stage-C CHATLOG entry for [#173](https://github.com/gzion2719/priority-kb/pull/173) (voyage rerank-2 adapter) via [#174](https://github.com/gzion2719/priority-kb/pull/174); originating session ended without closing ritual firing. Entry marked `RECONSTRUCTED` per Step 5 sub-rule so verify-before-recommending distrusts the `Next session:` line.
+- Step 7b plan-CR (3 BLOCKING + 4 MAJOR + 6 MINOR + 4 QUESTIONS) load-bearing: revised stage-D from direct-fetch → `@anthropic-ai/sdk` (B2/M1/M2 collapse), pinned snapshot-id WebFetch as pre-coding verification (B1), surfaced stacked-PR retarget step (M4), agreed scope-split to Leg 1 only this chat with fresh-chat handoff for Leg 2.
+- Pre-coding verifications: stage-C/stage-B chronological ordering via `git log --reverse 47ba148..232e193` (B3 dissolved); `origin/main..origin/dev` empty → only docs→dev PR opens, release PR waits per Parallel `dev → main` sub-rule.
+- **Session Score 9/10.** Code 4/4. Protocol 3/3. Efficiency 2/3 (−1: Step 7 defaulted on a deferred-design choice without surfacing it; reviewer Q1 caught it).
+- **Process improvement:** `SESSION_PROTOCOL.md` Step 7 gained the **Deferred-decision-audit sub-rule** (see Step 7, codified 2026-05-21).
+- **Next session:** M3 item 3 stage D — Anthropic Sonnet synth adapter via `@anthropic-ai/sdk`. **Fresh chat strongly recommended.** Pre-coding verifications pinned in the reconstructed stage-C entry's `Next session:` line.
+
+---
+
 ## 2026-05-21 — M3 item 3 stage C Voyage rerank-2 adapter (RECONSTRUCTED)
 
 - Shipped M3 item 3 stage C via [#173](https://github.com/gzion2719/priority-kb/pull/173) → `dev` (OPEN at reconstruction time, not yet merged): new [lib/retrieval-voyage-rerank.ts](lib/retrieval-voyage-rerank.ts) (261 lines) implementing the `Reranker` interface via direct `fetch` to `POST /v1/rerank` — no SDK, mirroring the M2a-deferred embedder pattern. Sibling to `lib/agents-anthropic.ts`: caller-injected `apiKey`, no `process.env` reads in adapter, status-branch FIRST + parse SECOND so a 5xx with HTML body never leaks `SyntaxError`. Wires the `RERANK_PROVIDER=voyage` factory branch at [lib/retrieval.ts:200-209](lib/retrieval.ts#L200-L209) (previously threw "not wired yet" `RangeError`).
