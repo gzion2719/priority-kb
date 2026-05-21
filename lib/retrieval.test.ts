@@ -25,6 +25,7 @@ afterEach(() => {
   resetSynthesizerForTests();
   delete process.env.RERANK_PROVIDER;
   delete process.env.SYNTH_PROVIDER;
+  delete process.env.VOYAGE_API_KEY;
 });
 
 describe("createStubReranker — deterministic ranking for #8-compliant tests", () => {
@@ -163,8 +164,9 @@ describe("getReranker — env-driven singleton factory", () => {
     expect(r.model).toBe(STUB_RERANK_MODEL);
   });
 
-  it('throws RangeError naming "M3 item 3" when RERANK_PROVIDER="voyage"', () => {
+  it('throws RangeError naming VOYAGE_API_KEY when RERANK_PROVIDER="voyage" and key is absent', () => {
     process.env.RERANK_PROVIDER = "voyage";
+    delete process.env.VOYAGE_API_KEY;
     let err: unknown;
     try {
       getReranker();
@@ -172,8 +174,20 @@ describe("getReranker — env-driven singleton factory", () => {
       err = e;
     }
     expect(err).toBeInstanceOf(RangeError);
-    expect((err as Error).message).toMatch(/M3 item 3/);
-    expect((err as Error).message).toMatch(/voyage/i);
+    expect((err as Error).message).toMatch(/missing VOYAGE_API_KEY/);
+    expect((err as Error).message).toMatch(/iron rule #1/i);
+  });
+
+  it('resolves the Voyage adapter when RERANK_PROVIDER="voyage" and VOYAGE_API_KEY is set', () => {
+    process.env.RERANK_PROVIDER = "voyage";
+    process.env.VOYAGE_API_KEY = "pa-test-key-not-real";
+    try {
+      const r = getReranker();
+      expect(r.model).toBe("rerank-2");
+      expect(r.version).toBe("v1");
+    } finally {
+      delete process.env.VOYAGE_API_KEY;
+    }
   });
 
   it("throws RangeError naming the bad value when RERANK_PROVIDER is unknown", () => {
@@ -198,6 +212,10 @@ describe("getReranker — env-driven singleton factory", () => {
     const a = getReranker();
     resetRerankerForTests();
     process.env.RERANK_PROVIDER = "voyage";
+    // Explicit precondition: voyage branch without VOYAGE_API_KEY must
+    // throw RangeError. Don't depend on test-order cleanup of a sibling
+    // test's `finally` block.
+    delete process.env.VOYAGE_API_KEY;
     expect(() => getReranker()).toThrow(RangeError);
     // sanity: also verify a fresh stub resolves after reset
     resetRerankerForTests();
