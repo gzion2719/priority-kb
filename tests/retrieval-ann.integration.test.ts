@@ -384,14 +384,22 @@ describeIfDb("annCandidates — ADR-0012 §B + ADR-0013 §2.3 integration", () =
     // — but the regression is now load-bearing on a sibling assertion: the
     // value WITHOUT SET should be the pgvector default (40), and WITH SET
     // should be 100. Asserting both pins the contract.
+    // `SHOW hnsw.ef_search` returns a row whose column name is the dotted
+    // GUC name (`hnsw.ef_search`), which node-postgres exposes as a key
+    // that's awkward to access by destructuring. `current_setting()`
+    // returns the value under a clean alias.
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      const noSet = await client.query<{ ef_search: string }>("SHOW hnsw.ef_search");
+      const noSet = await client.query<{ ef_search: string }>(
+        "SELECT current_setting('hnsw.ef_search') AS ef_search",
+      );
       // Default is "40" on pgvector ≥ 0.5.0.
       expect(noSet.rows[0]?.ef_search).toBe("40");
       await client.query("SET LOCAL hnsw.ef_search = 100");
-      const afterSet = await client.query<{ ef_search: string }>("SHOW hnsw.ef_search");
+      const afterSet = await client.query<{ ef_search: string }>(
+        "SELECT current_setting('hnsw.ef_search') AS ef_search",
+      );
       expect(afterSet.rows[0]?.ef_search).toBe("100");
       await client.query("COMMIT");
     } finally {
