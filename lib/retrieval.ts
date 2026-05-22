@@ -264,6 +264,20 @@ export function resetSynthesizerForTests(): void {
   globalThis.__synthesizer = undefined;
 }
 
+/**
+ * Inject a fully-constructed `Synthesizer` into the singleton slot for the
+ * duration of a test. Test-only. Use instead of reaching directly into
+ * `globalThis.__synthesizer` — this preserves the contract boundary, so a
+ * future refactor that swaps the lazy-cache pattern for an env-re-resolution
+ * scheme breaks here (in one place) rather than silently in every test file.
+ *
+ * Pair with `resetSynthesizerForTests()` in `afterEach`. Pure setter — does
+ * not touch process env.
+ */
+export function setSynthesizerForTests(synth: Synthesizer): void {
+  globalThis.__synthesizer = synth;
+}
+
 // ─── ADR-0013: hybrid keyword lane + RRF + degraded-matrix types ───────────────
 
 /**
