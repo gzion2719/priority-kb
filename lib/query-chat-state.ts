@@ -8,7 +8,7 @@
 //   {kind:"answer_delta", text:    string}                   // 1+ deltas; stub synth emits exactly 1
 //   {kind:"done",         citation_ids: string[]}            // terminal happy path
 //   {kind:"no_content"}                                      // terminal: empty candidate set
-//   {kind:"error",        code: "internal"|"db"|"synth_unavailable"}  // terminal failure
+//   {kind:"error",        code: "internal"|"db"|"synth_unavailable"|"citation_validation_failed"}  // terminal failure
 //
 // Plus client-side terminal transitions for SSE-transport failure:
 //   - markStreamError(err)  — parse/fetch failure (no in-stream {kind:"error"} event)
@@ -43,7 +43,10 @@ export type QueryEvent =
   | { kind: "answer_delta"; text: string }
   | { kind: "done"; citation_ids: string[] }
   | { kind: "no_content" }
-  | { kind: "error"; code: "internal" | "db" | "synth_unavailable" };
+  | {
+      kind: "error";
+      code: "internal" | "db" | "synth_unavailable" | "citation_validation_failed";
+    };
 
 export type QueryState = {
   status: QueryStatus;
@@ -150,12 +153,20 @@ export function reset(): QueryState {
   return initialQueryState;
 }
 
-function errorMessageForCode(code: "internal" | "db" | "synth_unavailable"): string {
+function errorMessageForCode(
+  code: "internal" | "db" | "synth_unavailable" | "citation_validation_failed",
+): string {
   switch (code) {
     case "db":
       return "Database error — try again in a moment.";
     case "synth_unavailable":
       return "Answer service unavailable — try again later.";
+    case "citation_validation_failed":
+      // The synth produced an answer the route could not mechanically
+      // verify against the retrieved entries (per ADR-0012 §5 + iron rule
+      // #3). User-facing copy is intentionally generic; the audit row
+      // carries the failure discriminant for forensic replay.
+      return "Could not verify citations on the generated answer — try again.";
     case "internal":
       return "Something went wrong on our side.";
   }

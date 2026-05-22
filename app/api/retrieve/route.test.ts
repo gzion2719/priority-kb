@@ -16,11 +16,49 @@
 //   - #12 degraded: audit row payload has degraded=true and the slice's
 //     reason code; the no-content path still writes degraded:true.
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 
-import { POST } from "@/app/api/retrieve/route";
+import { POST, RETRIEVAL_RETRY_PREFIX_HASH } from "@/app/api/retrieve/route";
 import { RETRIEVAL_AGENT_PROMPT_HASH } from "@/lib/prompts";
+import {
+  resetSynthesizerForTests,
+  setSynthesizerForTests,
+  type Synthesizer,
+} from "@/lib/retrieval";
+
+/**
+ * Build a Synthesizer fake that returns the i-th `answers` string on the
+ * i-th call (with the last answer reused on any further calls — protects
+ * the tests against accidental N>2 calls without bypassing the
+ * retry-twice-forbidden audit assertion). Tracks call count for the
+ * negative-assertion dual check on retry tests.
+ */
+function makeInjectedSynth(answers: string[]): Synthesizer & { calls: () => number } {
+  let i = 0;
+  const synth: Synthesizer = {
+    model: "test-synth",
+    version: "v1-test",
+    async synthesize(_prompt: string, _ctx: string[]) {
+      const idx = i;
+      i += 1;
+      return {
+        answer: answers[Math.min(idx, answers.length - 1)] ?? "",
+        tokens_in: 0,
+        tokens_out: 0,
+      };
+    },
+  };
+  return Object.assign(synth, { calls: () => i });
+}
+
+function injectSynth(s: Synthesizer): void {
+  // Goes through the dedicated lib helper rather than reaching into
+  // globalThis directly — keeps the contract boundary single-sourced
+  // (n1 cross-ref in the 2c-i code-CR).
+  resetSynthesizerForTests();
+  setSynthesizerForTests(s);
+}
 
 const databaseUrl = process.env.DATABASE_URL;
 const isCi = process.env.CI === "true";
@@ -117,8 +155,15 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     await pool.end();
   });
 
+  beforeEach(() => {
+    // Each test starts with a fresh synth singleton; tests that need an
+    // injected synth call injectSynth(...) after this hook fires.
+    resetSynthesizerForTests();
+  });
+
   afterEach(async () => {
     await pool.query("TRUNCATE audit_log, chunks, entries_versions, entries CASCADE");
+    resetSynthesizerForTests();
   });
 
   async function seed(
@@ -138,7 +183,7 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     }
   }
 
-  it("happy path: candidates → answer_delta → done; citations are real entry IDs (NOT the stub synth's zero-UUID sentinel)", async () => {
+  it("happy path: candidates → answer_delta → done; injected synth emits valid Sources block over real topNIds", async () => {
     const realId = "11111111-1111-4111-8111-111111111111";
     await seed([
       {
@@ -148,6 +193,12 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
         sensitivity: "public",
       },
     ]);
+
+    // Inject a synth whose first attempt produces a §5-conformant answer:
+    // one inline citation, trailing Sources block, set-equal to inline,
+    // every UUID in `topNIds`, valid v4. The validator returns ok.
+    const synth = makeInjectedSynth([`Answer text [${realId}].\n\nSources: [${realId}]`]);
+    injectSynth(synth);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeReq({ query: "invoice" }, "user") as any, {});
@@ -161,20 +212,254 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
       text?: string;
     }>;
 
-    // Event ordering invariant.
+    // Event ordering invariant — validator passed first attempt.
     expect(events.map((e) => e.kind)).toEqual(["candidates", "answer_delta", "done"]);
-
-    // candidates contains the real seeded entry.
     expect(events[0]?.entries?.[0]?.entry_id).toBe(realId);
 
-    // done's citation_ids are REAL — NOT the stub's zero-UUID sentinel.
+    // done.citation_ids is the validator's deduplicated Sources list, NOT
+    // raw topNIds. The two coincide here (single seeded entry), but the
+    // assertion that it equals `validation.ids` distinguishes "validator
+    // ran" from "validator was skipped and topNIds was sent verbatim" —
+    // the latter would also produce `[realId]` here, so the wire shape is
+    // additionally pinned by the "Sources block stripped from
+    // answer_delta" assertion below (would NOT hold if the validator
+    // were bypassed and the synth's raw answer were streamed).
     expect(events[2]?.citation_ids).toEqual([realId]);
-    expect(events[2]?.citation_ids).not.toContain("00000000-0000-4000-8000-000000000000");
 
-    // Stub synth's trailing "Sources: [zero-uuid]" was stripped from
-    // the streamed answer text.
-    expect(events[1]?.text ?? "").not.toContain("00000000-0000-4000-8000-000000000000");
+    // The validator returns Sources-block-stripped body in `validation.body`.
+    // A regression bypassing the validator would stream the raw answer
+    // containing the literal "Sources: [...]" line.
     expect(events[1]?.text ?? "").not.toMatch(/Sources\s*:\s*\[/i);
+
+    // Exactly one synth call — no retry on the happy path.
+    expect(synth.calls()).toBe(1);
+  });
+
+  it("stub-default synth surfaces citation_validation_failed (behavior break disclosed in PR body)", async () => {
+    const realId = "44444444-4444-4444-8444-444444444444";
+    await seed([
+      {
+        id: realId,
+        title: "Stub default smoke",
+        body: "Body content for the stub-default smoke test.",
+        sensitivity: "public",
+      },
+    ]);
+
+    // No injectSynth — uses the default stub which emits a Sources block
+    // citing the zero-UUID sentinel. That UUID is NOT in topNIds, so
+    // validateCitations returns `hallucinated_id` on both attempts.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq({ query: "stub" }, "user") as any, {});
+    expect(res.status).toBe(200);
+
+    const events = (await readSseEvents(res)) as Array<{
+      kind: string;
+      code?: string;
+    }>;
+
+    // candidates fires, then the validator fails on attempt 1, retry fires
+    // and fails on attempt 2, then error.
+    expect(events.map((e) => e.kind)).toEqual(["candidates", "error"]);
+    expect(events.find((e) => e.kind === "error")?.code).toBe("citation_validation_failed");
+
+    // Audit row carries the §5 forensic fields.
+    const { rows } = await pool.query<{
+      payload: {
+        degraded_reason: string;
+        citation_ids: string[];
+        citation_validation_outcome: string;
+        citation_validation_detail: { offending_ids?: string[] } | null;
+        retry_attempted: boolean;
+        retry_prefix_hash: string | null;
+        status: string;
+      };
+    }>("SELECT payload FROM audit_log ORDER BY occurred_at DESC LIMIT 1");
+    // CRITICAL: degraded_reason MUST stay ROW_8_REASON in this slice
+    // (route is permanently row 8 by construction). 2c-ii's synth-ok
+    // rows will flip to citation_validation_failed per ADR-0012 §3.
+    expect(rows[0]?.payload.degraded_reason).toBe("embed_rerank_synth_unavailable_keyword_bare");
+    expect(rows[0]?.payload.citation_validation_outcome).toBe("hallucinated_id");
+    // CR M1: the per-reason payload IS persisted — not just the discriminant.
+    // The stub synth's sentinel UUID is the offending id.
+    expect(rows[0]?.payload.citation_validation_detail).toEqual({
+      offending_ids: ["00000000-0000-4000-8000-000000000000"],
+    });
+    expect(rows[0]?.payload.retry_attempted).toBe(true);
+    expect(rows[0]?.payload.retry_prefix_hash).toBe(RETRIEVAL_RETRY_PREFIX_HASH);
+    expect(rows[0]?.payload.citation_ids).toEqual([]);
+    expect(rows[0]?.payload.status).toBe("error");
+  });
+
+  it("retry-once succeeds: first attempt fails hallucinated_id, second attempt passes", async () => {
+    const realId = "55555555-5555-4555-8555-555555555555";
+    await seed([
+      {
+        id: realId,
+        title: "Retry-succeeds entry",
+        body: "Body content for the retry-succeeds test.",
+        sensitivity: "public",
+      },
+    ]);
+
+    // Attempt 1: cites a UUID not in topNIds → hallucinated_id.
+    // Attempt 2: cites the real id → ok.
+    const hallucinatedId = "99999999-9999-4999-8999-999999999999";
+    const synth = makeInjectedSynth([
+      `First try [${hallucinatedId}].\n\nSources: [${hallucinatedId}]`,
+      `Second try [${realId}].\n\nSources: [${realId}]`,
+    ]);
+    injectSynth(synth);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq({ query: "retry" }, "user") as any, {});
+    const events = (await readSseEvents(res)) as Array<{
+      kind: string;
+      citation_ids?: string[];
+      text?: string;
+    }>;
+
+    // Happy terminal kind — retry succeeded.
+    expect(events.map((e) => e.kind)).toEqual(["candidates", "answer_delta", "done"]);
+    expect(events[2]?.citation_ids).toEqual([realId]);
+
+    // DUAL ASSERTION (CR M5 negative-assertion floor): synthSpy call count
+    // distinguishes "retry ran and succeeded" from "retry was skipped".
+    // If retry were skipped, synth.calls()===1 and the first answer would
+    // have surfaced as error.
+    expect(synth.calls()).toBe(2);
+
+    const { rows } = await pool.query<{
+      payload: {
+        retry_attempted: boolean;
+        retry_prefix_hash: string | null;
+        citation_validation_outcome: string;
+        citation_validation_detail: unknown;
+        citation_ids: string[];
+        status: string;
+      };
+    }>("SELECT payload FROM audit_log ORDER BY occurred_at DESC LIMIT 1");
+    expect(rows[0]?.payload.retry_attempted).toBe(true);
+    expect(rows[0]?.payload.retry_prefix_hash).toBe(RETRIEVAL_RETRY_PREFIX_HASH);
+    expect(rows[0]?.payload.citation_validation_outcome).toBe("ok");
+    // CR M1: detail is null on success — only failure variants carry payload.
+    expect(rows[0]?.payload.citation_validation_detail).toBeNull();
+    expect(rows[0]?.payload.citation_ids).toEqual([realId]);
+    expect(rows[0]?.payload.status).toBe("ok");
+  });
+
+  it("retry-once both fail: ADR-0012 §5 caps at 2 synth calls; degraded_reason stays ROW_8_REASON", async () => {
+    const realId = "66666666-6666-4666-8666-666666666666";
+    await seed([
+      {
+        id: realId,
+        title: "Both-fail entry",
+        body: "Body content for the both-fail test.",
+        sensitivity: "public",
+      },
+    ]);
+
+    // Same hallucinated id on both attempts.
+    const hallucinatedId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const synth = makeInjectedSynth([
+      `Try 1 [${hallucinatedId}].\n\nSources: [${hallucinatedId}]`,
+      `Try 2 [${hallucinatedId}].\n\nSources: [${hallucinatedId}]`,
+      // Third element NEVER consumed — its presence pins that a future
+      // regression to "retry-twice" would surface as the test still
+      // asserting calls()===2 (negative-assertion floor).
+      `Try 3 [${hallucinatedId}].\n\nSources: [${hallucinatedId}]`,
+    ]);
+    injectSynth(synth);
+
+    // Query "test" matches the body's `test` token after Postgres' `simple`
+    // tokenizer splits "both-fail" into {both, fail} — using "bothfail"
+    // would not tokenize-match and the keyword lane would short-circuit to
+    // no_content, never reaching the retry path under test.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq({ query: "test" }, "user") as any, {});
+    const events = (await readSseEvents(res)) as Array<{ kind: string; code?: string }>;
+
+    expect(events.map((e) => e.kind)).toEqual(["candidates", "error"]);
+    expect(events.find((e) => e.kind === "error")?.code).toBe("citation_validation_failed");
+
+    // DUAL ASSERTION (CR M5): exactly 2 synth calls — §5 retry-once cap.
+    // Regression dropping retry → calls===1. Regression retry-twice →
+    // calls===3 (would consume the third answer in the array).
+    expect(synth.calls()).toBe(2);
+
+    const { rows } = await pool.query<{
+      payload: {
+        degraded_reason: string;
+        citation_validation_outcome: string;
+        citation_validation_detail: { offending_ids?: string[] } | null;
+        citation_ids: string[];
+        retry_attempted: boolean;
+        status: string;
+        error?: string;
+      };
+    }>("SELECT payload FROM audit_log ORDER BY occurred_at DESC LIMIT 1");
+    expect(rows[0]?.payload.degraded_reason).toBe("embed_rerank_synth_unavailable_keyword_bare");
+    expect(rows[0]?.payload.citation_validation_outcome).toBe("hallucinated_id");
+    // CR M1: per-reason payload preserved on the audit row — the offending
+    // UUID the synth cited on the second attempt is recoverable.
+    expect(rows[0]?.payload.citation_validation_detail).toEqual({
+      offending_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+    });
+    expect(rows[0]?.payload.citation_ids).toEqual([]);
+    expect(rows[0]?.payload.retry_attempted).toBe(true);
+    expect(rows[0]?.payload.status).toBe("error");
+    expect(rows[0]?.payload.error).toContain("citation_validation_failed");
+  });
+
+  it("validator-bypass negative assertion: done.citation_ids reflects the validator's Sources set, NOT topNIds", async () => {
+    // Seed TWO entries; inject a synth that cites only one of them. A
+    // regression that bypassed the validator and sent topNIds verbatim
+    // would surface as [realId1, realId2]; the validator-driven flow
+    // surfaces only the cited subset.
+    const realId1 = "77777777-7777-4777-8777-777777777777";
+    const realId2 = "88888888-8888-4888-8888-888888888888";
+    await seed([
+      {
+        id: realId1,
+        title: "First match",
+        body: "Body 1 about validator subsets and citation handling.",
+        sensitivity: "public",
+      },
+      {
+        id: realId2,
+        title: "Second match",
+        body: "Body 2 about validator subsets and citation handling.",
+        sensitivity: "public",
+      },
+    ]);
+
+    // Synth cites only realId1 even though both are in topNIds.
+    const synth = makeInjectedSynth([`Subset answer [${realId1}].\n\nSources: [${realId1}]`]);
+    injectSynth(synth);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq({ query: "validator" }, "user") as any, {});
+    const events = (await readSseEvents(res)) as Array<{
+      kind: string;
+      citation_ids?: string[];
+      text?: string;
+    }>;
+
+    expect(events.map((e) => e.kind)).toEqual(["candidates", "answer_delta", "done"]);
+    // The validator-driven citation set is the SUBSET — not topNIds.
+    expect(events[2]?.citation_ids).toEqual([realId1]);
+
+    // CR m2 strengthening: also assert the answer text uses the
+    // validator's stripped body, NOT the raw synth output. A regression
+    // that bypassed the validator (sending synthResult.answer verbatim)
+    // would surface the literal "Sources: [..." line; the validator's
+    // `result.body` strips it. Distinguishes "validator-stripped body"
+    // from "raw-answer-passthrough" — the topic the .toEqual above
+    // doesn't fully cover (a bypass could still set citation_ids
+    // correctly by accident if a future regression flipped only the
+    // answer source).
+    expect(events[1]?.text ?? "").not.toMatch(/Sources\s*:\s*\[/i);
+    expect(events[1]?.text ?? "").toContain("Subset answer");
   });
 
   it("iron rule #6: user role does NOT see restricted entries (flip-positive negative-assertion)", async () => {
