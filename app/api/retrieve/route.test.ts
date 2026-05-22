@@ -371,8 +371,12 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     ]);
     injectSynth(synth);
 
+    // Query "test" matches the body's `test` token after Postgres' `simple`
+    // tokenizer splits "both-fail" into {both, fail} — using "bothfail"
+    // would not tokenize-match and the keyword lane would short-circuit to
+    // no_content, never reaching the retry path under test.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await POST(makeReq({ query: "bothfail" }, "user") as any, {});
+    const res = await POST(makeReq({ query: "test" }, "user") as any, {});
     const events = (await readSseEvents(res)) as Array<{ kind: string; code?: string }>;
 
     expect(events.map((e) => e.kind)).toEqual(["candidates", "error"]);
