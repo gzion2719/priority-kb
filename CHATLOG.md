@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-22 — M3 item 3 stage E sub-slices 2a + 2b (2 features + 2 releases)
+
+- **Sub-slice 2a synth-input helper** via [#181](https://github.com/gzion2719/priority-kb/pull/181)→[#182](https://github.com/gzion2719/priority-kb/pull/182): [lib/retrieval-synth-input.ts](lib/retrieval-synth-input.ts) — pure XML-block builder per ADR-0012 §D. TS field `source_pointer` renders to `<source>` to match v0.2.0 prompt line 20 (resolved drift between ADR and hashed-prompt contract). Defensive boundary floors: sensitivity enum, non-empty entry_id, finite score.
+- **Sub-slice 2b citations validator** via [#183](https://github.com/gzion2719/priority-kb/pull/183)→[#184](https://github.com/gzion2719/priority-kb/pull/184) (#184 open): [lib/retrieval-citations.ts](lib/retrieval-citations.ts) — pure 8-step §5 + v0.2.0 set-equality validator with discriminated-union failure carrying offending IDs. Iron rule #3 mechanical floor.
+- **Step 7b two-pass discipline load-bearing on both.** Plan-CR drove `<source>` rename + sensitivity guard + trailing-prose anchor + CRLF normalize + multi-Sources discriminant + union-set UUID. Code-CR drove finite-score guard + Hebrew round-trip + multi-line-body realism + standalone-safe multi-block strip + 4 precedence pins.
+- **Stacked-PR child-retarget-before-merge fired correctly** when #181 merged: retargeted #183 + dev-merged + pushed before merge-UI could fire on stale parent ref. Verify-before-implementing-CR-claim refuted 2 findings (prompt-line-20 wording; `gen_random_uuid()` v4 via baseline migration).
+- **Session Score 8/10.** Code 3/4 (−1: 2 gate-failure rounds across slices, both off-by-one in self-written test literals — `toHaveLength(10)` actual 9 in 2a; 37-char string for 36-char regex in 2b). Protocol 3/3. Efficiency 2/3 (−1: same test-bug cluster). Ceiling: mental-trace exact-value test literals before writing; 2nd recurrence of class (1st 2026-05-21 stage D), 3rd triggers a mechanical floor per `feedback_prefer_mechanical_over_prose`.
+- **Process improvement:** none codifiable this session — 2nd recurrence of off-by-one-in-test-data is observation territory per the prefer-mechanical-over-prose pattern; 3rd recurrence builds a `scripts/precheck-test-numeric-literals.mjs` floor.
+- **Next session:** M3 item 3 stage E sub-slice 2c — `/api/retrieve` route wire-up consuming both helpers + retry-once with stricter system-prompt prefix (ADR-0012 §5) + 8-row degraded matrix integration (ADR-0012 §3 + ADR-0013 §3) + LogEvent emission for validation outcome (ADR-0012 §8). **Fresh chat strongly recommended** — substantively bigger surface. External-state: live `ANTHROPIC_API_KEY` + `VOYAGE_API_KEY` smoke deferred to Phase-2 user run (stub-mode unit + integration paths need no keys).
+
+---
+
 ## 2026-05-21 — M3 item 3 stages D + E sub-slice 1 (2 PR pairs, all merged)
 
 - **Stage D Anthropic synth adapter** via [#176](https://github.com/gzion2719/priority-kb/pull/176)→[#177](https://github.com/gzion2719/priority-kb/pull/177) (on `main`): new [lib/retrieval-anthropic-synth.ts](lib/retrieval-anthropic-synth.ts) implementing `Synthesizer` via `@anthropic-ai/sdk` non-streaming `messages.create({stream:false})`; factory branch `SYNTH_PROVIDER=anthropic` at [lib/retrieval.ts](lib/retrieval.ts) wired. Two new error classes (`SynthRefusalError`, `SynthTruncatedError`) discriminate 200-OK policy + truncation from transient `SynthUnavailableError`. Model id `claude-sonnet-4-6` — dateless IS the pinned snapshot per Anthropic docs (verified via WebFetch, refuting stage-C handoff's dated-suffix guidance).
