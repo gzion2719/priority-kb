@@ -37,6 +37,9 @@
  * See `docs/adr/0005-log-event-schema.md`.
  */
 
+import type { DegradedReasonCode } from "@/lib/retrieval-degraded";
+import type { CitationValidationOutcome } from "@/lib/retrieval";
+
 export type Tokens = {
   input?: number;
   output?: number;
@@ -99,7 +102,89 @@ export interface LogEventVoyage extends LogEventBase {
   kind: "voyage";
 }
 
-export type LogEvent = LogEventClaude | LogEventVoyage;
+/**
+ * Pre-stream config-error sentinels emitted on the route's pre-stream paths
+ * (embedder/synth/reranker factory throws). NOT in {@link DegradedReasonCode}
+ * — those are matrix outcomes; these are upstream-of-the-matrix failures.
+ * Mirrors the sentinel set in {@link app/api/retrieve/route.ts}'s
+ * `preStreamErrorOutcome`.
+ */
+export type PreStreamConfigReason = "embedder_config" | "synth_config" | "synth_unavailable";
+
+/**
+ * Request-level summary event for the `/api/retrieve` pipeline.
+ *
+ * Intentionally does NOT extend {@link LogEventBase}: the aggregate event
+ * spans three different vendor model calls (embed, rerank, synth) and naming
+ * a single "model" would be a lie. Per-vendor identity lives on the
+ * `kind:"voyage"` / `kind:"claude"` lines and on the `audit_log` row's
+ * `embedding_model` / `synthesizer_model` fields. ADR-0005 amendment
+ * 2026-05-23 names this as the second variant (alongside the open
+ * `kind:"route"` BACKLOG item) without the `LogEventBase` shape.
+ *
+ * `cost_usd` is always `null` here — aggregate costs are summable from the
+ * per-vendor lines; reporting a number would double-count. The field is
+ * present so the {@link logEvent} cost-type runtime guard permits the line
+ * uniformly across variants.
+ *
+ * The `error` field passes through the same redact-then-truncate pipeline as
+ * the other variants (see {@link logEvent}).
+ *
+ * `keyword_only` is technically derivable from {@link degraded_reason}
+ * (any `embed_*_keyword_*` or `no_keyword_match_under_embed_outage`), but
+ * exposing both is cheap and lets log consumers filter on either without
+ * pattern-matching the reason string.
+ */
+export interface LogEventRetrievalPipeline {
+  kind: "retrieval_pipeline";
+  /** Total end-to-end latency including pre-stream config-resolution. */
+  latency_ms: number;
+  /**
+   * Always `null` for this variant — see interface JSDoc. Present so the
+   * runtime cost-type guard fires uniformly across variants.
+   */
+  cost_usd: number | null;
+  status?: LogStatus;
+  /** Subject to redact + truncate (same pipeline as other variants). */
+  error?: string;
+  /**
+   * Pipeline-level correlation id; intentionally a DIFFERENT field name from
+   * the per-vendor SDK `request_id` (omitted from this variant to avoid
+   * overloading the dashboard correlation key). Optional — populated when
+   * the route layer surfaces one.
+   */
+  pipeline_request_id?: string;
+  /**
+   * SHA-256(redactSecrets(query.trim())) first 16 hex chars. Log-correlation
+   * scope ONLY — NOT a cache key. Omitted on the JSON-parse-400 path where
+   * no query was extractable.
+   */
+  query_hash?: string;
+  /** Role string from stub-auth; decoupled from `auth.ts` `Role` union. */
+  role: string;
+  degraded: boolean;
+  /**
+   * Matrix `DegradedReasonCode` OR pre-stream config sentinel
+   * (`embedder_config` / `synth_config` / `synth_unavailable`). Typed as the
+   * explicit union so a future enum addition compiles loudly.
+   */
+  degraded_reason?: DegradedReasonCode | PreStreamConfigReason;
+  /**
+   * Validator outcome discriminant; `null` when validation never ran (synth
+   * absent, pre-stream error, no-content terminal). Imported as type-only
+   * from `lib/retrieval` — purely compile-time coupling, erased at runtime.
+   */
+  citation_validation_outcome: CitationValidationOutcome | null;
+  retry_attempted: boolean;
+  keyword_only: boolean;
+  /**
+   * @internal — the helper injects `ts` itself; `ts?: never` blocks callers
+   * from passing one even when widening through a structural cast.
+   */
+  ts?: never;
+}
+
+export type LogEvent = LogEventClaude | LogEventVoyage | LogEventRetrievalPipeline;
 
 /** Maximum length of the `error` field after redaction; longer is truncated. */
 export const ERROR_MAX_LEN = 500;
