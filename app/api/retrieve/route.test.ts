@@ -292,8 +292,9 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     expect(rows[0]?.payload.retry_attempted).toBe(true);
     expect(rows[0]?.payload.retry_prefix_hash).toBe(RETRIEVAL_RETRY_PREFIX_HASH);
     expect(rows[0]?.payload.citation_ids).toEqual([]);
-    // Validation-fail is NOT a synth-down error — status stays "ok".
-    expect(rows[0]?.payload.status).toBe("ok");
+    // Code-CR B1: post-retry validation failure tags the audit row as an
+    // error outcome per the RetrievalAuditPayload.status JSDoc contract.
+    expect(rows[0]?.payload.status).toBe("error");
   });
 
   it("retry-once succeeds: first attempt fails hallucinated_id, second attempt passes", async () => {
@@ -418,8 +419,9 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     });
     expect(rows[0]?.payload.citation_ids).toEqual([]);
     expect(rows[0]?.payload.retry_attempted).toBe(true);
-    // Validation-fail is NOT a synth-down error — status stays "ok".
-    expect(rows[0]?.payload.status).toBe("ok");
+    // Code-CR B1: post-retry validation failure tags the audit row as an
+    // error outcome per the RetrievalAuditPayload.status JSDoc contract.
+    expect(rows[0]?.payload.status).toBe("error");
   });
 
   it("validator-bypass negative assertion: done.citation_ids reflects the validator's Sources set, NOT topNIds", async () => {
