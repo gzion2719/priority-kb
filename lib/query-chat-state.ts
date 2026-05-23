@@ -6,7 +6,8 @@
 //
 //   {kind:"candidates",   entries: QueryCandidate[]}         // sent first if any matched
 //   {kind:"answer_delta", text:    string}                   // 1+ deltas; stub synth emits exactly 1
-//   {kind:"done",         citation_ids: string[]}            // terminal happy path
+//   {kind:"done",         citation_ids, degraded?, degraded_reason?}  // terminal happy path
+//   {kind:"chunks_only",  entries: QueryChunkSnippet[]}      // terminal: synth-down rows (ADR-0012 §3)
 //   {kind:"no_content"}                                      // terminal: empty candidate set
 //   {kind:"error",        code: "internal"|"db"|"synth_unavailable"|"citation_validation_failed"}  // terminal failure
 //
@@ -15,19 +16,34 @@
 //   - markUnavailable()     — 503 response from the route (iron rule #12)
 //
 // Statuses:
-//   idle        — no active stream; ready to submit.
-//   streaming   — SSE connection open; deltas arriving.
-//   done        — last turn finalized cleanly via {kind:"done"}.
-//   no_content  — last turn returned {kind:"no_content"}; UI shows the
-//                 "I don't have a KB entry that answers this" affordance.
-//   error       — terminal failure (in-stream error event OR transport error).
-//   unavailable — route returned 503; UI shows the iron-rule-#12 banner.
+//   idle         — no active stream; ready to submit.
+//   streaming    — SSE connection open; deltas arriving.
+//   done         — last turn finalized cleanly via {kind:"done"}.
+//   chunks_only  — last turn finalized via {kind:"chunks_only"}; UI renders
+//                  ranked chunk snippets with citations but no synthesized
+//                  answer. ADR-0012 §3 rows 2/4/7 (synth unavailable).
+//   no_content   — last turn returned {kind:"no_content"}; UI shows the
+//                  "I don't have a KB entry that answers this" affordance.
+//   error        — terminal failure (in-stream error event OR transport error).
+//   unavailable  — route returned 503; UI shows the iron-rule-#12 banner.
 //
 // Pure functions only — no React, no fetch, no timers. The page calls
 // setState((s) => applyEvent(s, ev)) inside the SSE consumer loop and
 // setState((s) => markX(s, ...)) at terminal client-side transitions.
 
-export type QueryStatus = "idle" | "streaming" | "done" | "no_content" | "error" | "unavailable";
+// Import from the leaf module — NOT @/lib/retrieval — so a future
+// orchestrator that imports QueryEvent from this file doesn't close a
+// circular dependency through retrieval.ts. See lib/retrieval-degraded.ts.
+import type { DegradedReasonCode } from "@/lib/retrieval-degraded";
+
+export type QueryStatus =
+  | "idle"
+  | "streaming"
+  | "done"
+  | "chunks_only"
+  | "no_content"
+  | "error"
+  | "unavailable";
 
 export type QueryCandidate = {
   entry_id: string;
@@ -37,11 +53,55 @@ export type QueryCandidate = {
   last_verified_at: string; // ISO timestamp
 };
 
+/**
+ * A chunk-snippet entry surfaced when synth is unavailable but candidates
+ * have content (ADR-0012 §3 rows 2/4/7 — synth fails, rerank-or-fused
+ * chunks survive). The `snippet` is the same text the synth would have
+ * received in its context block — for ANN-path entries it's the best
+ * chunk's body slice; for keyword-only entries (ADR-0013 §2.3 step 4) it's
+ * the synthetic "title + first 500 tokens" representative. The UI renders
+ * citations from these directly, satisfying iron rule #3 without synthesis.
+ */
+export type QueryChunkSnippet = {
+  entry_id: string;
+  title: string;
+  category: string;
+  sensitivity: "public" | "internal" | "restricted";
+  last_verified_at: string;
+  snippet: string;
+};
+
 /** Event vocabulary the route sends over SSE; mirrored in app/api/retrieve/route.ts. */
 export type QueryEvent =
   | { kind: "candidates"; entries: QueryCandidate[] }
   | { kind: "answer_delta"; text: string }
-  | { kind: "done"; citation_ids: string[] }
+  | {
+      kind: "done";
+      citation_ids: string[];
+      /**
+       * Sub-slice 2c-ii additions: the orchestrator surfaces the degraded
+       * mode + reason on the terminal `done` event so the UI can render the
+       * iron-rule-#12 banner without a side-channel. Optional so legacy 2c-i
+       * route emissions (always row 8 by construction, but no client-readable
+       * signal) remain backwards-compatible — a client reading only
+       * `citation_ids` ignores them.
+       */
+      degraded?: boolean;
+      degraded_reason?: DegradedReasonCode;
+    }
+  | {
+      kind: "chunks_only";
+      entries: QueryChunkSnippet[];
+      /**
+       * Forward-compat (added in 2c-ii foundation slice): the orchestrator
+       * MAY surface the specific synth-down reason (rows 2/4/7 — synth_
+       * unavailable vs rerank_and_synth_unavailable vs embed_and_synth_
+       * unavailable_keyword_bare) so the UI can render distinct copy. Optional
+       * so emitters that don't carry it remain wire-compatible; absence ===
+       * "synth-down, reason unspecified".
+       */
+      degraded_reason?: DegradedReasonCode;
+    }
   | { kind: "no_content" }
   | {
       kind: "error";
@@ -58,6 +118,29 @@ export type QueryState = {
   answer: string;
   /** Citation IDs from the terminal done event; non-empty only after done. */
   citations: string[];
+  /**
+   * Chunk snippets from a terminal {kind:"chunks_only"} event; non-empty
+   * only when status === "chunks_only". Carries the same shape the synth
+   * would have received, so the UI can render citations + body excerpts
+   * without a synthesized answer.
+   *
+   * Absence convention: ALWAYS PRESENT, defaulting to `[]`. Mirrors
+   * `candidates`/`citations` which use the same "empty-array sentinel for
+   * not-yet-set" convention so the UI can render-by-length without
+   * branching on undefined. Contrast with `degraded`/`degradedReason`
+   * below, which use "absent === not-yet-set" so render code can
+   * distinguish "we know it's healthy" from "we have no signal yet."
+   */
+  chunkSnippets: QueryChunkSnippet[];
+  /**
+   * Set on the terminal `done` event when the orchestrator emits a
+   * degraded-mode flag (ADR-0012 §3 + ADR-0013 §3). UI uses this to render
+   * the iron-rule-#12 banner. Absent on healthy `done`; absent on terminal
+   * states other than `done` (chunks_only / unavailable carry degraded
+   * semantics implicitly).
+   */
+  degraded?: boolean;
+  degradedReason?: DegradedReasonCode;
   /** Terminal error message (from {kind:"error"} OR transport failure). */
   error?: string;
 };
@@ -68,6 +151,7 @@ export const initialQueryState: QueryState = {
   candidates: [],
   answer: "",
   citations: [],
+  chunkSnippets: [],
 };
 
 /**
@@ -85,6 +169,7 @@ export function startStream(_state: QueryState, query: string): QueryState {
     candidates: [],
     answer: "",
     citations: [],
+    chunkSnippets: [],
   };
 }
 
@@ -106,7 +191,31 @@ export function applyEvent(state: QueryState, event: QueryEvent): QueryState {
       return { ...state, answer: state.answer + event.text };
 
     case "done":
-      return { ...state, status: "done", citations: event.citation_ids };
+      return {
+        ...state,
+        status: "done",
+        citations: event.citation_ids,
+        // Only set when the route surfaces a degraded mode on `done`. Stays
+        // absent on healthy `done` so legacy consumers see no shape change.
+        ...(event.degraded !== undefined ? { degraded: event.degraded } : {}),
+        ...(event.degraded_reason !== undefined ? { degradedReason: event.degraded_reason } : {}),
+      };
+
+    case "chunks_only":
+      // Partial `answer` accumulated before this terminal is preserved on
+      // state (UI may want to show "partial: …" alongside the chunk
+      // snippets). The orchestrator's contract is that it emits
+      // chunks_only INSTEAD of answer_delta when synth is unavailable, so
+      // in practice `state.answer === ""` here — but the reducer does not
+      // wipe it defensively.
+      return {
+        ...state,
+        status: "chunks_only",
+        chunkSnippets: event.entries,
+        ...(event.degraded_reason !== undefined
+          ? { degradedReason: event.degraded_reason, degraded: true }
+          : {}),
+      };
 
     case "no_content":
       return { ...state, status: "no_content" };

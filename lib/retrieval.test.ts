@@ -18,6 +18,8 @@ import {
   getSynthesizer,
   resetRerankerForTests,
   resetSynthesizerForTests,
+  setRerankerForTests,
+  setSynthesizerForTests,
 } from "./retrieval";
 
 afterEach(() => {
@@ -292,6 +294,24 @@ describe("getSynthesizer — env-driven singleton factory", () => {
     const b = getSynthesizer();
     expect(b).not.toBe(a);
     expect(b.model).toBe(STUB_SYNTH_MODEL);
+  });
+
+  it("setRerankerForTests() injects a reranker that getReranker returns identity-equal", () => {
+    // Parallel to setSynthesizerForTests. The orchestrator slice (2c-ii)
+    // needs to inject a typed-error-throwing reranker into the singleton
+    // slot to drive the rerank-down matrix rows without touching env vars.
+    const injected = createStubReranker();
+    setRerankerForTests(injected);
+    expect(getReranker()).toBe(injected);
+    // resetRerankerForTests in afterEach clears the slot.
+  });
+
+  it("setSynthesizerForTests() injects a synthesizer that getSynthesizer returns identity-equal", () => {
+    // Pin the symmetric setter's contract — the orchestrator slice will
+    // drive synth-down rows the same way.
+    const injected = createStubSynthesizer();
+    setSynthesizerForTests(injected);
+    expect(getSynthesizer()).toBe(injected);
   });
 });
 

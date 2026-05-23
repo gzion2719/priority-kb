@@ -55,12 +55,27 @@ export type EmbeddingBatchResult = {
   tokens_used: number;
 };
 
+/**
+ * Per-call options. ADR-0012 §"Stage A" mandates `input_type:"query"` for
+ * retrieval-side embedding to engage Voyage `voyage-3-large`'s asymmetric
+ * query/document mode (mis-tagging halves recall). Optional + default
+ * "document" so M2a ingest call sites are unaffected.
+ *
+ * The stub embedder IGNORES this option — its hash-derived vectors don't
+ * model the query/document asymmetry. Stub-mode tests therefore can't
+ * detect a future bug where retrieval is wired with `input_type:"document"`;
+ * that floor lives on real Voyage at M3 acceptance.
+ */
+export type EmbedOptions = {
+  input_type?: "query" | "document";
+};
+
 export interface Embedder {
   readonly dimensions: number;
   readonly model: string;
   readonly version: string;
-  embed(text: string): Promise<EmbeddingResult>;
-  embedBatch(texts: string[]): Promise<EmbeddingBatchResult>;
+  embed(text: string, options?: EmbedOptions): Promise<EmbeddingResult>;
+  embedBatch(texts: string[], options?: EmbedOptions): Promise<EmbeddingBatchResult>;
 }
 
 /**
@@ -113,7 +128,11 @@ export function createStubEmbedder(): Embedder {
     dimensions,
     model,
     version,
-    async embed(text: string): Promise<EmbeddingResult> {
+    // `_options` intentionally unused: the stub's hash-derived vectors don't
+    // model Voyage's query/document asymmetry. Accepting the option keeps
+    // the interface signature uniform so callers don't branch on the
+    // embedder identity. See EmbedOptions JSDoc.
+    async embed(text: string, _options?: EmbedOptions): Promise<EmbeddingResult> {
       return {
         vector: vectorFor(text),
         model,
@@ -121,7 +140,7 @@ export function createStubEmbedder(): Embedder {
         tokens_used: 0,
       };
     },
-    async embedBatch(texts: string[]): Promise<EmbeddingBatchResult> {
+    async embedBatch(texts: string[], _options?: EmbedOptions): Promise<EmbeddingBatchResult> {
       return {
         vectors: texts.map(vectorFor),
         model,
@@ -166,4 +185,18 @@ export function getEmbedder(): Embedder {
 /** Clears the singleton cache. Test-only. Mirrors lib/db.ts's reset story. */
 export function resetEmbedderForTests(): void {
   globalThis.__embedder = undefined;
+}
+
+/**
+ * Inject a fully-constructed `Embedder` into the singleton slot for the
+ * duration of a test. Test-only. Symmetric with the retrieval module's
+ * `setRerankerForTests` / `setSynthesizerForTests`; the orchestrator slice
+ * (2c-ii) drives the embed-down matrix rows by injecting an embedder whose
+ * `embed()` throws `EmbeddingUnavailableError`, without touching env vars.
+ *
+ * Pair with `resetEmbedderForTests()` in `afterEach`. Pure setter — does
+ * not touch process env.
+ */
+export function setEmbedderForTests(embedder: Embedder): void {
+  globalThis.__embedder = embedder;
 }
