@@ -235,7 +235,7 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     expect(synth.calls()).toBe(1);
   });
 
-  it("stub-default synth surfaces citation_validation_failed (behavior break disclosed in PR body)", async () => {
+  it("stub-default synth surfaces citation_validation_failed via chunks_only (2c-ii orchestrator)", async () => {
     const realId = "44444444-4444-4444-8444-444444444444";
     await seed([
       {
@@ -255,17 +255,24 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
 
     const events = (await readSseEvents(res)) as Array<{
       kind: string;
-      code?: string;
+      degraded_reason?: string;
+      entries?: Array<{ entry_id: string }>;
     }>;
 
-    // candidates fires, then the validator fails on attempt 1, retry fires
-    // and fails on attempt 2, then error.
-    expect(events.map((e) => e.kind)).toEqual(["candidates", "error"]);
-    expect(events.find((e) => e.kind === "error")?.code).toBe("citation_validation_failed");
+    // 2c-ii: validation-fail-after-retry degrades to chunks_only per
+    // ADR-0012 §3. The kind:"error" emission was a slice-2c-i row-8-by-
+    // construction simplification, superseded by the orchestrator.
+    expect(events.map((e) => e.kind)).toEqual(["candidates", "chunks_only"]);
+    const terminal = events.find((e) => e.kind === "chunks_only")!;
+    expect(terminal.degraded_reason).toBe("citation_validation_failed");
+    // chunks_only carries the rerank-input snippets so the UI can render
+    // citations without a synthesized answer (iron rule #3).
+    expect(terminal.entries?.[0]?.entry_id).toBe(realId);
 
     // Audit row carries the §5 forensic fields.
     const { rows } = await pool.query<{
       payload: {
+        degraded: boolean;
         degraded_reason: string;
         citation_ids: string[];
         citation_validation_outcome: string;
@@ -275,19 +282,18 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
         status: string;
       };
     }>("SELECT payload FROM audit_log ORDER BY occurred_at DESC LIMIT 1");
-    // CRITICAL: degraded_reason MUST stay ROW_8_REASON in this slice
-    // (route is permanently row 8 by construction). 2c-ii's synth-ok
-    // rows will flip to citation_validation_failed per ADR-0012 §3.
-    expect(rows[0]?.payload.degraded_reason).toBe("embed_rerank_synth_unavailable_keyword_bare");
+    expect(rows[0]?.payload.degraded).toBe(true);
+    expect(rows[0]?.payload.degraded_reason).toBe("citation_validation_failed");
     expect(rows[0]?.payload.citation_validation_outcome).toBe("hallucinated_id");
-    // CR M1: the per-reason payload IS persisted — not just the discriminant.
-    // The stub synth's sentinel UUID is the offending id.
+    // Per-reason payload IS persisted. The stub synth's sentinel UUID is the offending id.
     expect(rows[0]?.payload.citation_validation_detail).toEqual({
       offending_ids: ["00000000-0000-4000-8000-000000000000"],
     });
     expect(rows[0]?.payload.retry_attempted).toBe(true);
     expect(rows[0]?.payload.retry_prefix_hash).toBe(RETRIEVAL_RETRY_PREFIX_HASH);
     expect(rows[0]?.payload.citation_ids).toEqual([]);
+    // Code-CR B1: post-retry validation failure tags the audit row as an
+    // error outcome per the RetrievalAuditPayload.status JSDoc contract.
     expect(rows[0]?.payload.status).toBe("error");
   });
 
@@ -348,7 +354,7 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     expect(rows[0]?.payload.status).toBe("ok");
   });
 
-  it("retry-once both fail: ADR-0012 §5 caps at 2 synth calls; degraded_reason stays ROW_8_REASON", async () => {
+  it("retry-once both fail: ADR-0012 §5 caps at 2 synth calls; degrades to chunks_only", async () => {
     const realId = "66666666-6666-4666-8666-666666666666";
     await seed([
       {
@@ -377,38 +383,45 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     // no_content, never reaching the retry path under test.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeReq({ query: "test" }, "user") as any, {});
-    const events = (await readSseEvents(res)) as Array<{ kind: string; code?: string }>;
+    const events = (await readSseEvents(res)) as Array<{
+      kind: string;
+      degraded_reason?: string;
+    }>;
 
-    expect(events.map((e) => e.kind)).toEqual(["candidates", "error"]);
-    expect(events.find((e) => e.kind === "error")?.code).toBe("citation_validation_failed");
+    expect(events.map((e) => e.kind)).toEqual(["candidates", "chunks_only"]);
+    expect(events.find((e) => e.kind === "chunks_only")?.degraded_reason).toBe(
+      "citation_validation_failed",
+    );
 
-    // DUAL ASSERTION (CR M5): exactly 2 synth calls — §5 retry-once cap.
+    // DUAL ASSERTION: exactly 2 synth calls — §5 retry-once cap.
     // Regression dropping retry → calls===1. Regression retry-twice →
     // calls===3 (would consume the third answer in the array).
     expect(synth.calls()).toBe(2);
 
     const { rows } = await pool.query<{
       payload: {
+        degraded: boolean;
         degraded_reason: string;
         citation_validation_outcome: string;
         citation_validation_detail: { offending_ids?: string[] } | null;
         citation_ids: string[];
         retry_attempted: boolean;
         status: string;
-        error?: string;
       };
     }>("SELECT payload FROM audit_log ORDER BY occurred_at DESC LIMIT 1");
-    expect(rows[0]?.payload.degraded_reason).toBe("embed_rerank_synth_unavailable_keyword_bare");
+    expect(rows[0]?.payload.degraded).toBe(true);
+    expect(rows[0]?.payload.degraded_reason).toBe("citation_validation_failed");
     expect(rows[0]?.payload.citation_validation_outcome).toBe("hallucinated_id");
-    // CR M1: per-reason payload preserved on the audit row — the offending
-    // UUID the synth cited on the second attempt is recoverable.
+    // Per-reason payload preserved on the audit row — the offending UUID the
+    // synth cited on the second attempt is recoverable.
     expect(rows[0]?.payload.citation_validation_detail).toEqual({
       offending_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
     });
     expect(rows[0]?.payload.citation_ids).toEqual([]);
     expect(rows[0]?.payload.retry_attempted).toBe(true);
+    // Code-CR B1: post-retry validation failure tags the audit row as an
+    // error outcome per the RetrievalAuditPayload.status JSDoc contract.
     expect(rows[0]?.payload.status).toBe("error");
-    expect(rows[0]?.payload.error).toContain("citation_validation_failed");
   });
 
   it("validator-bypass negative assertion: done.citation_ids reflects the validator's Sources set, NOT topNIds", async () => {
@@ -491,7 +504,7 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     );
   });
 
-  it("no_content path: empty corpus → no_content event + audit row still written with degraded:true", async () => {
+  it("no_content path: empty corpus → no_content event + audit row written with healthy embed state", async () => {
     // No seed.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeReq({ query: "anything that matches nothing" }, "user") as any, {});
@@ -500,24 +513,31 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     const events = (await readSseEvents(res)) as Array<{ kind: string }>;
     expect(events.map((e) => e.kind)).toEqual(["no_content"]);
 
-    // Audit row exists with the slice's degraded reason.
+    // Audit row exists. Under 2c-ii's orchestrator the stub embedder runs
+    // healthy and both lanes return zero rows from an empty corpus, so the
+    // matrix lands on "no degraded" — embed-OK plus empty-fused is the
+    // explicitly-not-degraded variant per `mapDegradedReason`'s flip-positive.
     const { rows } = await pool.query<{
       kind: string;
       prompt_hash: string;
       payload: {
         degraded: boolean;
-        degraded_reason: string;
+        degraded_reason?: string;
         keyword_only: boolean;
-        candidate_count: number;
+        ann_candidate_ids: string[];
+        keyword_candidate_ids: string[];
+        fused_ids: string[];
         role: string;
       };
     }>("SELECT kind, prompt_hash, payload FROM audit_log ORDER BY occurred_at DESC LIMIT 1");
     expect(rows[0]?.kind).toBe("agent_retrieval");
     expect(rows[0]?.prompt_hash).toBe(RETRIEVAL_AGENT_PROMPT_HASH);
-    expect(rows[0]?.payload.degraded).toBe(true);
-    expect(rows[0]?.payload.degraded_reason).toBe("embed_rerank_synth_unavailable_keyword_bare");
-    expect(rows[0]?.payload.keyword_only).toBe(true);
-    expect(rows[0]?.payload.candidate_count).toBe(0);
+    expect(rows[0]?.payload.degraded).toBe(false);
+    expect(rows[0]?.payload.degraded_reason).toBeUndefined();
+    expect(rows[0]?.payload.keyword_only).toBe(false);
+    expect(rows[0]?.payload.ann_candidate_ids).toEqual([]);
+    expect(rows[0]?.payload.keyword_candidate_ids).toEqual([]);
+    expect(rows[0]?.payload.fused_ids).toEqual([]);
     expect(rows[0]?.payload.role).toBe("user");
   });
 
