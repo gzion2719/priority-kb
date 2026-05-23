@@ -93,3 +93,47 @@ The redaction pass is *not* a full PII scrub — it covers the highest-blast-rad
 - **`vi.spyOn(process.stdout, "write")` as the primary testing strategy.** Rejected — vitest's worker-pool reporter also writes to stdout; spy call counts get polluted. Sink injection is cleaner. (`vi.spyOn` is still used in one targeted test to verify that `resetLogSink()` restores the default behavior — that's bounded.)
 - **Per-vendor `request_id` fields** (`claude_request_id`, `voyage_request_id`). Rejected — premature; one `request_id` field with a JSDoc note ("prefer SDK-provided id") is enough until evidence of correlation failures.
 - **`kind ↔ model` consistency check** (refuse `kind:"claude"` + `model:"voyage-3-large"`). Rejected — model-name allowlists drift; JSDoc note "caller is responsible" is enough until evidence of the typo bug.
+
+---
+
+## Amendment 2026-05-23 — `kind:"retrieval_pipeline"` request-summary variant
+
+Closes [docs/BACKLOG.md](../BACKLOG.md) "LogEvent discriminant for retrieval pipeline" + the open item in [ADR-0012](0012-retrieval-pipeline.md) §8.
+
+**What ships.** `LogEvent` gains a third variant `LogEventRetrievalPipeline` (`kind:"retrieval_pipeline"`) emitted exactly once per `/api/retrieve` request on every terminal route path except the 401-from-`withUserOrAdmin` short-circuit (the auth wrapper returns before `handler` is invoked; emitting from there would require a separate outer-logger surface — out of scope for this slice).
+
+**Shape (full declaration in [lib/log.ts](../../lib/log.ts)):**
+
+```ts
+export interface LogEventRetrievalPipeline {
+  kind: "retrieval_pipeline";
+  latency_ms: number;                 // total wall-clock from handler entry
+  cost_usd: number | null;            // always null — aggregate costs sum from per-vendor lines
+  role: string;                       // decoupled from auth.ts Role union
+  degraded: boolean;
+  degraded_reason?: DegradedReasonCode | "embedder_config" | "synth_config" | "synth_unavailable";
+  citation_validation_outcome: CitationValidationOutcome | null;
+  retry_attempted: boolean;
+  keyword_only: boolean;
+  status?: "ok" | "error";
+  error?: string;                     // redact + truncate pipeline inherited
+  query_hash?: string;                // sha256(redact(query.trim())).slice(0,16) — log-correlation only
+  pipeline_request_id?: string;       // distinct from per-vendor request_id
+  ts?: never;                         // helper-injected
+}
+```
+
+**Departures from the original ADR shape.**
+
+1. **Does NOT extend `LogEventBase`.** The aggregate event spans embed + rerank + synth model calls; naming a single "model" / "model_version" / "prompt_hash" would be a lie. Per-vendor identity lives on the `kind:"voyage"` / `kind:"claude"` lines and on the `audit_log` row's `embedding_model` / `synthesizer_model` columns. This is the second variant in the union that opts out of `LogEventBase` (the open BACKLOG `kind:"route"` item for ingest-route 500-paths is the sibling; the two BACKLOG items resolved independently). The original-ADR enforcement framing of #9/#10 at the type level is preserved for the variants where it applies; this variant explicitly does NOT carry vendor identity, so #9/#10 are not relevant.
+2. **`cost_usd: number | null` is required and always `null`.** Field is present so the existing runtime cost-type guard permits this variant uniformly across the union — no special-case in `logEvent()`.
+3. **`request_id` is intentionally not reused.** ADR-0005 reserved `request_id` for SDK-provided vendor call ids. A separate optional `pipeline_request_id` field is provided for route-level correlation to avoid collapsing two semantically-different correlation keys into one dashboard filter.
+4. **`citation_validation_outcome` typed as `CitationValidationOutcome | null`.** Imported as `import type` from `@/lib/retrieval` — purely compile-time coupling, erased at runtime. M5 dashboards filtering on string literals get compile-time-checked values rather than bare `string`.
+5. **`degraded_reason` typed as the explicit union of `DegradedReasonCode` + pre-stream sentinels** (`embedder_config` / `synth_config` / `synth_unavailable` — also exported as `PreStreamConfigReason`). The pre-stream-error path emits these sentinels onto the audit row's `degraded_reason` even though they aren't in `DEGRADED_REASON_CODES`; the log line accepts both shapes via the union so a future enum addition compiles loudly rather than passing through `string`.
+6. **`keyword_only` is redundant with `degraded_reason`** (any `embed_*_keyword_*` or `no_keyword_match_under_embed_outage` reason implies `keyword_only:true`). Exposing both is cheap and lets log consumers filter on either without pattern-matching the reason string. Same field appears on `RetrievalAuditPayload` for the same reason.
+7. **401 path emits no line — by design.** `withUserOrAdmin` returns before `handler` runs; emitting a `retrieval_pipeline` line for unauthenticated requests would require either an outer-logger wrapper or in-handler auth resolution. Both enlarge scope; the gap is documented here and in the helper's JSDoc.
+8. **Orchestrator-uncaught-throw path uses a separate `emitOnOrchestratorThrow` helper** rather than reusing the main emitter with `outcome = preStreamErrorOutcome(...)`. The synthetic outcome hard-codes `retry_attempted:false` / `keyword_only:false` / `citation_validation_outcome:null`; reporting those on a throw that happened mid-retry would lie about in-flight state. The throw-path helper emits a minimal shape with `status:"error"` + `degraded:true` + the throw message.
+
+**`query_hash` semantics.** SHA-256 of `redactSecrets(query.trim())`, first 16 hex chars (64 bits). Scope is log-correlation ONLY — collision-prone for cache-key reuse. The BACKLOG memoization item (line 70) uses a separate `(query_hash, role, sensitivity_allowed, prompt_hash)` cache key; do not reach for the log-line value.
+
+**Test coverage.** [lib/log.test.ts](../../lib/log.test.ts) gains 7 cases for the new variant (NDJSON shape, optional-field omission, latency/cost guard inheritance, redaction inheritance, `ts` non-overridable). [app/api/retrieve/route.test.ts](../../app/api/retrieve/route.test.ts) gains a Layer 3 describe-block asserting exactly one `kind:"retrieval_pipeline"` line per terminal path with the correct field mapping — filtered by `kind` first so the assertions remain stable when per-vendor (`kind:"voyage"` / `kind:"claude"`) lines land in future M3 slices.

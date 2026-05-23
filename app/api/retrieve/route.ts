@@ -19,6 +19,8 @@
 // the per-row implementation. CSRF posture: inherited from ADR-0010 — stub
 // auth header is the dev-only gate; M5 brings Microsoft Entra ID.
 
+import { createHash } from "node:crypto";
+
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 
@@ -26,7 +28,7 @@ import * as schema from "@/drizzle/schema";
 import { sensitivityAllowedForRole, withUserOrAdmin, type Role } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { EmbeddingUnavailableError, getEmbedder } from "@/lib/embedding";
-import { redactSecrets } from "@/lib/log";
+import { logEvent, redactSecrets, type LogEventRetrievalPipeline } from "@/lib/log";
 import { RETRIEVAL_AGENT_PROMPT_HASH } from "@/lib/prompts";
 import { SynthUnavailableError, getReranker, getSynthesizer } from "@/lib/retrieval";
 import { RETRIEVAL_RETRY_PREFIX_HASH, STRICTER_PROMPT_PREFIX } from "@/lib/retrieval-retry-prefix";
@@ -74,6 +76,90 @@ const RequestBody = z
       });
     }
   });
+
+// ── Retrieval-pipeline log emitter (ADR-0012 §8, ADR-0005 amendment 2026-05-23) ──
+
+/**
+ * Compute the 16-hex-char `query_hash` field per ADR-0005 amendment
+ * 2026-05-23. Trim-normalized so leading/trailing whitespace doesn't fork the
+ * hash; secrets stripped via {@link redactSecrets} before hashing so accidental
+ * key-paste in a query doesn't burn into the log file. Scope is
+ * log-correlation only — NOT a cache key (collision-prone at 64 bits).
+ */
+function computeQueryHash(query: string): string {
+  return createHash("sha256").update(redactSecrets(query.trim())).digest("hex").slice(0, 16);
+}
+
+/**
+ * Emit one `kind:"retrieval_pipeline"` NDJSON line summarizing this request.
+ *
+ * Called from every terminal route path EXCEPT the 401-from-`withUserOrAdmin`
+ * short-circuit — that path returns before `handler` runs so neither `t0`
+ * nor `role` is in scope; by-design no line is emitted (ADR-0005 amendment
+ * 2026-05-23 documents the gap).
+ *
+ * On the orchestrator-uncaught-throw branch use
+ * {@link emitOnOrchestratorThrow} instead — that helper omits
+ * `retry_attempted` / `keyword_only` / `citation_validation_outcome` from
+ * the wire rather than reporting the synthetic placeholder values from
+ * `preStreamErrorOutcome`.
+ */
+function emitRetrievalPipelineLog(args: {
+  outcome: AuditOutcome | null;
+  query?: string;
+  role: Role | "unknown";
+  t0: number;
+  status: "ok" | "error";
+  error?: string;
+}): void {
+  const { outcome, query, role, t0, status, error } = args;
+  const event: LogEventRetrievalPipeline = {
+    kind: "retrieval_pipeline",
+    latency_ms: Date.now() - t0,
+    cost_usd: null,
+    role,
+    degraded: outcome?.degraded ?? false,
+    citation_validation_outcome: outcome?.citation_validation_outcome ?? null,
+    retry_attempted: outcome?.retry_attempted ?? false,
+    keyword_only: outcome?.keyword_only ?? false,
+  };
+  if (status) event.status = status;
+  if (error) event.error = error;
+  if (query !== undefined) event.query_hash = computeQueryHash(query);
+  if (outcome?.degraded_reason !== undefined) {
+    event.degraded_reason = outcome.degraded_reason as LogEventRetrievalPipeline["degraded_reason"];
+  }
+  logEvent(event);
+}
+
+/**
+ * Emit a `kind:"retrieval_pipeline"` line for the orchestrator-uncaught
+ * exception path. Omits `retry_attempted` / `keyword_only` /
+ * `citation_validation_outcome`-as-anything-but-null rather than emitting the
+ * `preStreamErrorOutcome` synthetic placeholders, which would lie about
+ * in-flight state at the moment of throw.
+ */
+function emitOnOrchestratorThrow(args: {
+  query: string;
+  role: Role;
+  t0: number;
+  error: string;
+}): void {
+  const { query, role, t0, error } = args;
+  logEvent({
+    kind: "retrieval_pipeline",
+    latency_ms: Date.now() - t0,
+    cost_usd: null,
+    role,
+    degraded: true,
+    citation_validation_outcome: null,
+    retry_attempted: false,
+    keyword_only: false,
+    status: "error",
+    error,
+    query_hash: computeQueryHash(query),
+  });
+}
 
 // ── Audit-row writer ───────────────────────────────────────────────────────
 
@@ -150,12 +236,25 @@ function preStreamErrorOutcome(args: {
 // ── Handler ────────────────────────────────────────────────────────────────
 
 async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Response> {
+  // Captured first thing so the `retrieval_pipeline` log line on EVERY
+  // terminal path measures wall-clock from request entry. Pre-stream
+  // resolution time (embedder/synth/reranker factory) IS included by design
+  // — observability of cold-start cost on the request-summary line.
+  const t0 = Date.now();
+
   // 1. PARSE + VALIDATE pre-stream. Once Content-Type: text/event-stream
   //    commits we cannot retract to a JSON 400.
   let rawBody: unknown;
   try {
     rawBody = await req.json();
   } catch {
+    emitRetrievalPipelineLog({
+      outcome: null,
+      role,
+      t0,
+      status: "error",
+      error: "invalid_json",
+    });
     return jsonError(400, "invalid_json");
   }
   const parsed = RequestBody.safeParse(rawBody);
@@ -165,7 +264,21 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
       firstCustom && "params" in firstCustom
         ? (firstCustom.params as { reason?: string } | undefined)?.reason
         : undefined;
-    return jsonError(400, reason === "empty" ? "query_empty" : "query_invalid");
+    const code = reason === "empty" ? "query_empty" : "query_invalid";
+    emitRetrievalPipelineLog({
+      outcome: null,
+      // Pass the raw query string if present so query_hash correlates even
+      // for invalid-shape rejections; undefined when body was missing the field.
+      query:
+        typeof (rawBody as { query?: unknown })?.query === "string"
+          ? (rawBody as { query: string }).query
+          : undefined,
+      role,
+      t0,
+      status: "error",
+      error: code,
+    });
+    return jsonError(400, code);
   }
   const query = parsed.data.query;
 
@@ -186,32 +299,47 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
       // pre-stream so we don't write a half-formed audit row.
       embedding_model = "unavailable";
       embedding_version = "unavailable";
-      await writeAuditRow(
-        preStreamErrorOutcome({
-          query,
-          role,
-          embedding_model,
-          embedding_version,
-          synthesizer_model: null,
-          synthesizer_version: null,
-          degraded_reason: "embedder_config",
-          error: err.message,
-        }),
-      );
-      return jsonError(500, "embedder_config");
-    }
-    await writeAuditRow(
-      preStreamErrorOutcome({
+      const outcome = preStreamErrorOutcome({
         query,
         role,
-        embedding_model: "config_error",
-        embedding_version: "config_error",
+        embedding_model,
+        embedding_version,
         synthesizer_model: null,
         synthesizer_version: null,
         degraded_reason: "embedder_config",
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
+        error: err.message,
+      });
+      await writeAuditRow(outcome);
+      emitRetrievalPipelineLog({
+        outcome,
+        query,
+        role,
+        t0,
+        status: "error",
+        error: err.message,
+      });
+      return jsonError(500, "embedder_config");
+    }
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const outcome = preStreamErrorOutcome({
+      query,
+      role,
+      embedding_model: "config_error",
+      embedding_version: "config_error",
+      synthesizer_model: null,
+      synthesizer_version: null,
+      degraded_reason: "embedder_config",
+      error: errorMsg,
+    });
+    await writeAuditRow(outcome);
+    emitRetrievalPipelineLog({
+      outcome,
+      query,
+      role,
+      t0,
+      status: "error",
+      error: errorMsg,
+    });
     return jsonError(500, "embedder_config");
   }
 
@@ -221,32 +349,47 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
     synth = getSynthesizer();
   } catch (err) {
     if (err instanceof SynthUnavailableError) {
-      await writeAuditRow(
-        preStreamErrorOutcome({
-          query,
-          role,
-          embedding_model,
-          embedding_version,
-          synthesizer_model: null,
-          synthesizer_version: null,
-          degraded_reason: "synth_unavailable",
-          error: err.message,
-        }),
-      );
-      return jsonError(503, "synth_unavailable");
-    }
-    await writeAuditRow(
-      preStreamErrorOutcome({
+      const outcome = preStreamErrorOutcome({
         query,
         role,
         embedding_model,
         embedding_version,
         synthesizer_model: null,
         synthesizer_version: null,
-        degraded_reason: "synth_config",
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
+        degraded_reason: "synth_unavailable",
+        error: err.message,
+      });
+      await writeAuditRow(outcome);
+      emitRetrievalPipelineLog({
+        outcome,
+        query,
+        role,
+        t0,
+        status: "error",
+        error: err.message,
+      });
+      return jsonError(503, "synth_unavailable");
+    }
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const outcome = preStreamErrorOutcome({
+      query,
+      role,
+      embedding_model,
+      embedding_version,
+      synthesizer_model: null,
+      synthesizer_version: null,
+      degraded_reason: "synth_config",
+      error: errorMsg,
+    });
+    await writeAuditRow(outcome);
+    emitRetrievalPipelineLog({
+      outcome,
+      query,
+      role,
+      t0,
+      status: "error",
+      error: errorMsg,
+    });
     return jsonError(500, "synth_config");
   }
 
@@ -257,18 +400,26 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
   try {
     reranker = getReranker();
   } catch (err) {
-    await writeAuditRow(
-      preStreamErrorOutcome({
-        query,
-        role,
-        embedding_model,
-        embedding_version,
-        synthesizer_model: synth.model,
-        synthesizer_version: synth.version,
-        degraded_reason: "synth_config",
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const outcome = preStreamErrorOutcome({
+      query,
+      role,
+      embedding_model,
+      embedding_version,
+      synthesizer_model: synth.model,
+      synthesizer_version: synth.version,
+      degraded_reason: "synth_config",
+      error: errorMsg,
+    });
+    await writeAuditRow(outcome);
+    emitRetrievalPipelineLog({
+      outcome,
+      query,
+      role,
+      t0,
+      status: "error",
+      error: errorMsg,
+    });
     return jsonError(500, "reranker_config");
   }
 
@@ -286,6 +437,7 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
 
       const gen = retrievePipeline({ embedder, reranker, synth }, { query, role });
       let outcome: AuditOutcome | undefined;
+      let orchestratorThrewError: string | null = null;
       try {
         outcome = await drainPipelineEvents(gen, send);
       } catch (err) {
@@ -293,6 +445,8 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
         // generic error event and synthesize a minimal audit outcome — we
         // lost the orchestrator's accumulated state.
         send({ kind: "error", code: isDbError(err) ? "db" : "internal" });
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        orchestratorThrewError = errorMsg;
         outcome = preStreamErrorOutcome({
           query,
           role,
@@ -301,7 +455,7 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
           synthesizer_model: synth.model,
           synthesizer_version: synth.version,
           degraded_reason: "synth_config",
-          error: err instanceof Error ? err.message : String(err),
+          error: errorMsg,
         });
       } finally {
         // Best-effort generator finalize — releases lane DB transactions if
@@ -313,6 +467,24 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
         }
         if (outcome) {
           await writeAuditRow(outcome);
+        }
+        // ADR-0012 §8 + ADR-0005 amendment 2026-05-23: one `retrieval_pipeline`
+        // line per request, AFTER writeAuditRow, BEFORE controller.close().
+        // Orchestrator-throw branch uses a separate emitter that omits
+        // retry/keyword/citation rather than reporting the synthetic
+        // preStreamErrorOutcome placeholders (which would lie about
+        // in-flight state at the moment of throw).
+        if (orchestratorThrewError !== null) {
+          emitOnOrchestratorThrow({ query, role, t0, error: orchestratorThrewError });
+        } else {
+          emitRetrievalPipelineLog({
+            outcome: outcome ?? null,
+            query,
+            role,
+            t0,
+            status: outcome?.status === "error" ? "error" : "ok",
+            error: outcome?.error,
+          });
         }
         try {
           controller.close();

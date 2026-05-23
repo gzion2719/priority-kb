@@ -228,7 +228,7 @@ Not exposed via HTTP. The eval runner (M3 items 6-7) imports it directly. Skippi
 Per ADR-0005, structured JSON logs cover every Voyage + Claude call. This pipeline emits:
 - One `LogEventVoyage` per stage A (embed) and stage C (rerank), keyed by call site.
 - One `LogEventClaude` for stage D (synth).
-- One `LogEvent` (kind to be confirmed at implementation time; likely a new `kind:"retrieval_pipeline"` discriminant per the existing [BACKLOG.md](../BACKLOG.md) `LogEvent` route-kind item) for the request-level summary: total latency, breaker states, citation-validation outcome.
+- One `LogEventRetrievalPipeline` (`kind:"retrieval_pipeline"`) per request for the request-level summary: total latency, degraded state + reason, citation-validation outcome, retry state, keyword-only flag. Shipped 2026-05-23; see ADR-0005 amendment of the same date. The route layer is the single emit site; one line per request on every terminal path EXCEPT the 401-from-`withUserOrAdmin` short-circuit (by design — auth wrapper returns before `handler` runs).
 
 Audit row schema is pinned in stage E above. Cross-ref ADR-0005 for the per-call log shape contract; this ADR does not amend it.
 

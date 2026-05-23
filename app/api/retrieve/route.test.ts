@@ -20,6 +20,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { Pool } from "pg";
 
 import { POST, RETRIEVAL_RETRY_PREFIX_HASH } from "@/app/api/retrieve/route";
+import { resetLogSink, setLogSink } from "@/lib/log";
 import { RETRIEVAL_AGENT_PROMPT_HASH } from "@/lib/prompts";
 import {
   resetSynthesizerForTests,
@@ -604,5 +605,254 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     );
     expect(rows[0]?.payload.query).not.toContain("abc123def456ghi789");
     expect(rows[0]?.payload.query).toContain("[REDACTED]");
+  });
+});
+
+// ── Layer 3: retrieval_pipeline log line (ADR-0012 §8) ─────────────────────
+//
+// Asserts exactly one `kind:"retrieval_pipeline"` NDJSON line per request on
+// every terminal route path. Filter-by-kind first — future M3 slices land
+// per-vendor `kind:"voyage"` / `kind:"claude"` lines, and a bare
+// `lines.length === 1` would break the day Voyage rerank wires its log call
+// in. Tests use the dedicated sink injection from `lib/log.ts`.
+
+type CapturedRpLine = {
+  kind: "retrieval_pipeline";
+  latency_ms: number;
+  cost_usd: number | null;
+  role: string;
+  degraded: boolean;
+  degraded_reason?: string;
+  citation_validation_outcome: string | null;
+  retry_attempted: boolean;
+  keyword_only: boolean;
+  status?: string;
+  error?: string;
+  query_hash?: string;
+  ts: string;
+};
+
+function captureLogLines(): {
+  lines: string[];
+  rpLines: () => CapturedRpLine[];
+  reset: () => void;
+} {
+  const lines: string[] = [];
+  setLogSink((chunk: string) => {
+    lines.push(chunk);
+    return true;
+  });
+  return {
+    lines,
+    rpLines: () => {
+      const parsed: CapturedRpLine[] = [];
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj && obj.kind === "retrieval_pipeline") parsed.push(obj as CapturedRpLine);
+        } catch {
+          // skip non-JSON
+        }
+      }
+      return parsed;
+    },
+    reset: () => {
+      lines.length = 0;
+    },
+  };
+}
+
+describe("POST /api/retrieve — retrieval_pipeline log line (no DB, pre-stream terminals)", () => {
+  let cap: ReturnType<typeof captureLogLines>;
+
+  beforeEach(() => {
+    cap = captureLogLines();
+  });
+
+  afterEach(() => {
+    resetLogSink();
+  });
+
+  it("emits exactly one line on the JSON-parse 400 path (no query_hash, status=error)", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq("not-json{", "user") as any, {});
+    expect(res.status).toBe(400);
+
+    const rp = cap.rpLines();
+    expect(rp).toHaveLength(1);
+    expect(rp[0]?.status).toBe("error");
+    expect(rp[0]?.error).toBe("invalid_json");
+    expect(rp[0]?.role).toBe("user");
+    expect(rp[0]?.degraded).toBe(false);
+    expect(rp[0]?.retry_attempted).toBe(false);
+    expect(rp[0]?.keyword_only).toBe(false);
+    expect(rp[0]?.citation_validation_outcome).toBeNull();
+    // query_hash omitted — no query was extractable from invalid JSON.
+    expect(rp[0]?.query_hash).toBeUndefined();
+    expect(rp[0]?.latency_ms).toBeGreaterThanOrEqual(0);
+    expect(Number.isFinite(rp[0]?.latency_ms ?? Number.NaN)).toBe(true);
+  });
+
+  it("emits exactly one line on the Zod 400 empty-query path (query_hash from raw body)", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq({ query: "" }, "user") as any, {});
+    expect(res.status).toBe(400);
+
+    const rp = cap.rpLines();
+    expect(rp).toHaveLength(1);
+    expect(rp[0]?.status).toBe("error");
+    expect(rp[0]?.error).toBe("query_empty");
+    expect(rp[0]?.role).toBe("user");
+    expect(rp[0]?.degraded).toBe(false);
+    // Empty string is still a string — query_hash IS emitted (hash of the
+    // trimmed, redacted empty string).
+    expect(rp[0]?.query_hash).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("emits no line on the 401 path (withUserOrAdmin short-circuits before handler runs)", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq({ query: "anything" }, null) as any, {});
+    expect(res.status).toBe(401);
+
+    // By-design gap documented in ADR-0005 amendment 2026-05-23 + helper
+    // JSDoc — `withUserOrAdmin` returns before `handler` ever sees the
+    // request, so no `retrieval_pipeline` line is emitted.
+    expect(cap.rpLines()).toHaveLength(0);
+  });
+
+  it("query_hash is deterministic and trim-normalized (correlation key contract)", async () => {
+    // Pre-stream path only — the punctuation-only Zod 400 fires inside POST
+    // synchronously, so no SSE drain is needed. Hash of trim-normalized
+    // "hello-only" must match across runs AND tolerate leading/trailing
+    // whitespace.
+    // "!!!" fails the no-letters/digits superRefine → query_invalid 400.
+    cap.reset();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await POST(makeReq({ query: "!!!" }, "user") as any, {});
+    const hash1 = cap.rpLines()[0]?.query_hash;
+    expect(hash1).toMatch(/^[0-9a-f]{16}$/);
+
+    cap.reset();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await POST(makeReq({ query: "!!!" }, "user") as any, {});
+    expect(cap.rpLines()[0]?.query_hash).toBe(hash1);
+
+    cap.reset();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await POST(makeReq({ query: "   !!!   " }, "user") as any, {});
+    expect(cap.rpLines()[0]?.query_hash).toBe(hash1);
+  });
+});
+
+describeIfDb("POST /api/retrieve — retrieval_pipeline log line (DB-integration terminals)", () => {
+  let pool: Pool;
+  let cap: ReturnType<typeof captureLogLines>;
+
+  beforeAll(() => {
+    pool = new Pool({ connectionString: databaseUrl });
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  beforeEach(() => {
+    resetSynthesizerForTests();
+    cap = captureLogLines();
+  });
+
+  afterEach(async () => {
+    await pool.query("TRUNCATE audit_log, chunks, entries_versions, entries CASCADE");
+    resetSynthesizerForTests();
+    resetLogSink();
+  });
+
+  async function seed(
+    rows: {
+      id: string;
+      title: string;
+      body: string;
+      sensitivity: "public" | "internal" | "restricted";
+    }[],
+  ): Promise<void> {
+    for (const r of rows) {
+      await pool.query(
+        `INSERT INTO entries (id, title, category, tags, body, source_pointer, last_verified_at, sensitivity)
+         VALUES ($1, $2, 'test', '{}'::text[], $3, 'src://test', now(), $4)`,
+        [r.id, r.title, r.body, r.sensitivity],
+      );
+    }
+  }
+
+  it("ok-happy terminal: exactly one line, status=ok, degraded=false, retry=false, validation=ok", async () => {
+    const realId = "11111111-1111-4111-8111-111111111111";
+    await seed([
+      {
+        id: realId,
+        title: "Invoice workflow",
+        body: "Steps to issue and finalize an invoice in Priority.",
+        sensitivity: "public",
+      },
+    ]);
+    const synth = makeInjectedSynth([`Answer [${realId}].\n\nSources: [${realId}]`]);
+    injectSynth(synth);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq({ query: "invoice" }, "user") as any, {});
+    await readSseEvents(res); // drain SSE → triggers stream.start finally
+
+    const rp = cap.rpLines();
+    expect(rp).toHaveLength(1);
+    expect(rp[0]?.status).toBe("ok");
+    expect(rp[0]?.degraded).toBe(false);
+    expect(rp[0]?.degraded_reason).toBeUndefined();
+    expect(rp[0]?.citation_validation_outcome).toBe("ok");
+    expect(rp[0]?.retry_attempted).toBe(false);
+    expect(rp[0]?.keyword_only).toBe(false);
+    expect(rp[0]?.role).toBe("user");
+    expect(rp[0]?.query_hash).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("ok-degraded terminal (citation-validation-failed via stub-default synth): status=error, degraded=true, validation=hallucinated_id, retry=true", async () => {
+    const realId = "44444444-4444-4444-8444-444444444444";
+    await seed([
+      {
+        id: realId,
+        title: "Stub default smoke",
+        body: "Body content for the stub-default smoke test.",
+        sensitivity: "public",
+      },
+    ]);
+    // No injectSynth — default stub fails citation validation on both attempts.
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq({ query: "stub" }, "user") as any, {});
+    await readSseEvents(res);
+
+    const rp = cap.rpLines();
+    expect(rp).toHaveLength(1);
+    // Per RetrievalAuditPayload.status contract: post-retry validation-fail
+    // tags the audit row (and the log line, by mapping) as error.
+    expect(rp[0]?.status).toBe("error");
+    expect(rp[0]?.degraded).toBe(true);
+    expect(rp[0]?.degraded_reason).toBe("citation_validation_failed");
+    expect(rp[0]?.citation_validation_outcome).toBe("hallucinated_id");
+    expect(rp[0]?.retry_attempted).toBe(true);
+    expect(rp[0]?.keyword_only).toBe(false);
+  });
+
+  it("no_content terminal (empty corpus): status=ok, degraded=false, validation=null", async () => {
+    // No seed.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq({ query: "anything that matches nothing" }, "user") as any, {});
+    await readSseEvents(res);
+
+    const rp = cap.rpLines();
+    expect(rp).toHaveLength(1);
+    expect(rp[0]?.status).toBe("ok");
+    expect(rp[0]?.degraded).toBe(false);
+    expect(rp[0]?.citation_validation_outcome).toBeNull();
+    expect(rp[0]?.retry_attempted).toBe(false);
+    expect(rp[0]?.keyword_only).toBe(false);
   });
 });
