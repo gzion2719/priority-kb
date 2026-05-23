@@ -31,13 +31,51 @@ jobs:
           # historical leaks; on PRs it scans the diff range only.
           fetch-depth: 0
 
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Comment-on-PR is noisy; surface findings via the Actions UI / SARIF.
-          GITLEAKS_ENABLE_COMMENTS: "false"
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+      # The gitleaks/gitleaks-action@v2 wrapper started enforcing a paid
+      # license key for non-paying orgs in 2024, surfacing as
+      # `🛑 missing gitleaks license` on every PR. The underlying gitleaks
+      # binary remains MIT-licensed — we install it directly and run the
+      # same scan via CLI, bypassing the gated Action wrapper without
+      # losing rule coverage. Cross-ref: gitleaks/gitleaks-action#119.
+      - name: Install gitleaks
+        run: |
+          GITLEAKS_VERSION=8.21.2
+          curl -sSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Run gitleaks (PR diff range)
+        if: github.event_name == 'pull_request'
+        run: |
+          gitleaks detect \
+            --source . \
+            --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" \
+            --redact \
+            --verbose \
+            --report-format sarif \
+            --report-path gitleaks.sarif \
+            --exit-code 1
+
+      - name: Run gitleaks (full history)
+        if: github.event_name != 'pull_request'
+        run: |
+          gitleaks detect \
+            --source . \
+            --redact \
+            --verbose \
+            --report-format sarif \
+            --report-path gitleaks.sarif \
+            --exit-code 1
+
+      - name: Upload SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-sarif
+          path: gitleaks.sarif
+          if-no-files-found: ignore
 
   # CodeQL deferred — Code Scanning must first be enabled in the repo settings
   # (Settings → Code security → Code scanning). Re-enable this job once that's
