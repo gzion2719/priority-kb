@@ -259,6 +259,19 @@ export function resetRerankerForTests(): void {
   globalThis.__reranker = undefined;
 }
 
+/**
+ * Inject a fully-constructed `Reranker` into the singleton slot for the
+ * duration of a test. Test-only. Symmetric with {@link setSynthesizerForTests};
+ * see that JSDoc for the contract-boundary rationale. Use instead of reaching
+ * directly into `globalThis.__reranker`.
+ *
+ * Pair with `resetRerankerForTests()` in `afterEach`. Pure setter — does
+ * not touch process env.
+ */
+export function setRerankerForTests(reranker: Reranker): void {
+  globalThis.__reranker = reranker;
+}
+
 /** Clears the synthesizer singleton cache. Test-only. */
 export function resetSynthesizerForTests(): void {
   globalThis.__synthesizer = undefined;
@@ -280,28 +293,14 @@ export function setSynthesizerForTests(synth: Synthesizer): void {
 
 // ─── ADR-0013: hybrid keyword lane + RRF + degraded-matrix types ───────────────
 
-/**
- * Reciprocal Rank Fusion outcome codes — extends ADR-0012's degraded-reason set
- * with the four embed-down → keyword-fallback variants from ADR-0013 §2.5.
- *
- * Slice 1 ships the enum + the audit payload type only. The route-layer
- * branching across the 8-row matrix (ADR-0013 §3) is Slice 2 / M3-item-3
- * route territory.
- */
-export const DEGRADED_REASON_CODES = [
-  // ADR-0012:
-  "synth_unavailable",
-  "rerank_unavailable",
-  "rerank_and_synth_unavailable",
-  "citation_validation_failed",
-  // ADR-0013 — embed-down → keyword fallback variants:
-  "embed_unavailable_keyword_fallback",
-  "embed_and_rerank_unavailable_keyword_fallback",
-  "embed_and_synth_unavailable_keyword_bare",
-  "embed_rerank_synth_unavailable_keyword_bare",
-  "no_keyword_match_under_embed_outage",
-] as const;
-export type DegradedReasonCode = (typeof DEGRADED_REASON_CODES)[number];
+// Degraded-reason enum + type live in lib/retrieval-degraded.ts (leaf
+// module) so the UI-side reducer can consume them without dragging this
+// file's DB/pool/auth-adjacent imports into the client bundle. Re-imported
+// + re-exported here for backward-compat with callers that still import
+// from `@/lib/retrieval` (and so the in-file `RetrievalAuditPayload` below
+// can reference the type).
+import { DEGRADED_REASON_CODES, type DegradedReasonCode } from "./retrieval-degraded";
+export { DEGRADED_REASON_CODES, type DegradedReasonCode };
 
 /**
  * Audit-row payload shape after ADR-0013. Extends ADR-0012 §E with lane-id

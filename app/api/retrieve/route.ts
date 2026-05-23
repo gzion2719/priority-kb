@@ -74,8 +74,6 @@
 // CSRF posture: inherited from ADR-0010 Consequences — deferred to M5 with
 // Microsoft Entra ID. Stub-auth header is the dev-only gate.
 
-import { createHash } from "node:crypto";
-
 import { type NextRequest } from "next/server";
 import { inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -89,8 +87,16 @@ import { RETRIEVAL_AGENT_PROMPT, RETRIEVAL_AGENT_PROMPT_HASH } from "@/lib/promp
 import { keywordCandidates } from "@/lib/retrieval-keyword";
 import { SynthUnavailableError, getSynthesizer } from "@/lib/retrieval";
 import { validateCitations, type CitationValidationResult } from "@/lib/retrieval-citations";
+import { RETRIEVAL_RETRY_PREFIX_HASH, STRICTER_PROMPT_PREFIX } from "@/lib/retrieval-retry-prefix";
 import type { QueryEvent } from "@/lib/query-chat-state";
 import type { Sensitivity } from "@/drizzle/schema";
+
+// Re-export for callers that imported these from the route in slice 2c-i
+// (e.g., app/api/retrieve/route.test.ts at the time of writing). The
+// canonical site is now lib/retrieval-retry-prefix; this shim avoids
+// churning the test imports during the foundation slice. Slice 2c-ii's
+// orchestrator will consume directly from lib/retrieval-retry-prefix.
+export { RETRIEVAL_RETRY_PREFIX_HASH, STRICTER_PROMPT_PREFIX };
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -102,45 +108,12 @@ const TOP_N_SYNTH = 5;
 const ROW_8_REASON = "embed_rerank_synth_unavailable_keyword_bare" as const;
 
 // ── Stricter-prompt-prefix retry (ADR-0012 §5) ─────────────────────────────
-
-/**
- * Single generic stricter system-prompt prefix prepended on retry when the
- * first synth attempt fails mechanical citation validation. The prefix is
- * route-layer, NOT part of the hashed retrieval-agent prompt — iron rule
- * #10's `prompt_hash` continues to pin RETRIEVAL_AGENT_PROMPT_HASH on every
- * audit row. The prefix's own SHA-256 is computed at module load below and
- * recorded on the audit row in `retry_prefix_hash` so the exact retry input
- * is reconstructable post-hoc by content-addressing.
- *
- * Per-reason prefix table (e.g. naming the specific offending IDs back at
- * the model) is queued for sub-slice 2c-ii; the v0.2.0 retrieval-agent
- * prompt already documents the §5 contract, so a single generic reminder
- * is sufficient for slice 2c-i.
- */
-export const STRICTER_PROMPT_PREFIX =
-  "The previous response failed mechanical citation validation per the §5 contract. " +
-  "Re-emit the answer respecting these invariants: every factual claim ends with an " +
-  "inline citation of the form [entry_id]; the response ends with a single trailing " +
-  "Sources: [<uuid>, ...] block on its own last line; the set of inline-cited UUIDs " +
-  "equals the set inside the Sources block; every UUID is a valid v4 drawn ONLY from " +
-  "the provided entries; no prose follows the Sources block.";
-
-/**
- * SHA-256 (hex) of {@link STRICTER_PROMPT_PREFIX}, sealed at module load.
- * Audit-row `retry_prefix_hash` carries this value when a retry fired and
- * null otherwise. Parallel to {@link RETRIEVAL_AGENT_PROMPT_HASH}.
- *
- * No byte-roundtrip integrity check is paired with this hash (cf. the
- * `_PROMPT_ROUNDTRIP_HASH` assertion at lib/prompts.ts:79-91): the prefix
- * is a TypeScript string literal compiled into the module, not a file-read,
- * so the BOM / non-UTF-8 failure mode that motivated the prompts.ts check
- * is unreachable here. A refactor that swaps in a different encoding for
- * the `Buffer.from(..., "utf8")` call would silently change the hash —
- * captured as a m1 cross-ref in the 2c-i code-CR.
- */
-export const RETRIEVAL_RETRY_PREFIX_HASH = createHash("sha256")
-  .update(Buffer.from(STRICTER_PROMPT_PREFIX, "utf8"))
-  .digest("hex");
+//
+// The constant + sealed hash live in lib/retrieval-retry-prefix so the
+// orchestrator slice (2c-ii) and the future per-reason prefix table (2c-iii,
+// BACKLOG "Per-reason retry-prefix table") consume them from one canonical
+// site. They are re-exported above for callers (e.g. route.test.ts) that
+// imported from the route in slice 2c-i.
 
 /** Discriminator values for the audit row's citation_validation_outcome. */
 type CitationValidationOutcome = "ok" | Extract<CitationValidationResult, { ok: false }>["reason"];
