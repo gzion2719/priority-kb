@@ -302,6 +302,36 @@ export function setSynthesizerForTests(synth: Synthesizer): void {
 import { DEGRADED_REASON_CODES, type DegradedReasonCode } from "./retrieval-degraded";
 export { DEGRADED_REASON_CODES, type DegradedReasonCode };
 
+import type { CitationValidationResult } from "./retrieval-citations";
+
+/**
+ * Discriminator for the audit row's `citation_validation_outcome` field.
+ * "ok" on first-or-second-attempt pass; one of the validator's failure-reason
+ * values when both attempts failed. Null when validation never ran (synth was
+ * absent, or the pipeline aborted before stage D).
+ */
+export type CitationValidationOutcome =
+  | "ok"
+  | Extract<CitationValidationResult, { ok: false }>["reason"];
+
+/**
+ * Per-reason payload carried on the audit row alongside the outcome
+ * discriminant. The validator's discriminated-union failure variants carry
+ * `offending_ids` (3 reasons), `inline_only`/`sources_only` (1 reason), a
+ * `count` (1 reason), or a `trailing` excerpt (1 reason). Preserves the
+ * validator's content for forensic replay + per-reason retry-prefix tuning.
+ *
+ * `null` when validation passed (no detail to record), when validation never
+ * ran, or when the failure variant carries no auxiliary payload (e.g.
+ * `sources_block_missing`).
+ */
+export type CitationValidationDetail =
+  | null
+  | { offending_ids: string[] }
+  | { inline_only: string[]; sources_only: string[] }
+  | { count: number }
+  | { trailing: string };
+
 /**
  * Audit-row payload shape after ADR-0013. Extends ADR-0012 §E with lane-id
  * arrays, the RRF k constant used at request time, and the keyword-only
@@ -346,6 +376,30 @@ export type RetrievalAuditPayload = {
   latencies_ms?: Record<string, number>;
   degraded: boolean;
   degraded_reason?: DegradedReasonCode;
+  // ── Sub-slice 2c-ii additions (orchestrator audit-outcome) ────────────────
+  //
+  // Pinned into the canonical audit-payload type so the orchestrator's
+  // {@link AuditOutcome} return value IS this type (no projection / no drift).
+  // Slice 2c-i wrote these fields onto a locally-scoped `AuditPayload` in
+  // `app/api/retrieve/route.ts`; folding them in here is the M3/M4 alignment
+  // called out in the 2c-ii plan-CR. ADR-0013 §5 audit-row pin authorizes
+  // the audit-row shape; this type is the TS source of truth for it.
+  /** Request outcome status. "error" on synth-down, citation-validation-failed (post-retry), and pre-stream config errors. */
+  status: "ok" | "error";
+  /** Optional human-readable error message; redacted before persistence (see route layer). */
+  error?: string;
+  /** Resolved synthesizer model — null when the orchestrator ran in eval mode (synth absent). */
+  synthesizer_model: string | null;
+  /** Resolved synthesizer version — null when the orchestrator ran in eval mode (synth absent). */
+  synthesizer_version: string | null;
+  /** Validator outcome discriminant; null when validation never ran. */
+  citation_validation_outcome: CitationValidationOutcome | null;
+  /** Per-reason payload from the final (post-retry) validation attempt. */
+  citation_validation_detail: CitationValidationDetail;
+  /** True iff the orchestrator invoked synth a second time with the stricter prefix. */
+  retry_attempted: boolean;
+  /** SHA-256 hex of {@link STRICTER_PROMPT_PREFIX} when retry fired; null otherwise. */
+  retry_prefix_hash: string | null;
 };
 
 /** Internal-only retrieval result for the evals runner (ADR-0012 §7, ADR-0013 §2.5). */
