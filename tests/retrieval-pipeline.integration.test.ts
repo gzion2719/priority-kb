@@ -73,6 +73,16 @@ const E3 = "33333333-3333-4333-8333-333333333333";
 const E4 = "44444444-4444-4444-8444-444444444444";
 const ALL_ENTRY_IDS = [E1, E2, E3, E4] as const;
 
+// Shape β (sensitivity SQL WHERE) fixture IDs — disjoint from E1..E4 so a
+// stray `seedFourEntries()` + β seed in the same test would not collide on PK.
+// `afterEach TRUNCATE` makes cross-test collision impossible regardless.
+const E_PUB = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const E_INT = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const E_RES = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const E_RES2 = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const E_HE_INT = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const E_HE_PUB = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+
 // ── Stub model/version (shared by embedder stub + chunk inserts so the
 // ANN SQL `WHERE chunks.embedding_model = $3 AND ... = $4` matches). ────────
 
@@ -729,5 +739,263 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     // user still gets the public entries (all 4 seeded are public).
     expect(userRun.outcome.ann_candidate_ids.length).toBeGreaterThan(0);
     expect(userRun.outcome.keyword_candidate_ids.length).toBeGreaterThan(0);
+  });
+
+  // ── Shape β — sensitivity SQL WHERE end-to-end ──────────────────────────
+  //
+  // What this section pins that the test above does NOT:
+  //   - The test above (lines 710-732) seeds 4 PUBLIC entries and asserts the
+  //     `outcome.sensitivity_allowed` field shape under both roles. With every
+  //     row public, that test cannot prove the SQL filter actually excludes
+  //     anything — it only proves the role→array mapping is echoed onto the
+  //     outcome.
+  //   - The cases below seed entries spanning ALL three sensitivity values and
+  //     prove `chunks.sensitivity = ANY($2)` (ANN lane) AND
+  //     `entries.sensitivity = ANY($2)` (keyword lane) actually exclude rows
+  //     the role is not allowed to see.
+  //
+  // Negative-assertion structure: the load-bearing assertion is
+  // `user.{ann,keyword}_candidate_ids === [E_PUB]` (exact equality). If the
+  // sensitivity WHERE were dropped on either lane, the user run would surface
+  // E_INT and E_RES; both exact-equality asserts would fail loudly. Admin is
+  // used only as a counter-fact (proves the excluded rows DO exist), NOT as a
+  // discriminating assertion — admin's allow-list is the full sensitivityEnum
+  // so admin's WHERE is a no-op by construction.
+  //
+  // Doc-vs-code drift note (deferred to a reconciliation session):
+  //   `lib/auth.ts:189` maps user → ["public"] only, departing from ADR-0012
+  //   §6 + CLAUDE.md non-negotiable #6 which both state user → [public,
+  //   internal]. This section pins the IMPLEMENTATION. The drift is BACKLOG
+  //   item "Reconcile sensitivityAllowedForRole vs ADR-0012 §6" — must
+  //   resolve before M5 ship because the current code makes `internal`
+  //   entries unreachable to end users in violation of the documented
+  //   iron-rule-#6 contract.
+  //
+  // Deferred to shape γ: chunks.sensitivity vs entries.sensitivity divergence
+  // rejection (composite FK at drizzle/schema.ts:115-118 — onUpdate cascade,
+  // structural insert-side rejection on mismatched tuples).
+
+  // Insert helpers for the shape-β seeds. `vec(slot)` from the file's shared
+  // helpers; chunk sensitivity mirrors entry sensitivity to satisfy the
+  // composite FK by construction (NOT a test of FK behavior — see γ deferral).
+
+  async function seedMixedSensitivity(pool: Pool): Promise<void> {
+    await insertEntry(pool, {
+      id: E_PUB,
+      title: "Public priority overview",
+      body: "priority workflow public",
+      sensitivity: "public",
+    });
+    await insertEntry(pool, {
+      id: E_INT,
+      title: "Internal priority notes",
+      body: "priority internal procedure documentation",
+      sensitivity: "internal",
+    });
+    await insertEntry(pool, {
+      id: E_RES,
+      title: "Restricted priority memo",
+      body: "priority restricted memo content",
+      sensitivity: "restricted",
+    });
+
+    await insertChunk(pool, { entry_id: E_PUB, sensitivity: "public", embedding: vec(0.5) });
+    await insertChunk(pool, { entry_id: E_INT, sensitivity: "internal", embedding: vec(0.55) });
+    await insertChunk(pool, { entry_id: E_RES, sensitivity: "restricted", embedding: vec(0.6) });
+  }
+
+  async function seedAllRestricted(pool: Pool): Promise<void> {
+    await insertEntry(pool, {
+      id: E_RES,
+      title: "Restricted A",
+      body: "priority restricted alpha",
+      sensitivity: "restricted",
+    });
+    await insertEntry(pool, {
+      id: E_RES2,
+      title: "Restricted B",
+      body: "priority restricted bravo",
+      sensitivity: "restricted",
+    });
+    await insertChunk(pool, { entry_id: E_RES, sensitivity: "restricted", embedding: vec(0.5) });
+    await insertChunk(pool, { entry_id: E_RES2, sensitivity: "restricted", embedding: vec(0.55) });
+  }
+
+  // Hebrew niqqud seed: body has the niqqud-bearing form (טֶסט), query is the
+  // bare form (טסט). The trigger at drizzle/migrations/0002 strips combining
+  // marks [U+0591..U+05C7] before indexing, and lib/retrieval-keyword.ts
+  // mirrors the strip in `regexp_replace($1,'[֑-ׇ]','','g')`. So the indexed
+  // tsv contains the bare lexeme, and the bare query matches. If either
+  // strip path is dropped, the lexemes diverge and the test fails — this is
+  // the niqqud-recipe negative-assertion floor under non-public sensitivity.
+  async function seedHebrewMixedSensitivity(pool: Pool): Promise<void> {
+    await insertEntry(pool, {
+      id: E_HE_PUB,
+      title: "Hebrew public",
+      body: "טֶסט פריוריטי public",
+      sensitivity: "public",
+    });
+    await insertEntry(pool, {
+      id: E_HE_INT,
+      title: "Hebrew internal",
+      body: "טֶסט פריוריטי internal",
+      sensitivity: "internal",
+    });
+    await insertChunk(pool, { entry_id: E_HE_PUB, sensitivity: "public", embedding: vec(0.5) });
+    await insertChunk(pool, { entry_id: E_HE_INT, sensitivity: "internal", embedding: vec(0.55) });
+  }
+
+  it("β1 — user-role mixed seed: only E_PUB returned on both lanes; admin counter-fact returns all three", async () => {
+    await seedMixedSensitivity(pool);
+    // The default synth cites ALL_ENTRY_IDS (E1..E4 — the 4-public seed's
+    // IDs), which would fail citation validation against the β seed's
+    // {E_PUB,E_INT,E_RES} reranked-id set. Override so the synth cites only
+    // E_PUB (the single entry the user sees), keeping the validator green
+    // and isolating this test's focus to the SQL filter, not synth contract.
+    const userDeps = buildRealDbDeps(pool, { synth: buildSynth({ cite: [E_PUB] }) });
+    const adminDeps = buildRealDbDeps(pool, {
+      synth: buildSynth({ cite: [E_PUB, E_INT, E_RES] }),
+    });
+
+    const userRun = await drainPipeline(
+      retrievePipeline(userDeps, { query: QUERY, role: "user" satisfies Role }),
+    );
+    const adminRun = await drainPipeline(
+      retrievePipeline(adminDeps, { query: QUERY, role: "admin" satisfies Role }),
+    );
+
+    // Load-bearing iron-rule-#6 assertions: exact-equality of the user lane
+    // outputs. If the SQL `WHERE sensitivity = ANY($2)` were dropped on either
+    // lane, E_INT and E_RES would surface here and the test would fail.
+    expect(userRun.outcome.ann_candidate_ids).toEqual([E_PUB]);
+    expect(userRun.outcome.keyword_candidate_ids).toEqual([E_PUB]);
+    // Downstream of the SQL filter — proves the orchestrator does NOT widen
+    // the filter post-WHERE (e.g., via an over-eager hydration path that
+    // refetches by entry_id only).
+    expect(userRun.outcome.fused_ids).toEqual([E_PUB]);
+    expect(userRun.outcome.reranked_ids).toEqual([E_PUB]);
+    expect(userRun.outcome.sensitivity_allowed).toEqual(["public"]);
+    expect(userRun.outcome.status).toBe("ok");
+
+    // Counter-fact: the excluded rows DO exist in the DB. Admin's allow-list
+    // is the full enum so admin's WHERE is a no-op — this assertion proves
+    // the user-side exclusion above is the SQL filter doing work, not the
+    // seed being missing rows.
+    expect(new Set(adminRun.outcome.ann_candidate_ids)).toEqual(new Set([E_PUB, E_INT, E_RES]));
+    expect(new Set(adminRun.outcome.keyword_candidate_ids)).toEqual(new Set([E_PUB, E_INT, E_RES]));
+    expect(adminRun.outcome.sensitivity_allowed).toEqual(["public", "internal", "restricted"]);
+  });
+
+  it("β2 — direct annCandidates + keywordCandidates SQL filter by allow-list", async () => {
+    await seedMixedSensitivity(pool);
+
+    // ["public"] — only E_PUB qualifies on both lanes.
+    const annPublic = await annCandidates(
+      pool,
+      vec(0.5),
+      ["public"],
+      STUB_MODEL,
+      STUB_VERSION,
+      20,
+      50,
+    );
+    const kwPublic = await keywordCandidates(pool, QUERY, ["public"], 20);
+    expect(annPublic.map((r) => r.entry_id)).toEqual([E_PUB]);
+    expect(kwPublic.map((r) => r.entry_id)).toEqual([E_PUB]);
+
+    // ["public","internal"] — E_PUB + E_INT qualify; E_RES excluded.
+    const annPubInt = await annCandidates(
+      pool,
+      vec(0.5),
+      ["public", "internal"],
+      STUB_MODEL,
+      STUB_VERSION,
+      20,
+      50,
+    );
+    const kwPubInt = await keywordCandidates(pool, QUERY, ["public", "internal"], 20);
+    expect(new Set(annPubInt.map((r) => r.entry_id))).toEqual(new Set([E_PUB, E_INT]));
+    expect(annPubInt.map((r) => r.entry_id)).not.toContain(E_RES);
+    expect(new Set(kwPubInt.map((r) => r.entry_id))).toEqual(new Set([E_PUB, E_INT]));
+    expect(kwPubInt.map((r) => r.entry_id)).not.toContain(E_RES);
+
+    // ["public","internal","restricted"] — full enum, all three qualify.
+    const annAll = await annCandidates(
+      pool,
+      vec(0.5),
+      ["public", "internal", "restricted"],
+      STUB_MODEL,
+      STUB_VERSION,
+      20,
+      50,
+    );
+    const kwAll = await keywordCandidates(pool, QUERY, ["public", "internal", "restricted"], 20);
+    expect(new Set(annAll.map((r) => r.entry_id))).toEqual(new Set([E_PUB, E_INT, E_RES]));
+    expect(new Set(kwAll.map((r) => r.entry_id))).toEqual(new Set([E_PUB, E_INT, E_RES]));
+  });
+
+  it("β3 — Hebrew niqqud query against internal-sensitivity entry: admin matches, user excluded", async () => {
+    await seedHebrewMixedSensitivity(pool);
+    const deps = buildRealDbDeps(pool, {});
+
+    // Bare-form Hebrew query (no niqqud); seeded bodies have niqqud-bearing
+    // form. The trigger + keyword-lane recipe both strip combining marks, so
+    // the indexed lexemes match the bare query. This case exercises the
+    // niqqud-strip + sensitivity-WHERE combination — proves the keyword
+    // normalization path still applies the role-derived filter.
+    const HE_QUERY = "טסט";
+
+    const adminRun = await drainPipeline(
+      retrievePipeline(deps, { query: HE_QUERY, role: "admin" satisfies Role }),
+    );
+    const userRun = await drainPipeline(
+      retrievePipeline(deps, { query: HE_QUERY, role: "user" satisfies Role }),
+    );
+
+    // Admin sees both rows — proves niqqud normalization works under the
+    // full allow-list (catches a regression that breaks the regexp_replace
+    // mirror between trigger and query helper).
+    expect(new Set(adminRun.outcome.keyword_candidate_ids)).toEqual(new Set([E_HE_PUB, E_HE_INT]));
+
+    // User sees ONLY the public row — proves the sensitivity WHERE applies
+    // even when the keyword recipe is exercising its non-trivial Hebrew
+    // normalization path.
+    expect(userRun.outcome.keyword_candidate_ids).toEqual([E_HE_PUB]);
+    expect(userRun.outcome.keyword_candidate_ids).not.toContain(E_HE_INT);
+  });
+
+  it("β4 — user role on all-restricted seed → no_content terminal; sensitivity filter excludes every row", async () => {
+    await seedAllRestricted(pool);
+    const deps = buildRealDbDeps(pool, {});
+
+    const userRun = await drainPipeline(
+      retrievePipeline(deps, { query: QUERY, role: "user" satisfies Role }),
+    );
+
+    // Exercises the orchestrator's `!fusedNonEmpty` terminal branch under
+    // sensitivity exclusion (lib/retrieval-pipeline.ts:457-466). The
+    // SQL-filtered-out path is structurally identical to "no rows in DB" —
+    // both produce the no_content terminal — but the `degraded_reason`
+    // discriminates: this case is `undefined` (embed succeeded, no rows is
+    // a content gap, not an outage), whereas the embed-fail + zero-keyword
+    // case at line 682 sets `no_keyword_match_under_embed_outage`.
+    expect(userRun.events.map((e) => e.kind)).toEqual(["no_content"]);
+    expect(userRun.outcome.ann_candidate_ids).toEqual([]);
+    expect(userRun.outcome.keyword_candidate_ids).toEqual([]);
+    expect(userRun.outcome.fused_ids).toEqual([]);
+    expect(userRun.outcome.reranked_ids).toEqual([]);
+    expect(userRun.outcome.citation_ids).toEqual([]);
+    expect(userRun.outcome.degraded).toBe(false);
+    expect(userRun.outcome.degraded_reason).toBeUndefined();
+    expect(userRun.outcome.status).toBe("ok");
+
+    // Admin counter-fact: same seed, admin role → both lanes populated.
+    // Proves the rows exist and the user-side exclusion is the SQL filter
+    // doing work, not the seed being empty.
+    const adminRun = await drainPipeline(
+      retrievePipeline(deps, { query: QUERY, role: "admin" satisfies Role }),
+    );
+    expect(new Set(adminRun.outcome.ann_candidate_ids)).toEqual(new Set([E_RES, E_RES2]));
+    expect(new Set(adminRun.outcome.keyword_candidate_ids)).toEqual(new Set([E_RES, E_RES2]));
   });
 });
