@@ -12,6 +12,7 @@ import {
   createStubEmbedder,
   getEmbedder,
   resetEmbedderForTests,
+  setEmbedderForTests,
 } from "./embedding";
 
 afterEach(() => {
@@ -100,6 +101,61 @@ describe("createStubEmbedder — deterministic stub for #8-compliant tests", () 
     const single = await e.embed("same");
     const batch = await e.embedBatch(["same"]);
     expect(single.vector).toEqual(batch.vectors[0]);
+  });
+});
+
+describe("EmbedOptions — input_type signature extension (ADR-0012 §A)", () => {
+  // The stub is intentionally option-blind — its hash-derived vectors don't
+  // model Voyage's query/document asymmetry. These tests pin the SHAPE of
+  // the contract (signature accepts options; stub returns the same vector
+  // regardless), NOT semantic differentiation; the semantic floor lives on
+  // real Voyage at M3 acceptance.
+
+  it("embed accepts an optional input_type option without affecting the stub vector", async () => {
+    const e = createStubEmbedder();
+    const noOpt = await e.embed("question");
+    const queryOpt = await e.embed("question", { input_type: "query" });
+    const docOpt = await e.embed("question", { input_type: "document" });
+    expect(queryOpt.vector).toEqual(noOpt.vector);
+    expect(docOpt.vector).toEqual(noOpt.vector);
+  });
+
+  it("embedBatch accepts an optional input_type option without affecting stub vectors", async () => {
+    const e = createStubEmbedder();
+    const noOpt = await e.embedBatch(["a", "b"]);
+    const queryOpt = await e.embedBatch(["a", "b"], { input_type: "query" });
+    expect(queryOpt.vectors).toEqual(noOpt.vectors);
+  });
+
+  it("embed accepts an empty options object (defensive — caller may pass {})", async () => {
+    const e = createStubEmbedder();
+    const empty = await e.embed("q", {});
+    const noOpt = await e.embed("q");
+    expect(empty.vector).toEqual(noOpt.vector);
+  });
+
+  it("factory-resolved embedder accepts input_type at the call site (interface contract)", async () => {
+    // m8: lock the runtime signature at the factory boundary, not just
+    // at the stub constructor. A future Voyage adapter that silently
+    // dropped the second arg would still pass the stub-only tests above;
+    // this test exercises the factory path so a wired-but-broken adapter
+    // surfaces here. The stub ignores the option; the assertion is that
+    // the call does not throw and the result shape is intact.
+    const e = getEmbedder();
+    const r = await e.embed("query text", { input_type: "query" });
+    expect(r.vector).toHaveLength(STUB_DIMENSIONS);
+    expect(r.model).toBe(STUB_MODEL);
+  });
+});
+
+describe("setEmbedderForTests — symmetric setter for orchestrator tests", () => {
+  it("injects an embedder that getEmbedder returns identity-equal", () => {
+    // Parallel to setRerankerForTests / setSynthesizerForTests. The
+    // orchestrator slice will use this to drive embed-down matrix rows
+    // without touching env vars.
+    const injected = createStubEmbedder();
+    setEmbedderForTests(injected);
+    expect(getEmbedder()).toBe(injected);
   });
 });
 
