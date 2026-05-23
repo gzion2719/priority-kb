@@ -321,6 +321,176 @@ describe("logEvent — sink robustness", () => {
   });
 });
 
+describe("logEvent — retrieval_pipeline variant (ADR-0005 amendment 2026-05-23)", () => {
+  it("emits one NDJSON line with all required fields and omits LogEventBase shape", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "retrieval_pipeline",
+      latency_ms: 1234,
+      cost_usd: null,
+      role: "user",
+      degraded: false,
+      citation_validation_outcome: "ok",
+      retry_attempted: false,
+      keyword_only: false,
+    });
+
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.kind).toBe("retrieval_pipeline");
+    expect(parsed.latency_ms).toBe(1234);
+    expect(parsed.cost_usd).toBeNull();
+    expect(parsed.role).toBe("user");
+    expect(parsed.degraded).toBe(false);
+    expect(parsed.citation_validation_outcome).toBe("ok");
+    expect(parsed.retry_attempted).toBe(false);
+    expect(parsed.keyword_only).toBe(false);
+    expect(parsed.ts).toMatch(ISO_8601);
+    // LogEventBase shape NOT carried — no model / model_version / tokens /
+    // prompt_hash on the aggregate event (per-vendor lines carry those).
+    expect("model" in parsed).toBe(false);
+    expect("model_version" in parsed).toBe(false);
+    expect("prompt_hash" in parsed).toBe(false);
+    // Assert on raw line — JSON.parse silently drops undefined-valued keys,
+    // would miss a regression that wrote `model: undefined` into the spread.
+    expect(lines[0]).not.toMatch(/"model"/);
+    expect(lines[0]).not.toMatch(/"prompt_hash"/);
+  });
+
+  it("preserves optional fields (status, error, query_hash, degraded_reason, pipeline_request_id) when present", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "retrieval_pipeline",
+      latency_ms: 50,
+      cost_usd: null,
+      role: "admin",
+      degraded: true,
+      degraded_reason: "synth_unavailable",
+      citation_validation_outcome: null,
+      retry_attempted: false,
+      keyword_only: false,
+      status: "error",
+      error: "stage D unavailable",
+      query_hash: "deadbeefcafe1234",
+      pipeline_request_id: "req-abc-123",
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.degraded).toBe(true);
+    expect(parsed.degraded_reason).toBe("synth_unavailable");
+    expect(parsed.status).toBe("error");
+    expect(parsed.error).toBe("stage D unavailable");
+    expect(parsed.query_hash).toBe("deadbeefcafe1234");
+    expect(parsed.pipeline_request_id).toBe("req-abc-123");
+  });
+
+  it("omits optional fields from the raw NDJSON line when absent (string-level assertion)", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "retrieval_pipeline",
+      latency_ms: 10,
+      cost_usd: null,
+      role: "user",
+      degraded: false,
+      citation_validation_outcome: null,
+      retry_attempted: false,
+      keyword_only: false,
+    });
+
+    // Assert on the raw line — same rationale as the Claude-variant test:
+    // JSON.parse drops undefined-valued keys, but a `spread` regression
+    // that wrote `query_hash: undefined` would leave the key name in the
+    // raw string.
+    expect(lines[0]).not.toMatch(/"status"/);
+    expect(lines[0]).not.toMatch(/"error"/);
+    expect(lines[0]).not.toMatch(/"query_hash"/);
+    expect(lines[0]).not.toMatch(/"degraded_reason"/);
+    expect(lines[0]).not.toMatch(/"pipeline_request_id"/);
+  });
+
+  it("inherits the latency_ms guard (throws on NaN)", () => {
+    expect(() =>
+      logEvent({
+        kind: "retrieval_pipeline",
+        latency_ms: Number.NaN,
+        cost_usd: null,
+        role: "user",
+        degraded: false,
+        citation_validation_outcome: null,
+        retry_attempted: false,
+        keyword_only: false,
+      }),
+    ).toThrow(/finite non-negative number/);
+  });
+
+  it("inherits the cost_usd guard (throws on undefined-smuggled-as-any)", () => {
+    expect(() =>
+      logEvent({
+        kind: "retrieval_pipeline",
+        latency_ms: 1,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        cost_usd: undefined as any,
+        role: "user",
+        degraded: false,
+        citation_validation_outcome: null,
+        retry_attempted: false,
+        keyword_only: false,
+      }),
+    ).toThrow(/cost_usd must be a number or null/);
+  });
+
+  it("inherits the error redact + truncate pipeline", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "retrieval_pipeline",
+      latency_ms: 1,
+      cost_usd: null,
+      role: "user",
+      degraded: true,
+      degraded_reason: "synth_unavailable",
+      citation_validation_outcome: null,
+      retry_attempted: false,
+      keyword_only: false,
+      status: "error",
+      error: "401 Authorization: Bearer sk-ant-XXXXXXXXXXXX",
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.error).not.toContain("sk-ant-XXXXXXXXXXXX");
+    expect(parsed.error).toContain("[REDACTED]");
+  });
+
+  it("ts is helper-injected and not caller-overridable via structural cast", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "retrieval_pipeline",
+      latency_ms: 1,
+      cost_usd: null,
+      role: "user",
+      degraded: false,
+      citation_validation_outcome: null,
+      retry_attempted: false,
+      keyword_only: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...({ ts: "1970-01-01T00:00:00.000Z" } as any),
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.ts).not.toBe("1970-01-01T00:00:00.000Z");
+    expect(parsed.ts).toMatch(ISO_8601);
+  });
+});
+
 describe("logEvent — sink injection", () => {
   it("resetLogSink stops the swapped writer and resumes default", () => {
     const { lines, writer } = captureLog();
