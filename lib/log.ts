@@ -184,7 +184,67 @@ export interface LogEventRetrievalPipeline {
   ts?: never;
 }
 
-export type LogEvent = LogEventClaude | LogEventVoyage | LogEventRetrievalPipeline;
+/**
+ * Route-layer-or-dispatch error event NOT attributable to a single vendor
+ * call. Emitted by the catch-all paths in `app/api/ingest/route.ts`,
+ * `app/api/ingest/[id]/route.ts`, and `app/api/agent/ingest/route.ts`'s
+ * `dispatchTool` — sites where the failure happened in our own request
+ * plumbing (Zod validation post-Zod fall-through, ORM error, dispatch
+ * recovery), not in an outbound Voyage/Anthropic SDK call.
+ *
+ * Intentionally does NOT extend {@link LogEventBase}: there is no vendor
+ * `model` / `model_version` to attribute, and the original
+ * `kind:"voyage", model:"route", model_version:"ingest"` pollution that
+ * this variant replaces violated dashboards that group by `kind`. Same
+ * carve-out rationale as {@link LogEventRetrievalPipeline} (ADR-0005
+ * Amendment 2026-05-23 §1) — iron rules #9/#10 don't apply when no
+ * vendor call was made, so there is nothing to attribute and the type
+ * level enforcement is vacuously satisfied.
+ *
+ * `cost_usd` is always `null` here — no vendor cost was incurred. The
+ * field is present so the {@link logEvent} cost-type runtime guard fires
+ * uniformly across variants without a per-kind branch.
+ *
+ * The `error` field passes through the same redact-then-truncate
+ * pipeline as the other variants (see {@link logEvent}).
+ *
+ * `latency_ms` is typically `0` on these catch-all paths — they're
+ * recovery sites, not timed operations. Dashboards that average latency
+ * by `kind` should filter on `status:"error"` first.
+ *
+ * No `request_id` field: there is no SDK call whose id we could carry.
+ * Sibling variant's `pipeline_request_id` is for spanning multiple
+ * vendor calls — not applicable here.
+ */
+export interface LogEventRoute {
+  kind: "route";
+  /**
+   * Stable `METHOD path` label dashboards group by — e.g.
+   * `"POST /api/ingest"`. Keep this symmetric across sites so a future
+   * dashboard `GROUP BY route` doesn't see phantom rows that don't
+   * correspond to a real endpoint.
+   */
+  route: string;
+  /** Finite, non-negative. Typically `0` on catch-all paths. */
+  latency_ms: number;
+  /**
+   * Always `null` for this variant — no vendor invoked, no cost. Field
+   * is present so the runtime cost-type guard permits the line uniformly
+   * across variants.
+   */
+  cost_usd: number | null;
+  status?: LogStatus;
+  /** Subject to redact + truncate (same pipeline as other variants). */
+  error?: string;
+  /**
+   * @internal — the helper injects `ts` itself; `ts?: never` blocks
+   * callers from passing one even when widening through a structural
+   * cast.
+   */
+  ts?: never;
+}
+
+export type LogEvent = LogEventClaude | LogEventVoyage | LogEventRetrievalPipeline | LogEventRoute;
 
 /** Maximum length of the `error` field after redaction; longer is truncated. */
 export const ERROR_MAX_LEN = 500;

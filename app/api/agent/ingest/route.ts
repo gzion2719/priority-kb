@@ -150,9 +150,8 @@ async function dispatchTool(name: string, input: unknown): Promise<ToolDispatchR
     // Non-Zod, non-EmptyBody throws → log + recover. The agent gets a
     // failed tool_result and can decide what to do; the stream stays open.
     logEvent({
-      kind: "voyage",
-      model: "route",
-      model_version: "agent-ingest",
+      kind: "route",
+      route: "POST /api/agent/ingest",
       latency_ms: 0,
       cost_usd: null,
       status: "error",
