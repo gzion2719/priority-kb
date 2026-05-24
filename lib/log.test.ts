@@ -491,6 +491,136 @@ describe("logEvent — retrieval_pipeline variant (ADR-0005 amendment 2026-05-23
   });
 });
 
+describe("logEvent — route variant (ADR-0005 amendment 2026-05-27)", () => {
+  it("emits one NDJSON line with all required fields and omits LogEventBase shape", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "route",
+      route: "POST /api/ingest",
+      latency_ms: 0,
+      cost_usd: null,
+      status: "error",
+      error: "boom",
+    });
+
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.kind).toBe("route");
+    expect(parsed.route).toBe("POST /api/ingest");
+    expect(parsed.latency_ms).toBe(0);
+    expect(parsed.cost_usd).toBeNull();
+    expect(parsed.status).toBe("error");
+    expect(parsed.error).toBe("boom");
+    expect(parsed.ts).toMatch(ISO_8601);
+    // LogEventBase shape NOT carried — no vendor model invoked, nothing
+    // to attribute. Same carve-out rationale as kind:"retrieval_pipeline".
+    expect("model" in parsed).toBe(false);
+    expect("model_version" in parsed).toBe(false);
+    expect("prompt_hash" in parsed).toBe(false);
+    expect("tokens" in parsed).toBe(false);
+    expect("request_id" in parsed).toBe(false);
+    // Assert on raw line — JSON.parse silently drops undefined-valued
+    // keys; would miss a regression that wrote `model: undefined` into
+    // the spread.
+    expect(lines[0]).not.toMatch(/"model"/);
+    expect(lines[0]).not.toMatch(/"model_version"/);
+    expect(lines[0]).not.toMatch(/"prompt_hash"/);
+  });
+
+  it("omits optional fields (status, error) from the raw NDJSON line when absent", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "route",
+      route: "POST /api/agent/ingest",
+      latency_ms: 0,
+      cost_usd: null,
+    });
+
+    expect(lines[0]).not.toMatch(/"status"/);
+    expect(lines[0]).not.toMatch(/"error"/);
+  });
+
+  it("inherits the latency_ms guard (throws on NaN)", () => {
+    expect(() =>
+      logEvent({
+        kind: "route",
+        route: "POST /api/ingest",
+        latency_ms: Number.NaN,
+        cost_usd: null,
+      }),
+    ).toThrow(/finite non-negative number/);
+  });
+
+  it("inherits the cost_usd guard (throws on undefined-smuggled-as-any)", () => {
+    expect(() =>
+      logEvent({
+        kind: "route",
+        route: "POST /api/ingest",
+        latency_ms: 0,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        cost_usd: undefined as any,
+      }),
+    ).toThrow(/cost_usd must be a number or null/);
+  });
+
+  it("inherits the error redact + truncate pipeline", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "route",
+      route: "POST /api/ingest",
+      latency_ms: 0,
+      cost_usd: null,
+      status: "error",
+      error: "ORM blew up Authorization: Bearer sk-ant-XXXXXXXXXXXX",
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.error).not.toContain("sk-ant-XXXXXXXXXXXX");
+    expect(parsed.error).toContain("[REDACTED]");
+  });
+
+  it("ts is helper-injected and not caller-overridable via structural cast", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "route",
+      route: "POST /api/ingest",
+      latency_ms: 0,
+      cost_usd: null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...({ ts: "1970-01-01T00:00:00.000Z" } as any),
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.ts).not.toBe("1970-01-01T00:00:00.000Z");
+    expect(parsed.ts).toMatch(ISO_8601);
+  });
+
+  it("does not propagate sink errors into the caller", () => {
+    setLogSink(() => {
+      throw new Error("sink exploded");
+    });
+
+    expect(() =>
+      logEvent({
+        kind: "route",
+        route: "POST /api/ingest",
+        latency_ms: 0,
+        cost_usd: null,
+        status: "error",
+        error: "boom",
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe("logEvent — sink injection", () => {
   it("resetLogSink stops the swapped writer and resumes default", () => {
     const { lines, writer } = captureLog();

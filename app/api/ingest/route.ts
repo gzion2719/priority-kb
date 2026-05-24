@@ -67,9 +67,8 @@ async function handler(req: NextRequest): Promise<Response> {
     // PII or stack hints). Observability still gets the detail via
     // logEvent, which applies its own secret-redaction pass.
     logEvent({
-      kind: "voyage",
-      model: "route",
-      model_version: "ingest",
+      kind: "route",
+      route: "POST /api/ingest",
       latency_ms: 0,
       cost_usd: null,
       status: "error",
