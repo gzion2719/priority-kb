@@ -772,9 +772,12 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
   //   the admin-only escape hatch in the three-tier enum (see lib/auth.ts:175
   //   JSDoc + ADR-0012 §6).
   //
-  // Deferred to shape γ: chunks.sensitivity vs entries.sensitivity divergence
-  // rejection (composite FK at drizzle/schema.ts:115-118 — onUpdate cascade,
-  // structural insert-side rejection on mismatched tuples).
+  // Shape γ (this file, below): chunks.sensitivity vs entries.sensitivity
+  // ON UPDATE CASCADE end-to-end through retrieval lanes (composite FK at
+  // drizzle/schema.ts:115-118). Insert-side mismatched-tuple rejection is
+  // intentionally NOT duplicated here — already covered by name at
+  // tests/migration.test.ts:130-163 and tests/ingest.integration.test.ts:151-181
+  // (both pin /chunks_entry_id_sensitivity_fk/).
 
   // Insert helpers for the shape-β seeds. `vec(slot)` from the file's shared
   // helpers; chunk sensitivity mirrors entry sensitivity to satisfy the
@@ -1051,5 +1054,129 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     );
     expect(new Set(adminRun.outcome.ann_candidate_ids)).toEqual(new Set([E_RES, E_RES2]));
     expect(new Set(adminRun.outcome.keyword_candidate_ids)).toEqual(new Set([E_RES, E_RES2]));
+  });
+
+  // ── Shape γ: composite-FK ON UPDATE CASCADE end-to-end ────────────────────
+  //
+  // Proves the composite FK chunks(entry_id, sensitivity) → entries(id,
+  // sensitivity) ON UPDATE CASCADE (drizzle/schema.ts:115-121) fires at
+  // RUNTIME on a real UPDATE statement — not merely that confupdtype='c' in
+  // the catalog (which tests/migration.test.ts:60-85 already pins). The
+  // retrieval-lane assertions then prove that the role-based
+  // `WHERE chunks.sensitivity = ANY($2)` (ANN lane) picks up the cascaded
+  // value, i.e., that iron rule #6 enforcement remains correct across a
+  // sensitivity flip without any app-level re-derivation.
+  //
+  // Cascade direction: public → restricted. Chosen so the pre-cascade user
+  // run is independent of the 2026-05-24 user→[public,internal] mapping
+  // reconciliation — a future re-tightening of `sensitivityAllowedForRole`
+  // would not collapse this test for an unrelated reason.
+  it("γ — ON UPDATE CASCADE propagates entries.sensitivity into chunks; ANN lane reflects new sensitivity end-to-end", async () => {
+    // Seed: one entry @ public, TWO chunks @ public so the multi-row cascade
+    // is exercised (single-chunk would hide a per-row cascade bug where only
+    // the first matching child row is updated).
+    await insertEntry(pool, {
+      id: E_PUB,
+      title: "Public entry",
+      body: "priority workflow public",
+      sensitivity: "public",
+    });
+    await insertChunk(pool, { entry_id: E_PUB, sensitivity: "public", embedding: vec(0.5) });
+    await insertChunk(pool, { entry_id: E_PUB, sensitivity: "public", embedding: vec(0.55) });
+
+    // Pre-cascade DB sanity — chunks at 'public', embedding_model/version
+    // intact. The model/version columns are checked so a future
+    // "helpful" migration that re-derives them on cascade fails loud
+    // (iron rule #9: embedding_model + embedding_version are mandatory).
+    const pre = await pool.query<{
+      sensitivity: string;
+      embedding_model: string;
+      embedding_version: string;
+    }>(
+      `SELECT sensitivity, embedding_model, embedding_version
+         FROM chunks WHERE entry_id = $1 ORDER BY chunk_index`,
+      [E_PUB],
+    );
+    expect(pre.rows).toHaveLength(2);
+    expect(pre.rows.every((r) => r.sensitivity === "public")).toBe(true);
+    expect(pre.rows.every((r) => r.embedding_model === STUB_MODEL)).toBe(true);
+    expect(pre.rows.every((r) => r.embedding_version === STUB_VERSION)).toBe(true);
+
+    // Pre-cascade retrieval — user role sees the public entry. Independent
+    // of the post-2026-05-24 mapping flip (public is allowed under every
+    // historic and current shape of sensitivityAllowedForRole).
+    const userDepsPre = buildRealDbDeps(pool, { synth: buildSynth({ cite: [E_PUB] }) });
+    const userRunPre = await drainPipeline(
+      retrievePipeline(userDepsPre, { query: QUERY, role: "user" satisfies Role }),
+    );
+    expect(userRunPre.outcome.ann_candidate_ids).toContain(E_PUB);
+    expect(userRunPre.outcome.keyword_candidate_ids).toContain(E_PUB);
+
+    // Trigger ON UPDATE CASCADE at the DB level via raw SQL UPDATE. The
+    // BEFORE UPDATE trigger entries_set_updated_at (migration 0001) bumps
+    // updated_at; the FK-driven cascade on chunks fires as a separate
+    // row-level action driven by the entries.sensitivity column change.
+    await pool.query("UPDATE entries SET sensitivity = 'restricted' WHERE id = $1", [E_PUB]);
+
+    // Post-cascade DB assertion — load-bearing. Distinguishes "cascade
+    // fires at runtime" from "FK exists with confupdtype='c' in catalog".
+    // If the FK were redefined as ON UPDATE NO ACTION, Postgres would
+    // REJECT the entries UPDATE (orphan-tuple violation) and this query
+    // would never run — but the test would still fail (UPDATE throws).
+    // If the FK were dropped entirely, the UPDATE succeeds and chunks
+    // stay 'public' — this assertion catches that. embedding_model/version
+    // re-asserted to catch a cascade that "helpfully" rewrites unrelated
+    // columns.
+    const post = await pool.query<{
+      sensitivity: string;
+      embedding_model: string;
+      embedding_version: string;
+    }>(
+      `SELECT sensitivity, embedding_model, embedding_version
+         FROM chunks WHERE entry_id = $1 ORDER BY chunk_index`,
+      [E_PUB],
+    );
+    expect(post.rows).toHaveLength(2);
+    expect(post.rows.every((r) => r.sensitivity === "restricted")).toBe(true);
+    expect(post.rows.every((r) => r.embedding_model === STUB_MODEL)).toBe(true);
+    expect(post.rows.every((r) => r.embedding_version === STUB_VERSION)).toBe(true);
+
+    // Post-cascade retrieval — user role. Synth is unreachable on this
+    // path (no_content terminal fires at lib/retrieval-pipeline.ts:457
+    // before synth runs), so the default synth via undefined-cite is
+    // irrelevant; passing the default-deps keeps the test minimal.
+    const userDepsPost = buildRealDbDeps(pool, {});
+    const userRunPost = await drainPipeline(
+      retrievePipeline(userDepsPost, { query: QUERY, role: "user" satisfies Role }),
+    );
+
+    // Both lanes are empty. Note: the keyword lane filters on
+    // entries.sensitivity (already flipped by the UPDATE above), so its
+    // emptiness is structural — NOT cascade-discriminating. The ANN lane
+    // filters on chunks.sensitivity, which can only be 'restricted' if
+    // the cascade actually fired — so the ANN lane emptiness IS the
+    // cascade-discriminating retrieval assertion (paired with the direct
+    // DB SELECT above). Keep both as a multi-lane symmetric iron-rule-#6
+    // pin.
+    expect(userRunPost.outcome.ann_candidate_ids).toEqual([]);
+    expect(userRunPost.outcome.keyword_candidate_ids).toEqual([]);
+    // Pin the terminal so a different bug returning empty lanes (e.g.,
+    // seed truncation race, swallowed connection error) doesn't slip
+    // through as a vacuous .toEqual([]) pass.
+    expect(userRunPost.events.map((e) => e.kind)).toEqual(["no_content"]);
+    expect(userRunPost.outcome.degraded).toBe(false);
+    expect(userRunPost.outcome.degraded_reason).toBeUndefined();
+    expect(userRunPost.outcome.status).toBe("ok");
+
+    // Admin counter-fact — row still exists at sensitivity='restricted';
+    // user-side exclusion is the SQL filter doing work, not the row
+    // disappearing. Admin's allow-list is the full enum so its WHERE is
+    // a no-op by construction.
+    const adminDeps = buildRealDbDeps(pool, { synth: buildSynth({ cite: [E_PUB] }) });
+    const adminRunPost = await drainPipeline(
+      retrievePipeline(adminDeps, { query: QUERY, role: "admin" satisfies Role }),
+    );
+    expect(adminRunPost.outcome.ann_candidate_ids).toContain(E_PUB);
+    expect(adminRunPost.outcome.keyword_candidate_ids).toContain(E_PUB);
   });
 });
