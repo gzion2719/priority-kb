@@ -82,6 +82,7 @@ const E_RES = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const E_RES2 = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const E_HE_INT = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const E_HE_PUB = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+const E_HE_RES = "aaabbbcc-1111-4111-8111-222233334444";
 
 // ── Stub model/version (shared by embedder stub + chunk inserts so the
 // ANN SQL `WHERE chunks.embedding_model = $3 AND ... = $4` matches). ────────
@@ -730,11 +731,11 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     const userRun = await drainPipeline(
       retrievePipeline(deps, { query: QUERY, role: "user" satisfies Role }),
     );
-    // NOTE: lib/auth.ts:189 currently maps user→["public"] only, which
-    // departs from ADR-0012 §6 ("user → [public, internal]") + CLAUDE.md
-    // non-negotiable #6. This test pins the IMPLEMENTATION, not the spec.
-    // Doc-vs-code drift surfaced in this session — BACKLOG follow-up.
-    expect(userRun.outcome.sensitivity_allowed).toEqual(["public"]);
+    // user → [public, internal] per ADR-0012 §6 + lib/auth.ts:175 JSDoc.
+    // Restricted remains admin-only. The 2026-05-24 reconciliation flipped
+    // this from the prior `["public"]`-only implementation; see CHATLOG
+    // entry for that date.
+    expect(userRun.outcome.sensitivity_allowed).toEqual(["public", "internal"]);
     expect(userRun.outcome.status).toBe("ok");
     // user still gets the public entries (all 4 seeded are public).
     expect(userRun.outcome.ann_candidate_ids.length).toBeGreaterThan(0);
@@ -762,14 +763,14 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
   // discriminating assertion — admin's allow-list is the full sensitivityEnum
   // so admin's WHERE is a no-op by construction.
   //
-  // Doc-vs-code drift note (deferred to a reconciliation session):
-  //   `lib/auth.ts:189` maps user → ["public"] only, departing from ADR-0012
-  //   §6 + CLAUDE.md non-negotiable #6 which both state user → [public,
-  //   internal]. This section pins the IMPLEMENTATION. The drift is BACKLOG
-  //   item "Reconcile sensitivityAllowedForRole vs ADR-0012 §6" — must
-  //   resolve before M5 ship because the current code makes `internal`
-  //   entries unreachable to end users in violation of the documented
-  //   iron-rule-#6 contract.
+  // Reconciliation note (2026-05-24):
+  //   The original 2c-iv block pinned user → ["public"] only as a deliberate
+  //   scope call against the implementation. Same-day follow-up PR
+  //   reconciled lib/auth.ts:189 against ADR-0012 §6, flipping user to
+  //   ["public", "internal"]. β cases below assert the NEW post-flip
+  //   semantics. Restricted remains admin-only by design — `restricted` IS
+  //   the admin-only escape hatch in the three-tier enum (see lib/auth.ts:175
+  //   JSDoc + ADR-0012 §6).
   //
   // Deferred to shape γ: chunks.sensitivity vs entries.sensitivity divergence
   // rejection (composite FK at drizzle/schema.ts:115-118 — onUpdate cascade,
@@ -841,8 +842,19 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
       body: "טֶסט פריוריטי internal",
       sensitivity: "internal",
     });
+    await insertEntry(pool, {
+      id: E_HE_RES,
+      title: "Hebrew restricted",
+      body: "טֶסט פריוריטי restricted",
+      sensitivity: "restricted",
+    });
     await insertChunk(pool, { entry_id: E_HE_PUB, sensitivity: "public", embedding: vec(0.5) });
     await insertChunk(pool, { entry_id: E_HE_INT, sensitivity: "internal", embedding: vec(0.55) });
+    await insertChunk(pool, {
+      entry_id: E_HE_RES,
+      sensitivity: "restricted",
+      embedding: vec(0.6),
+    });
   }
 
   it("β1 — user-role mixed seed: only E_PUB returned on both lanes; admin counter-fact returns all three", async () => {
@@ -852,7 +864,9 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     // {E_PUB,E_INT,E_RES} reranked-id set. Override so the synth cites only
     // E_PUB (the single entry the user sees), keeping the validator green
     // and isolating this test's focus to the SQL filter, not synth contract.
-    const userDeps = buildRealDbDeps(pool, { synth: buildSynth({ cite: [E_PUB] }) });
+    const userDeps = buildRealDbDeps(pool, {
+      synth: buildSynth({ cite: [E_PUB, E_INT] }),
+    });
     const adminDeps = buildRealDbDeps(pool, {
       synth: buildSynth({ cite: [E_PUB, E_INT, E_RES] }),
     });
@@ -864,26 +878,59 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
       retrievePipeline(adminDeps, { query: QUERY, role: "admin" satisfies Role }),
     );
 
-    // Load-bearing iron-rule-#6 assertions: exact-equality of the user lane
-    // outputs. If the SQL `WHERE sensitivity = ANY($2)` were dropped on either
-    // lane, E_INT and E_RES would surface here and the test would fail.
-    expect(userRun.outcome.ann_candidate_ids).toEqual([E_PUB]);
-    expect(userRun.outcome.keyword_candidate_ids).toEqual([E_PUB]);
+    // Load-bearing iron-rule-#6 assertions: user lane outputs include the
+    // public + internal rows but EXCLUDE the restricted row. Set-equality
+    // because the keyword lane's `ts_rank_cd` order over divergent bodies
+    // is not predictable across the {E_PUB, E_INT} pair. If the SQL
+    // `WHERE sensitivity = ANY($2)` were dropped on either lane, E_RES
+    // would surface here and the set-equality + non-membership asserts
+    // would fail.
+    expect(new Set(userRun.outcome.ann_candidate_ids)).toEqual(new Set([E_PUB, E_INT]));
+    expect(new Set(userRun.outcome.keyword_candidate_ids)).toEqual(new Set([E_PUB, E_INT]));
+    expect(userRun.outcome.ann_candidate_ids).not.toContain(E_RES);
+    expect(userRun.outcome.keyword_candidate_ids).not.toContain(E_RES);
     // Downstream of the SQL filter — proves the orchestrator does NOT widen
     // the filter post-WHERE (e.g., via an over-eager hydration path that
     // refetches by entry_id only).
-    expect(userRun.outcome.fused_ids).toEqual([E_PUB]);
-    expect(userRun.outcome.reranked_ids).toEqual([E_PUB]);
-    expect(userRun.outcome.sensitivity_allowed).toEqual(["public"]);
+    expect(new Set(userRun.outcome.fused_ids)).toEqual(new Set([E_PUB, E_INT]));
+    expect(new Set(userRun.outcome.reranked_ids)).toEqual(new Set([E_PUB, E_INT]));
+    expect(userRun.outcome.sensitivity_allowed).toEqual(["public", "internal"]);
     expect(userRun.outcome.status).toBe("ok");
 
-    // Counter-fact: the excluded rows DO exist in the DB. Admin's allow-list
-    // is the full enum so admin's WHERE is a no-op — this assertion proves
-    // the user-side exclusion above is the SQL filter doing work, not the
-    // seed being missing rows.
+    // Counter-fact: the excluded row (E_RES) DOES exist in the DB. Admin's
+    // allow-list is the full enum so admin's WHERE is a no-op — this
+    // assertion proves the user-side exclusion above is the SQL filter
+    // doing work, not the seed being missing rows.
     expect(new Set(adminRun.outcome.ann_candidate_ids)).toEqual(new Set([E_PUB, E_INT, E_RES]));
     expect(new Set(adminRun.outcome.keyword_candidate_ids)).toEqual(new Set([E_PUB, E_INT, E_RES]));
     expect(adminRun.outcome.sensitivity_allowed).toEqual(["public", "internal", "restricted"]);
+  });
+
+  it("β1b — user can read internal entries (dedicated positive iron-rule-#6 case)", async () => {
+    // Focused single-tier seed: only an internal entry. The 2026-05-24
+    // flip of sensitivityAllowedForRole lets user reach `internal`. This
+    // test fails loud if a regression reverts the mapping to
+    // ["public"]-only because both lanes would return [] and the
+    // orchestrator would short-circuit to no_content.
+    await insertEntry(pool, {
+      id: E_INT,
+      title: "Internal only",
+      body: "priority internal procedure",
+      sensitivity: "internal",
+    });
+    await insertChunk(pool, { entry_id: E_INT, sensitivity: "internal", embedding: vec(0.5) });
+
+    const deps = buildRealDbDeps(pool, { synth: buildSynth({ cite: [E_INT] }) });
+    const userRun = await drainPipeline(
+      retrievePipeline(deps, { query: QUERY, role: "user" satisfies Role }),
+    );
+
+    expect(userRun.outcome.ann_candidate_ids).toEqual([E_INT]);
+    expect(userRun.outcome.keyword_candidate_ids).toEqual([E_INT]);
+    expect(userRun.outcome.fused_ids).toEqual([E_INT]);
+    expect(userRun.outcome.reranked_ids).toEqual([E_INT]);
+    expect(userRun.outcome.status).toBe("ok");
+    expect(userRun.outcome.sensitivity_allowed).toEqual(["public", "internal"]);
   });
 
   it("β2 — direct annCandidates + keywordCandidates SQL filter by allow-list", async () => {
@@ -934,15 +981,17 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     expect(new Set(kwAll.map((r) => r.entry_id))).toEqual(new Set([E_PUB, E_INT, E_RES]));
   });
 
-  it("β3 — Hebrew niqqud query against internal-sensitivity entry: admin matches, user excluded", async () => {
+  it("β3 — Hebrew niqqud query: admin sees all 3, user sees {public,internal}, restricted excluded for user", async () => {
     await seedHebrewMixedSensitivity(pool);
     const deps = buildRealDbDeps(pool, {});
 
     // Bare-form Hebrew query (no niqqud); seeded bodies have niqqud-bearing
     // form. The trigger + keyword-lane recipe both strip combining marks, so
     // the indexed lexemes match the bare query. This case exercises the
-    // niqqud-strip + sensitivity-WHERE combination — proves the keyword
-    // normalization path still applies the role-derived filter.
+    // niqqud-strip + sensitivity-WHERE combination across all three tiers —
+    // proves the keyword normalization path applies the role-derived filter
+    // AND proves user can reach `internal` under Hebrew normalization
+    // (post-2026-05-24 reconciliation).
     const HE_QUERY = "טסט";
 
     const adminRun = await drainPipeline(
@@ -952,16 +1001,21 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
       retrievePipeline(deps, { query: HE_QUERY, role: "user" satisfies Role }),
     );
 
-    // Admin sees both rows — proves niqqud normalization works under the
-    // full allow-list (catches a regression that breaks the regexp_replace
-    // mirror between trigger and query helper).
-    expect(new Set(adminRun.outcome.keyword_candidate_ids)).toEqual(new Set([E_HE_PUB, E_HE_INT]));
+    // Admin sees all three rows — proves niqqud normalization works under
+    // the full allow-list (catches a regression that breaks the
+    // regexp_replace mirror between trigger and query helper).
+    expect(new Set(adminRun.outcome.keyword_candidate_ids)).toEqual(
+      new Set([E_HE_PUB, E_HE_INT, E_HE_RES]),
+    );
 
-    // User sees ONLY the public row — proves the sensitivity WHERE applies
-    // even when the keyword recipe is exercising its non-trivial Hebrew
-    // normalization path.
-    expect(userRun.outcome.keyword_candidate_ids).toEqual([E_HE_PUB]);
-    expect(userRun.outcome.keyword_candidate_ids).not.toContain(E_HE_INT);
+    // User sees public + internal — proves the keyword normalization path
+    // honours the new mapping (`internal` reachable) under Hebrew
+    // normalization. Set-equality because keyword `ts_rank_cd` order across
+    // {E_HE_PUB, E_HE_INT} is non-deterministic.
+    expect(new Set(userRun.outcome.keyword_candidate_ids)).toEqual(new Set([E_HE_PUB, E_HE_INT]));
+    // Restricted excluded — load-bearing iron-rule-#6 negative-assertion
+    // under the Hebrew normalization path.
+    expect(userRun.outcome.keyword_candidate_ids).not.toContain(E_HE_RES);
   });
 
   it("β4 — user role on all-restricted seed → no_content terminal; sensitivity filter excludes every row", async () => {

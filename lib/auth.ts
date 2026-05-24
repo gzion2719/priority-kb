@@ -173,7 +173,13 @@ export function withUserOrAdmin<C>(handler: AuthenticatedRouteHandler<C>): Route
  * Maps an authenticated role to the iron-rule-#6 sensitivity allow-list.
  *
  *   - admin → ['public', 'internal', 'restricted']
- *   - user  → ['public']
+ *   - user  → ['public', 'internal']
+ *
+ * Authoritative source: ADR-0012 §6 table (`docs/adr/0012-retrieval-pipeline.md`).
+ * The three-tier enum's design intent is that `restricted` IS the admin-only
+ * escape hatch — `internal` is org-internal and reachable by authenticated
+ * end users. A mapping that hid `internal` from user-role would collapse
+ * the three-tier enum to functional two-tier (`internal` ≡ `restricted`).
  *
  * The mapping is total over the `Role` union; any handler that calls this
  * has already passed `withUserOrAdmin`'s gate, so there is no fallback
@@ -186,5 +192,5 @@ export function sensitivityAllowedForRole(role: Role): Sensitivity[] {
   // Sensitivity[] without a readonly cast. The mapping itself is total
   // and immutable; we just avoid forcing readonly into the public type.
   if (role === "admin") return ["public", "internal", "restricted"];
-  return ["public"];
+  return ["public", "internal"];
 }

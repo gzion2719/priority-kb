@@ -106,15 +106,15 @@ describe("findEntryForRole — iron-rule #6 lives in SQL WHERE, not in JS", () =
     expect(calls[0].params[1]).toEqual(["public", "internal", "restricted"]);
   });
 
-  it("passes the user allow-list of only 'public'", async () => {
+  it("passes the user allow-list of public + internal (per ADR-0012 §6)", async () => {
     // Negative-assertion: a regression that mapped user → all tiers
-    // here would let users see internal/restricted entries via direct
-    // /entries/[id] navigation, completely bypassing the existence-
-    // leak defense.
+    // here would let users see restricted entries via direct
+    // /entries/[id] navigation, bypassing iron-rule #6's "restricted is
+    // admin-only" semantics. `internal` IS in the user allow-list by
+    // design (see lib/auth.ts:175 JSDoc + ADR-0012 §6 table).
     const { pool, calls } = mockPool([]);
     await findEntryForRole(pool, VALID_UUID, "user");
-    expect(calls[0].params[1]).toEqual(["public"]);
-    expect(calls[0].params[1]).not.toContain("internal");
+    expect(calls[0].params[1]).toEqual(["public", "internal"]);
     expect(calls[0].params[1]).not.toContain("restricted");
   });
 
