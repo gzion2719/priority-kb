@@ -4,15 +4,6 @@
 // banner with reason-specific copy. Kept as a pure leaf module (no React,
 // no fetch, no DOM) so it can be unit-tested without a renderer.
 //
-// Coverage note: `no_keyword_match_under_embed_outage` is included in the
-// enum + copy table for completeness, but it is currently UNREACHABLE from
-// the UI banner because the orchestrator emits a wire `{kind:"no_content"}`
-// event for that case, and the no_content event shape does not carry a
-// degraded_reason field. The audit row DOES carry it. Extending the wire
-// vocab (`{kind:"no_content", degraded_reason?}` + route emit + reducer
-// carry) is queued in docs/BACKLOG.md and will activate this copy entry
-// without a code change here.
-//
 // Exhaustiveness floor: the final `code satisfies never` in the switch
 // converts a future addition to `DEGRADED_REASON_CODES` into a compile
 // error in this file. The companion unit test enumerates the enum at
@@ -94,7 +85,6 @@ export function degradedCopy(code: DegradedReasonCode | undefined): DegradedCopy
           "Semantic search, reranking, and synthesis are all unavailable. Showing keyword-matched chunks in raw retrieval order.",
       };
     case "no_keyword_match_under_embed_outage":
-      // Currently unreachable from the UI — see file-header coverage note.
       return {
         title: "Search degraded — no matches",
         description:

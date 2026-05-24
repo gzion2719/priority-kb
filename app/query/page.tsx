@@ -14,21 +14,23 @@
 //     M5 swaps to Entra ID and the header send drops out).
 //   - #10 prompt hash: server pins RETRIEVAL_AGENT_PROMPT_HASH on the
 //     audit row; the page never handles the hash.
-//   - #12 degraded mode: the banner is now DYNAMIC — driven by
-//     `state.degraded` + `state.degradedReason` populated by the reducer
-//     from the terminal `done` and `chunks_only` events. Copy lookup lives
-//     in lib/degraded-copy.ts (one entry per DegradedReasonCode). The
-//     other surfaces use their own banners: 503 → state.status ===
-//     "unavailable" banner (lines below); error event / transport
-//     failure → state.status === "error" banner; empty candidates →
-//     state.status === "no_content" banner. The `no_content` path does
-//     NOT currently carry a degraded_reason on the wire (see
-//     docs/BACKLOG.md: "no_content wire event lacks degraded_reason"),
-//     so `no_keyword_match_under_embed_outage` is audit-only until that
-//     wire-vocab extension lands.
+//   - #12 degraded mode: the banner is DYNAMIC — driven by `state.degraded`
+//     + `state.degradedReason` populated by the reducer from the terminal
+//     `done`, `chunks_only`, AND `no_content` events. Copy lookup lives in
+//     lib/degraded-copy.ts (one entry per DegradedReasonCode). The other
+//     surfaces use their own banners: 503 → state.status === "unavailable"
+//     banner (lines below); error event / transport failure → state.status
+//     === "error" banner; empty candidates → state.status === "no_content"
+//     banner. When the no_content path carries a degraded_reason (ADR-0013
+//     §3 special row: embed-outage + zero-keyword), the degraded banner
+//     and the no_content banner stack — they're independent React
+//     conditionals and intentionally do not suppress each other (the
+//     degraded banner adds outage context, the no_content banner remains
+//     the affordance).
 //     TODO(M3 smoke): add a Playwright/RTL test asserting the banner is
 //     absent on a healthy `done` and present on `done(degraded:true)` /
-//     `chunks_only(degraded_reason:...)`. Page is currently smoke-only.
+//     `chunks_only(degraded_reason:...)` / `no_content(degraded_reason:...)`.
+//     Page is currently smoke-only.
 //   - #13 Kramer brand: chat-banner classes from styles/kramer-brand.css.
 
 import Link from "next/link";
