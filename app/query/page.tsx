@@ -14,15 +14,27 @@
 //     M5 swaps to Entra ID and the header send drops out).
 //   - #10 prompt hash: server pins RETRIEVAL_AGENT_PROMPT_HASH on the
 //     audit row; the page never handles the hash.
-//   - #12 degraded mode: this slice is ALWAYS keyword-only (ADR-0013 §3
-//     row 8), so the degraded-mode banner is persistent — not a 503
-//     reaction. The label distinguishes "fallback active" from "service
-//     down" so users know what they're getting.
+//   - #12 degraded mode: the banner is now DYNAMIC — driven by
+//     `state.degraded` + `state.degradedReason` populated by the reducer
+//     from the terminal `done` and `chunks_only` events. Copy lookup lives
+//     in lib/degraded-copy.ts (one entry per DegradedReasonCode). The
+//     other surfaces use their own banners: 503 → state.status ===
+//     "unavailable" banner (lines below); error event / transport
+//     failure → state.status === "error" banner; empty candidates →
+//     state.status === "no_content" banner. The `no_content` path does
+//     NOT currently carry a degraded_reason on the wire (see
+//     docs/BACKLOG.md: "no_content wire event lacks degraded_reason"),
+//     so `no_keyword_match_under_embed_outage` is audit-only until that
+//     wire-vocab extension lands.
+//     TODO(M3 smoke): add a Playwright/RTL test asserting the banner is
+//     absent on a healthy `done` and present on `done(degraded:true)` /
+//     `chunks_only(degraded_reason:...)`. Page is currently smoke-only.
 //   - #13 Kramer brand: chat-banner classes from styles/kramer-brand.css.
 
 import Link from "next/link";
 import { useCallback, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
+import { degradedCopy } from "@/lib/degraded-copy";
 import { parseSseStream, SseStreamError } from "@/lib/sse-parse";
 import {
   applyEvent,
@@ -158,15 +170,23 @@ export default function QueryPage(): React.ReactNode {
         </p>
       </header>
 
-      {/* Persistent degraded-mode banner — ADR-0013 §3 row 8 by construction. */}
-      <div
-        role="status"
-        className="chat-banner warn"
-        data-testid="degraded-banner"
-        style={{ fontSize: "0.875rem" }}
-      >
-        Keyword-only retrieval (hybrid search not yet wired). Results may be narrower than usual.
-      </div>
+      {/*
+        Dynamic degraded-mode banner (iron rule #12). Renders only when the
+        terminal `done` or `chunks_only` event surfaced degraded=true with
+        a reason code. role="status" (informational), NOT role="alert"
+        (interruptive) — the answer/chunks are still shown alongside.
+      */}
+      {state.degraded === true && state.degradedReason !== undefined && (
+        <div
+          role="status"
+          className="chat-banner warn"
+          data-testid="degraded-banner"
+          style={{ fontSize: "0.875rem" }}
+        >
+          <strong style={{ display: "block" }}>{degradedCopy(state.degradedReason).title}</strong>
+          <span>{degradedCopy(state.degradedReason).description}</span>
+        </div>
+      )}
 
       <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
         <textarea
