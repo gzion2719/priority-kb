@@ -211,6 +211,8 @@ Each PR is a self-contained slice; CI green before the next starts.
 
 The prompt hash will change on this bump; from that deploy forward `audit_log.prompt_hash` carries the v0.2.0 hash. Prior `agent_ingest` rows keep the v0.1.0 hash — that's the provenance design working as intended.
 
+**Note on §"Why not just a structured form?" below.** The v0.1.0 PII-coaching dialogue was one of three form-vs-chat arguments at the original ADR-0010 write-up. v0.2.0's shift to a one-shot PII alert ("heads-up, not a vote") neutralizes that argument — both shapes would now show a one-shot strip notice. Language-mirroring and duplicate-detection remain valid form-vs-chat differentiators; see §"Why not just a structured form?" below.
+
 ### Anthropic SDK adoption
 
 `@anthropic-ai/sdk` is a non-trivial new dependency. At impl-PR step 1, run `npm ls` against the lockfile produced and check for transitive conflicts with `next@16` / `react@19`. Pin exactly; bump deliberately.
@@ -232,7 +234,7 @@ The prompt hash will change on this bump; from that deploy forward `audit_log.pr
 
 The reviewer's q1 challenge. The form-vs-chat scope question is real — a structured HTML form ("Title:", "Category:", "Body:", "Source:", "Sensitivity:") with a single Claude call to validate + suggest fixes on submit is ~10× less surface than this ADR.
 
-But the spec [docs/AGENTS.md:11–17](../AGENTS.md) prescribes a conversational flow specifically: "Guides the admin through producing a well-structured KB entry **via a chat conversation**", "one question at a time when collecting fields" ([prompts/ingestion-agent.md:48](../../prompts/ingestion-agent.md)), "mirrors the admin's input language" ([prompts/ingestion-agent.md:14](../../prompts/ingestion-agent.md)), "Hebrew + English". A form would regress the spec — language mirroring becomes per-field rather than per-conversation, the PII-coaching dialogue becomes a one-shot alert, duplicate detection becomes a modal popup.
+But the spec [docs/AGENTS.md:11–17](../AGENTS.md) prescribes a conversational flow specifically: "Guides the admin through producing a well-structured KB entry **via a chat conversation**", "one question at a time when collecting fields" ([prompts/ingestion-agent.md:48](../../prompts/ingestion-agent.md)), "mirrors the admin's input language" ([prompts/ingestion-agent.md:14](../../prompts/ingestion-agent.md)), "Hebrew + English". A form would regress the spec — language mirroring becomes per-field rather than per-conversation, and duplicate detection becomes a modal popup (the PII-coaching argument is now neutral — see §"Prompt v0.2.0" above).
 
 The ADR keeps the conversational shape and bounds the surface via the caps in §3 instead. If the caps turn out wrong in practice (60s deadline too tight, 8 iterations too few, 20 turns too few), the env vars are tunable — but the conversational shape is the AGENTS.md commitment.
 
