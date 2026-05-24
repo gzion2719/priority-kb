@@ -42,6 +42,24 @@ export { RETRIEVAL_RETRY_PREFIX_HASH, STRICTER_PROMPT_PREFIX };
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// ── Env knobs ──────────────────────────────────────────────────────────────
+
+/**
+ * Read a positive-integer env var with a fallback. Throws `RangeError` on
+ * non-integer or non-positive values rather than silently coercing — a
+ * stray `RETRIEVAL_KEEPALIVE_MS="-5"` would otherwise become a 1ms flood
+ * loop via `setInterval` clamping. Mirrors `app/api/agent/ingest/route.ts:80`.
+ */
+function readPositiveInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new RangeError(`${name} must be a positive integer, got ${raw}`);
+  }
+  return n;
+}
+
 // ── Request validation ─────────────────────────────────────────────────────
 
 /**
@@ -425,6 +443,14 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
 
   // 5. OPEN STREAM and drive the orchestrator.
   const enc = new TextEncoder();
+  // Keepalive heartbeat (`: keepalive\n\n` SSE comment per WHATWG §9.2.6)
+  // keeps proxies / CDNs from dropping the connection during the ADR-0012
+  // §5 retry window (up to 2× synth round-trip ≈ 10-30s × 2 with live
+  // Anthropic synth). Pattern mirrors `app/api/agent/ingest/route.ts:381-454`.
+  // Hoisted above the stream construction so `cancel()` can clear it on
+  // consumer-abort before `start.finally` would have fired.
+  const keepaliveMs = readPositiveInt("RETRIEVAL_KEEPALIVE_MS", 10_000);
+  let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (ev: QueryEvent): void => {
@@ -434,6 +460,14 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
           // Stream already closed (consumer disconnect).
         }
       };
+
+      keepaliveTimer = setInterval(() => {
+        try {
+          controller.enqueue(enc.encode(": keepalive\n\n"));
+        } catch {
+          // Stream already closed (consumer disconnect).
+        }
+      }, keepaliveMs);
 
       const gen = retrievePipeline({ embedder, reranker, synth }, { query, role });
       let outcome: AuditOutcome | undefined;
@@ -458,6 +492,7 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
           error: errorMsg,
         });
       } finally {
+        if (keepaliveTimer) clearInterval(keepaliveTimer);
         // Best-effort generator finalize — releases lane DB transactions if
         // the iterator stopped early (consumer disconnect, throw).
         try {
@@ -492,6 +527,12 @@ async function handler(req: NextRequest, _ctx: unknown, role: Role): Promise<Res
           // Already closed.
         }
       }
+    },
+    cancel() {
+      // Defensive: `start.finally` already clears the timer, but if the
+      // consumer cancels before `start` returns and before any keepalive
+      // tick has run, clearing here avoids the gap. Mirrors agent/ingest/route.ts:449.
+      if (keepaliveTimer) clearInterval(keepaliveTimer);
     },
   });
 
