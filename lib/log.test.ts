@@ -93,6 +93,57 @@ describe("logEvent — Claude variant", () => {
     // `in parsed` form would not.
     expect(lines[0]).not.toMatch(/"tool_iterations"/);
     expect(lines[0]).not.toMatch(/"streaming"/);
+    expect(lines[0]).not.toMatch(/"stop_reason"/);
+  });
+
+  // ── stop_reason field (ADR-0005 Amendment 2026-05-28; BACKLOG:28) ────────
+  it("carries stop_reason when present — refusal terminal lands in the NDJSON line", () => {
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+
+    logEvent({
+      kind: "claude",
+      model: "claude-haiku-4-5-20251001",
+      model_version: "2026-05-18",
+      prompt_hash: "deadbeef",
+      tokens: { input: 50, output: 0, total: 50 },
+      latency_ms: 400,
+      cost_usd: 0.0005,
+      streaming: true,
+      tool_iterations: 0,
+      stop_reason: "refusal",
+    });
+
+    const parsed = JSON.parse(lines[0] ?? "") as Record<string, unknown>;
+    expect(parsed.stop_reason).toBe("refusal");
+    expect(parsed.streaming).toBe(true);
+  });
+
+  it("each terminal stop_reason serializes to the raw NDJSON line as-is — all six values", () => {
+    // Pins the full union from ADR-0010 §1 Amendment 2026-05-28. A future
+    // narrowing (e.g. dropping `max_turns` from the union) would surface
+    // here as a TS error on the cases array — exactly the drift detector
+    // ADR-0005 Amendment 2026-05-28 calls out via the `Extract<AgentEvent, ...>`
+    // type re-use.
+    const cases: Array<
+      "end_turn" | "tool_use" | "max_tokens" | "max_iterations" | "max_turns" | "refusal"
+    > = ["end_turn", "tool_use", "max_tokens", "max_iterations", "max_turns", "refusal"];
+    for (const sr of cases) {
+      const { lines, writer } = captureLog();
+      setLogSink(writer);
+      logEvent({
+        kind: "claude",
+        model: "claude-haiku-4-5-20251001",
+        model_version: "2026-05-18",
+        prompt_hash: "abc123",
+        latency_ms: 10,
+        cost_usd: null,
+        streaming: true,
+        stop_reason: sr,
+      });
+      expect(lines[0]).toMatch(new RegExp(`"stop_reason":"${sr}"`));
+      resetLogSink();
+    }
   });
 });
 

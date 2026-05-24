@@ -37,8 +37,17 @@
  * See `docs/adr/0005-log-event-schema.md`.
  */
 
+import type { AgentEvent } from "@/lib/agents";
 import type { DegradedReasonCode } from "@/lib/retrieval-degraded";
 import type { CitationValidationOutcome } from "@/lib/retrieval";
+
+/**
+ * Re-uses the `done` event's `stop_reason` union via `Extract` so this file
+ * never drifts from `lib/agents.ts`. Sibling-precedent: the
+ * `lib/agents-anthropic.ts` adapter's `DoneStopReason` type uses the same
+ * pattern.
+ */
+type AgentDoneStopReason = Extract<AgentEvent, { kind: "done" }>["stop_reason"];
 
 export type Tokens = {
   input?: number;
@@ -96,6 +105,16 @@ export interface LogEventClaude extends LogEventBase {
    * omitted from the NDJSON line when unset.
    */
   streaming?: boolean;
+  /**
+   * Terminal `stop_reason` from the agent's per-turn `done` event.
+   * Present iff `streaming: true` (SSE agent path); omitted on one-shot
+   * non-streaming Claude calls (M3 Retrieval Agent uses a non-streaming
+   * adapter that doesn't surface a per-turn `done`). Added in ADR-0005
+   * Amendment 2026-05-28 alongside ADR-0010 §1 Amendment 2026-05-28
+   * (BACKLOG:28 refusal variant); the type re-uses the AgentEvent.done
+   * union via `Extract` so this surface cannot drift from `lib/agents.ts`.
+   */
+  stop_reason?: AgentDoneStopReason;
 }
 
 export interface LogEventVoyage extends LogEventBase {

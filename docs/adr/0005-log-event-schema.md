@@ -176,3 +176,28 @@ export interface LogEventRoute {
 **`tool_dispatch` site scope expansion.** The original BACKLOG entry named only the two ingest-route 500-paths; the agent-ingest `dispatchTool` recovery catch was added to the same slice because it shared the identical pollution pattern. The variant JSDoc reflects this: "route-layer-or-dispatch error not attributable to a single vendor call," broader than the original "500-path catch-all" framing.
 
 **Test coverage.** [lib/log.test.ts](../../lib/log.test.ts) gains 7 cases for the new variant mirroring the Amendment 2026-05-23 sibling block: NDJSON shape pin (with raw-line assertions catching `undefined`-key spread regressions), optional-field omission, `latency_ms` guard inheritance, `cost_usd` guard inheritance, redact-then-truncate on `error`, `ts?:never` runtime non-overridable via structural-cast smuggle, sink-throw-swallow. The three call-site swaps have no pre-existing test assertions on the old tuple (greped: zero hits in `app/**/*.test.ts`), so no assertion churn outside `lib/log.test.ts`.
+
+---
+
+## Amendment 2026-05-28 — `stop_reason?` field on `LogEventClaude`
+
+Closes [docs/BACKLOG.md](../BACKLOG.md):28 ("ADR-0010 §1 amendment: distinct `refusal` stop_reason variant"); ships in lockstep with [ADR-0010](0010-admin-ingestion-agent-chat-ui.md) §1 Amendment 2026-05-28.
+
+`LogEventClaude` gains a new optional field:
+
+```ts
+stop_reason?: Extract<AgentEvent, { kind: "done" }>["stop_reason"];
+//          ≡ "end_turn" | "tool_use" | "max_tokens" | "max_iterations" | "max_turns" | "refusal"
+```
+
+The type re-uses `AgentEvent.done.stop_reason` via `Extract<…>` so this surface cannot drift from [lib/agents.ts](../../lib/agents.ts) — a future widening of the agent's terminal union surfaces automatically here without a parallel edit. Sibling-precedent: [lib/agents-anthropic.ts](../../lib/agents-anthropic.ts) `DoneStopReason` uses the same pattern internally.
+
+**Rationale (the gap this closes).** Pre-amendment, the per-turn `kind:"claude"` log line carried `tool_iterations` + `streaming:true` but no terminal-reason field. Refusals were indistinguishable from `end_turn` in the observability stream — the upstream `lib/agents-anthropic.ts` adapter mapped `stop_reason:"refusal"` to a synthesized `error("refusal")` event followed by `done("end_turn")`, so the route's `LogEventClaude` row read `status:"ok"` (no thrown error) with no field naming what actually terminated. `audit_log` did not carry the discriminator either (refusal happens before any `submit_entry` tool call, so no audit row is written). Adding `stop_reason?` on `LogEventClaude` is the only place the per-turn discriminator can live; sibling field `tool_iterations` set the precedent for per-turn-only optional fields on this variant.
+
+**Presence-iff-streaming invariant.** `stop_reason` is present iff `streaming:true` — only the SSE agent path surfaces a per-turn `done` event with a stop_reason. The M3 Retrieval Agent uses a non-streaming Anthropic adapter that has no per-turn `done`; its `kind:"claude"` log lines must continue to omit `stop_reason`. The JSDoc on the field pins this invariant; the omission test in [lib/log.test.ts](../../lib/log.test.ts) extends the pattern to assert the raw NDJSON line does not contain `"stop_reason"` when `streaming` is absent.
+
+**Does NOT change the `LogEventBase` opt-in count.** `LogEventClaude` still extends `LogEventBase` — one vendor call (Claude) attributed per line. The four-variant invariant from Amendment 2026-05-27 ("extend `LogEventBase` if and only if exactly one vendor call is being attributed") holds unchanged.
+
+**Test coverage.** [lib/log.test.ts](../../lib/log.test.ts) gains 3 cases for the new field: NDJSON shape pin with `stop_reason:"refusal"` present, omission test (the raw line does NOT contain `"stop_reason"` when the field is unset), and a type-level smoke test pinning the six-value union.
+
+**Call-site impact.** [app/api/agent/ingest/route.ts](../../app/api/agent/ingest/route.ts) is the only `LogEventClaude` writer with access to a per-turn `done.stop_reason` — the value is captured in the SSE-driver `for-await` loop and threaded into the `finally`-block `logEvent` call. The omit-when-undefined spread (`...(lastStopReason !== undefined ? { stop_reason: lastStopReason } : {})`) prevents the NDJSON line from carrying a `"stop_reason"` key when the stream threw before any `done` event landed (matches the existing `tool_iterations`/`streaming` omission discipline).

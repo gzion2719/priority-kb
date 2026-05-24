@@ -371,7 +371,7 @@ function applyToolResult(
 
 function applyDone(
   state: ChatState,
-  stopReason: "end_turn" | "tool_use" | "max_tokens" | "max_iterations" | "max_turns",
+  stopReason: "end_turn" | "tool_use" | "max_tokens" | "max_iterations" | "max_turns" | "refusal",
 ): ChatState {
   if (stopReason === "tool_use") {
     // Promote the assistant turn that just asked for tools, harvest its
@@ -417,7 +417,20 @@ function applyDone(
         }
       : stopReason === "max_tokens"
         ? { kind: "system", severity: "warn", text: "Response truncated at the token cap." }
-        : null; // end_turn: no system note
+        : stopReason === "refusal"
+          ? {
+              // refusal is a clean terminal (status:"done"), not an internal
+              // error — sibling to max_iterations / max_tokens. ADR-0010 §1
+              // Amendment 2026-05-28; closes BACKLOG:28. Prior shape
+              // surfaced refusal as a `kind:"error"` AgentEvent which the
+              // reducer's error branch routed to status:"error" with a
+              // red bubble; the new shape keeps the conversation cleanly
+              // terminated so the user can start a fresh turn.
+              kind: "system",
+              severity: "warn",
+              text: "Model declined to answer this turn.",
+            }
+          : null; // end_turn: no system note
   const promoted = promoteTerminalTurn(state);
   const next: ChatState = { ...promoted, status: "done" };
   if (systemNote === null) return next;

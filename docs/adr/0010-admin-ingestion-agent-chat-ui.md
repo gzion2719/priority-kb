@@ -34,7 +34,7 @@ export type AgentEvent =
   | { kind: "tool_use_start"; id: string; name: string; input: unknown }
   | { kind: "tool_result"; name: string; ok: true; output: unknown }
   | { kind: "tool_result"; name: string; ok: false; error: string }
-  | { kind: "done"; stop_reason: "end_turn" | "tool_use" | "max_tokens" | "max_iterations" | "max_turns" }
+  | { kind: "done"; stop_reason: "end_turn" | "tool_use" | "max_tokens" | "max_iterations" | "max_turns" | "refusal" }
   | { kind: "error"; code: string; message: string };
 ```
 
@@ -47,6 +47,14 @@ There is **no text streaming during tool execution.** Claude's SDK serializes tu
 The adapter buffers `input_json_delta` events server-side; **`tool_use_start` fires only after `content_block_stop` confirms the tool_use block is complete** — `input` is therefore the finalized JSON object, never partial. The `id` field is the Anthropic-wire `tool_use.id` (e.g. `toolu_01XYZ...`) and **must round-trip verbatim** to the next-turn `AgentContentBlock.tool_result.tool_use_id`; the loop driver in §3 echoes it without modification. The `stop_reason` union narrows the Anthropic SDK's native values (`end_turn | tool_use | max_tokens | stop_sequence`) and adds two route-synthesized values (`max_iterations`, `max_turns`) for the caps in §3; the adapter swallows `stop_sequence` (we set no stop sequences) and emits `end_turn` on its behalf.
 
 **Amendment 2026-05-18 (impl step 3a):** the originally-shipped §1 sample omitted the `id` field on `tool_use_start`. Step 3a added it as an additive (non-breaking) field bump. Without it the loop driver cannot correlate `tool_use_start` with the `tool_result` block it must echo in the next-turn `messages[]`, and the real Anthropic SDK in step 3b would reject the turn for missing `tool_use_id`. The stub-agent fixture scripts in `lib/agents.test.ts` were updated to provide a deterministic `id` (e.g. `"toolu_test_<n>"`).
+
+**Amendment 2026-05-28 (refusal stop_reason variant — closes [BACKLOG:28](../BACKLOG.md)):** `done.stop_reason` gains a sixth value, `"refusal"`. Prior shape: the [lib/agents-anthropic.ts](../../lib/agents-anthropic.ts) adapter mapped Anthropic's `stop_reason:"refusal"` to a synthesized `error("refusal")` AgentEvent followed by `done("end_turn")` — refusals were observable on the wire but indistinguishable from `end_turn` on the route's per-turn `LogEventClaude` (no field carried the discriminator). New shape: the adapter drops the synthesized error event and yields `done("refusal")` directly; the loop driver in §3 terminates on it (same as `end_turn` — only `tool_use` continues the loop); the [lib/agent-chat-state.ts](../../lib/agent-chat-state.ts) reducer treats refusal as a clean terminal (`status:"done"`) with a `severity:"warn"` system bubble ("Model declined to answer this turn."), sibling to `max_iterations` / `max_tokens`.
+
+**UX transition (deliberate).** Pre-amendment, the synthesized `kind:"error"` event routed through the reducer's error branch produced a red `severity:"error"` bubble and `status:"error"` — refusals looked indistinguishable from network drops or 4xx config errors. Post-amendment, refusal lands as a warn-severity bubble with `status:"done"`. This is a UX improvement, not a regression: refusal is a clean Anthropic-side policy decision, not an infrastructure failure, and bucketing it with the cap-reached siblings matches the user's mental model ("model couldn't complete this turn") more accurately than the prior error bucket.
+
+**Audit log untouched.** Refusal happens before any `submit_entry` tool call, so no `audit_log` row is written for the turn — the discriminator lives only in [LogEventClaude.stop_reason](0005-log-event-schema.md) (added in ADR-0005 Amendment 2026-05-28, lockstep with this amendment). The agent-rejected-audit-row BACKLOG entry remains the path for surfacing refusal in `audit_log` if/when that's wanted — out of scope for this amendment.
+
+**translateStopReason exhaustiveness.** The mapper at `lib/agents-anthropic.ts` was rewritten with an explicit case-list + `const _exhaustive: never = r` drift trap (mirrors the `code satisfies never` pattern in `lib/degraded-copy.ts`). If a future Anthropic SDK version adds a new `StopReason` value, the unhandled value surfaces as a compile error in our codebase — no silent drift to `"end_turn"`.
 
 Response headers pinned at impl time: `Cache-Control: no-cache, no-transform`, `Content-Type: text/event-stream`, `X-Accel-Buffering: no`. The `no-transform` directive prevents Brotli / gzip framing breaks at the CDN edge; `X-Accel-Buffering: no` covers nginx-class proxies.
 

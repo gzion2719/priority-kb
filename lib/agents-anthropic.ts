@@ -12,9 +12,12 @@
 //   AgentEvent emits ONLY at content_block_stop with the finalized JSON
 // - stop_sequence → end_turn (we set no stop sequences; ADR-0010 §1)
 // - pause_turn → end_turn (rare; not in our AgentEvent union; silent fold)
-// - refusal → AgentEvent error("refusal") THEN done(end_turn), so the route
-//   logs the refusal distinctly but the loop driver still sees a clean turn
-//   end (see BACKLOG: distinct refusal handling)
+// - refusal → AgentEvent done(refusal) — distinct terminal so the route's
+//   per-turn LogEventClaude carries stop_reason:"refusal" (ADR-0010 §1
+//   Amendment 2026-05-28; closes BACKLOG:28). Prior shape emitted a
+//   synthesized error("refusal") + done(end_turn); the error event was
+//   dropped because the new done variant carries the same information
+//   on the terminal event the reducer already handles.
 // - APIUserAbortError → DOMException("aborted","AbortError") to match the
 //   stub agent's abort contract (lib/agents.ts:160-166) — callers that
 //   `instanceof DOMException` work across both adapters
@@ -234,13 +237,6 @@ async function* streamFromAnthropic(
             };
             toolBuffers.clear();
           }
-          if (capturedStopReason === "refusal") {
-            yield {
-              kind: "error",
-              code: "refusal",
-              message: "model refused to respond",
-            };
-          }
           yield { kind: "done", stop_reason: translateStopReason(capturedStopReason) };
           return;
         }
@@ -258,12 +254,23 @@ function translateStopReason(r: StopReason | null): DoneStopReason {
     case "end_turn":
     case "tool_use":
     case "max_tokens":
+    case "refusal":
       return r;
     case "stop_sequence":
     case "pause_turn":
     case null:
-    default:
       return "end_turn";
+    default: {
+      // Exhaustiveness pin: if the Anthropic SDK adds a new StopReason
+      // value, the `never`-typed assignment errors at compile time and
+      // forces this switch to be extended (matches the satisfies-never
+      // precedent in lib/degraded-copy.ts). Runtime fallback to
+      // "end_turn" preserves safety if the SDK ships a value our types
+      // don't yet know about.
+      const _exhaustive: never = r;
+      void _exhaustive;
+      return "end_turn";
+    }
   }
 }
 

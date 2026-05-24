@@ -119,6 +119,29 @@ describe("createStubAgent — deterministic scripted stub for #8-compliant tests
     await expect(iter.next()).rejects.toMatchObject({ name: "AbortError" });
   });
 
+  // ADR-0010 §1 Amendment 2026-05-28 (BACKLOG:28): the `done.stop_reason`
+  // union must accept "refusal" alongside the five prior values. The pin
+  // below is type-level — a future narrowing that drops "refusal" would
+  // fail to compile (the `satisfies` constraint pins every member as a
+  // valid AgentEvent). Sibling-precedent: lib/agents-anthropic.ts
+  // `DoneStopReason` re-derives the same union via `Extract<…>`.
+  it("done.stop_reason union accepts refusal (type-level pin)", () => {
+    const all: AgentEvent[] = [
+      { kind: "done", stop_reason: "end_turn" },
+      { kind: "done", stop_reason: "tool_use" },
+      { kind: "done", stop_reason: "max_tokens" },
+      { kind: "done", stop_reason: "max_iterations" },
+      { kind: "done", stop_reason: "max_turns" },
+      { kind: "done", stop_reason: "refusal" },
+    ];
+    // Runtime smoke: each entry round-trips through JSON without loss
+    // (NDJSON-shaped serialization is the actual wire format).
+    for (const ev of all) {
+      expect(JSON.parse(JSON.stringify(ev))).toEqual(ev);
+    }
+    expect(all).toHaveLength(6);
+  });
+
   it("ignores system_prompt / messages / tools / max_tool_iterations / deadline_ms (stub yields only the script)", async () => {
     const script: AgentEvent[] = [{ kind: "done", stop_reason: "end_turn" }];
     const a = createStubAgent(script);
