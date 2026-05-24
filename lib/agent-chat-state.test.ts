@@ -352,6 +352,58 @@ describe("applyEvent — done", () => {
     s = applyEvent(s, { kind: "done", stop_reason: "max_tokens" });
     expect((s.displayItems.at(-1) as { text: string }).text).toMatch(/truncated/i);
   });
+
+  // ── refusal stop_reason (ADR-0010 §1 Amendment 2026-05-28; BACKLOG:28) ──
+  it("refusal terminal → status=done (NOT status=error) — clean terminal, not internal error", () => {
+    let s = appendUserText(initialChatState, "hi");
+    s = applyEvent(s, { kind: "done", stop_reason: "refusal" });
+    expect(s.status).toBe("done");
+    // Negative-assertion: refusal must NOT route through the error branch
+    // (which would land here as status:"error" with `s.error` set). The
+    // distinguishing property is the absence of an `error` field combined
+    // with a warn-severity (not error-severity) trailing bubble.
+    expect(s.error).toBeUndefined();
+  });
+
+  it("refusal terminal → warn-severity bubble with 'declined to answer' copy (sibling to max_iterations/max_tokens)", () => {
+    let s = appendUserText(initialChatState, "hi");
+    s = applyEvent(s, { kind: "done", stop_reason: "refusal" });
+    const last = s.displayItems.at(-1) as { kind: string; severity: string; text: string };
+    expect(last.kind).toBe("system");
+    expect(last.severity).toBe("warn");
+    expect(last.text).toMatch(/declined/i);
+  });
+
+  it("refusal after partial assistant text → partial text is promoted to wireMessages (matches end_turn)", () => {
+    // Anthropic can stream text deltas and then refuse via message_delta.
+    // The reducer should promote the partial assistant blocks to
+    // wireMessages on the terminal (same shape as end_turn) so the UI
+    // shows what the model said before declining.
+    let s = appendUserText(initialChatState, "hi");
+    s = applyEvent(s, { kind: "text_delta", text: "Sorry, I can't " });
+    s = applyEvent(s, { kind: "text_delta", text: "help with that." });
+    s = applyEvent(s, { kind: "done", stop_reason: "refusal" });
+    // Wire: user + assistant(text) — the partial assistant turn is
+    // preserved, not dropped.
+    expect(s.wireMessages.length).toBe(2);
+    expect(s.wireMessages[1].role).toBe("assistant");
+    const content = s.wireMessages[1].content;
+    expect(Array.isArray(content)).toBe(true);
+    expect(content).toEqual([{ type: "text", text: "Sorry, I can't help with that." }]);
+    // pendingAssistantBlocks must be cleared post-promotion.
+    expect(s.pendingAssistantBlocks).toEqual([]);
+    expect(s.status).toBe("done");
+  });
+
+  it("refusal does not re-enter streaming (terminal isolation from tool_use)", () => {
+    // tool_use keeps the stream open (server loops); every other stop_reason
+    // including refusal must terminate. Pin the distinction so a future
+    // refactor that lumps refusal into the loop branch fails loudly.
+    let s = appendUserText(initialChatState, "hi");
+    s = applyEvent(s, { kind: "done", stop_reason: "refusal" });
+    expect(s.status).not.toBe("streaming");
+    expect(s.status).toBe("done");
+  });
 });
 
 describe("applyEvent — error and unknown kinds", () => {

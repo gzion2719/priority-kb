@@ -412,6 +412,7 @@ describe("translateStopReason — ADR-0010 §1", () => {
     ["end_turn", "end_turn"],
     ["tool_use", "tool_use"],
     ["max_tokens", "max_tokens"],
+    ["refusal", "refusal"],
     ["stop_sequence", "end_turn"],
     ["pause_turn", "end_turn"],
   ])("%s → %s", async (from, expected) => {
@@ -429,17 +430,26 @@ describe("translateStopReason — ADR-0010 §1", () => {
     expect(events).toEqual([{ kind: "done", stop_reason: "end_turn" }]);
   });
 
-  it("refusal → error('refusal') THEN done('end_turn') — distinct surface for the route", async () => {
+  // ── refusal: ADR-0010 §1 Amendment 2026-05-28; closes BACKLOG:28 ───────
+  it("refusal → done('refusal') ONLY (no synthesized error event)", async () => {
+    // Pre-amendment shape was: error("refusal") THEN done("end_turn") — the
+    // route logged a refusal-flavored error but the per-turn LogEventClaude
+    // could not distinguish refusal from end_turn (no stop_reason field).
+    // Post-amendment: the adapter yields done("refusal") directly; the
+    // discriminator lives on the terminal event the reducer + the route
+    // already handle. This test pins the new shape and the absence of the
+    // legacy synthesized error event — a regression that re-introduced
+    // error("refusal") would fail on the length-1 assertion.
     setStream([
       { type: "message_delta", delta: { stop_reason: "refusal" } },
       { type: "message_stop" },
     ]);
     const a = createAnthropicAgent({ apiKey: "sk-ant-test" });
     const events = await collect(a.streamMessages(makeInput()));
-    expect(events).toEqual<AgentEvent[]>([
-      { kind: "error", code: "refusal", message: "model refused to respond" },
-      { kind: "done", stop_reason: "end_turn" },
-    ]);
+    expect(events).toHaveLength(1);
+    expect(events).toEqual<AgentEvent[]>([{ kind: "done", stop_reason: "refusal" }]);
+    // Negative-assertion: no error event of any code anywhere in the stream.
+    expect(events.some((e) => e.kind === "error")).toBe(false);
   });
 });
 

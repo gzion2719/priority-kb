@@ -398,6 +398,12 @@ async function handler(req: NextRequest): Promise<Response> {
       const stats: DriverStats = { iterations: 0 };
       let status: "ok" | "error" = "ok";
       let logError: string | undefined;
+      // Captured for the per-turn LogEventClaude `stop_reason` field. Updated
+      // on every `done` event yielded by the loop driver so the finally
+      // block sees the last terminal — ADR-0010 §1 Amendment 2026-05-28 +
+      // ADR-0005 Amendment 2026-05-28. Stays undefined if the stream throws
+      // before any `done` lands.
+      let lastStopReason: (AgentEvent & { kind: "done" })["stop_reason"] | undefined;
 
       try {
         for await (const ev of runAgentTurn(agent, messages, composedSignal, env, stats)) {
@@ -405,6 +411,8 @@ async function handler(req: NextRequest): Promise<Response> {
           if (ev.kind === "error") {
             status = "error";
             logError = `${ev.code}: ${ev.message}`;
+          } else if (ev.kind === "done") {
+            lastStopReason = ev.stop_reason;
           }
         }
       } catch (err) {
@@ -432,6 +440,7 @@ async function handler(req: NextRequest): Promise<Response> {
           prompt_hash: INGESTION_AGENT_PROMPT_HASH,
           streaming: true,
           tool_iterations: stats.iterations,
+          ...(lastStopReason !== undefined ? { stop_reason: lastStopReason } : {}),
           latency_ms: Date.now() - t0,
           cost_usd: null,
           ...(status === "error"

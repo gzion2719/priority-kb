@@ -588,6 +588,35 @@ describe("POST /api/agent/ingest — LogEvent emission (ADR-0005)", () => {
     expect(log.prompt_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  // ── refusal: ADR-0005 Amendment 2026-05-28; ADR-0010 §1 Amendment 2026-05-28 ──
+  it("refusal stream → logEventClaude carries stop_reason:'refusal' with status:'ok'", async () => {
+    const { agent, calls } = makeRecordingAgent([[{ kind: "done", stop_reason: "refusal" }]]);
+    agentForNextCall = agent;
+    const res = await POST(adminReq({ messages: makeBaseMessages(1) }) as never, {} as never);
+    const { events } = await readSse(res);
+    // Pin the wire: done(refusal) is the terminal — no synthesized error.
+    expect(events).toEqual([{ kind: "done", stop_reason: "refusal" }]);
+    // The route does NOT loop on refusal (only tool_use loops); exactly
+    // one streamMessages call must have happened. Negative-assertion against
+    // a future regression that treated refusal as a continue-the-loop case.
+    expect(calls.length).toBe(1);
+    const claudeLines = logLines
+      .map((l) => {
+        try {
+          return JSON.parse(l) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((r): r is Record<string, unknown> => !!r && r.kind === "claude");
+    expect(claudeLines).toHaveLength(1);
+    const log = claudeLines[0];
+    expect(log.stop_reason).toBe("refusal");
+    // Refusal is a clean terminal, not an internal error — status stays "ok".
+    expect(log.status).toBe("ok");
+    expect(log.streaming).toBe(true);
+  });
+
   it("error path: deadline → logs status:'error' with redacted error string", async () => {
     vi.stubEnv("AGENT_REQUEST_DEADLINE_MS", "20");
     const slowAgent: AgentClient = {
