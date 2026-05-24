@@ -76,11 +76,19 @@ describeIfDb("findEntryForRole — integration against Postgres", () => {
     expect(userResult?.id).toBe(publicId);
   });
 
-  it("internal entry: admin sees, user does not", async () => {
+  it("internal entry visible to both roles (post-2026-05-24 reconciliation: user → [public, internal])", async () => {
+    // Iron rule #6 / ADR-0012 §6: `internal` is org-internal and reachable
+    // by authenticated end users by design. `restricted` is the admin-only
+    // escape hatch — the load-bearing admin-only negative-assertion lives
+    // in the restricted-tier test above. See lib/auth.ts:175 JSDoc.
     await seedTier(internalId, "internal");
 
-    expect((await findEntryForRole(pool, internalId, "admin"))?.id).toBe(internalId);
-    expect(await findEntryForRole(pool, internalId, "user")).toBeNull();
+    const adminResult = await findEntryForRole(pool, internalId, "admin");
+    const userResult = await findEntryForRole(pool, internalId, "user");
+
+    expect(adminResult?.id).toBe(internalId);
+    expect(userResult?.id).toBe(internalId);
+    expect(userResult?.sensitivity).toBe("internal");
   });
 
   it("null role yields null for any tier (no SQL sent)", async () => {
