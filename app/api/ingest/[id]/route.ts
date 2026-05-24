@@ -77,9 +77,8 @@ async function handler(req: NextRequest, context: RouteContext): Promise<Respons
       );
     }
     logEvent({
-      kind: "voyage",
-      model: "route",
-      model_version: "ingest_update",
+      kind: "route",
+      route: "PUT /api/ingest/[id]",
       latency_ms: 0,
       cost_usd: null,
       status: "error",

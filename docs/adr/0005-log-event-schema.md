@@ -125,7 +125,7 @@ export interface LogEventRetrievalPipeline {
 
 **Departures from the original ADR shape.**
 
-1. **Does NOT extend `LogEventBase`.** The aggregate event spans embed + rerank + synth model calls; naming a single "model" / "model_version" / "prompt_hash" would be a lie. Per-vendor identity lives on the `kind:"voyage"` / `kind:"claude"` lines and on the `audit_log` row's `embedding_model` / `synthesizer_model` columns. This is the second variant in the union that opts out of `LogEventBase` (the open BACKLOG `kind:"route"` item for ingest-route 500-paths is the sibling; the two BACKLOG items resolved independently). The original-ADR enforcement framing of #9/#10 at the type level is preserved for the variants where it applies; this variant explicitly does NOT carry vendor identity, so #9/#10 are not relevant.
+1. **Does NOT extend `LogEventBase`.** The aggregate event spans embed + rerank + synth model calls; naming a single "model" / "model_version" / "prompt_hash" would be a lie. Per-vendor identity lives on the `kind:"voyage"` / `kind:"claude"` lines and on the `audit_log` row's `embedding_model` / `synthesizer_model` columns. This is the second variant in the union that opts out of `LogEventBase` (the BACKLOG `kind:"route"` item for route-layer-error consolidation is the sibling, closed by Amendment 2026-05-27; the two BACKLOG items resolved independently). The original-ADR enforcement framing of #9/#10 at the type level is preserved for the variants where it applies; this variant explicitly does NOT carry vendor identity, so #9/#10 are not relevant.
 2. **`cost_usd: number | null` is required and always `null`.** Field is present so the existing runtime cost-type guard permits this variant uniformly across the union — no special-case in `logEvent()`.
 3. **`request_id` is intentionally not reused.** ADR-0005 reserved `request_id` for SDK-provided vendor call ids. A separate optional `pipeline_request_id` field is provided for route-level correlation to avoid collapsing two semantically-different correlation keys into one dashboard filter.
 4. **`citation_validation_outcome` typed as `CitationValidationOutcome | null`.** Imported as `import type` from `@/lib/retrieval` — purely compile-time coupling, erased at runtime. M5 dashboards filtering on string literals get compile-time-checked values rather than bare `string`.
@@ -137,3 +137,42 @@ export interface LogEventRetrievalPipeline {
 **`query_hash` semantics.** SHA-256 of `redactSecrets(query.trim())`, first 16 hex chars (64 bits). Scope is log-correlation ONLY — collision-prone for cache-key reuse. The BACKLOG memoization item (line 70) uses a separate `(query_hash, role, sensitivity_allowed, prompt_hash)` cache key; do not reach for the log-line value.
 
 **Test coverage.** [lib/log.test.ts](../../lib/log.test.ts) gains 7 cases for the new variant (NDJSON shape, optional-field omission, latency/cost guard inheritance, redaction inheritance, `ts` non-overridable). [app/api/retrieve/route.test.ts](../../app/api/retrieve/route.test.ts) gains a Layer 3 describe-block asserting exactly one `kind:"retrieval_pipeline"` line per terminal path with the correct field mapping — filtered by `kind` first so the assertions remain stable when per-vendor (`kind:"voyage"` / `kind:"claude"`) lines land in future M3 slices.
+
+---
+
+## Amendment 2026-05-27 — `kind:"route"` route-layer-error variant
+
+Closes [docs/BACKLOG.md](../BACKLOG.md) "Extend `LogEvent` union with a `kind:"route"` variant" — the sibling pointer named open in Amendment-2026-05-23 §1.
+
+**What ships.** `LogEvent` gains a fourth variant `LogEventRoute` (`kind:"route"`) emitted from the catch-all paths in [app/api/ingest/route.ts](../../app/api/ingest/route.ts) (POST), [app/api/ingest/[id]/route.ts](../../app/api/ingest/[id]/route.ts) (PUT), and the `dispatchTool` recovery catch in [app/api/agent/ingest/route.ts](../../app/api/agent/ingest/route.ts). These three sites previously emitted `kind:"voyage", model:"route", model_version:"ingest"|"ingest_update"|"agent-ingest"` — a misuse of the Voyage discriminant that polluted any observability filter grouping by `kind` (e.g. M5 dashboard's "Voyage error rate" panel would have double-counted ORM errors as Voyage errors).
+
+**Shape (full declaration in [lib/log.ts](../../lib/log.ts)):**
+
+```ts
+export interface LogEventRoute {
+  kind: "route";
+  route: string;              // stable "METHOD path" label dashboards GROUP BY
+  latency_ms: number;         // typically 0 on catch-all paths
+  cost_usd: number | null;    // always null — no vendor invoked
+  status?: "ok" | "error";
+  error?: string;             // redact + truncate pipeline inherited
+  ts?: never;                 // helper-injected
+}
+```
+
+**Departures from the original ADR shape.**
+
+1. **Does NOT extend `LogEventBase`.** No vendor model invoked, nothing to attribute. Same carve-out rationale as `kind:"retrieval_pipeline"` (Amendment 2026-05-23 §1) — iron rules #9 (`model+model_version`) and #10 (`prompt_hash`) are vacuously satisfied because the variant explicitly does NOT carry vendor identity. With this amendment the union has three opt-in-`LogEventBase` slots (`claude`, `voyage`) and two opt-out slots (`retrieval_pipeline`, `route`); the contract is "extend `LogEventBase` if and only if exactly one vendor call is being attributed."
+2. **`cost_usd: number | null` is required and always `null`.** Field is present so the existing runtime cost-type guard permits the line uniformly across the union — no per-`kind` branch in `logEvent()`.
+3. **No `request_id` / `pipeline_request_id`.** There is no SDK call whose id we could carry; sibling's `pipeline_request_id` is for events that span multiple vendor calls, which the route variant does not.
+4. **Guard-inheritance test cases are re-asserted on the variant** (latency_ms / cost_usd / redact-truncate / sink-throw-swallow) for the same reason the sibling variant re-asserts them: the variant doesn't extend `LogEventBase`, so a future refactor of `logEvent()` that special-cases the base-shape variants could regress the guard surface on this variant without the dedicated tests catching it.
+5. **`latency_ms: 0` is the common case.** Catch-all paths are recovery sites, not timed operations. Dashboards that average latency by `kind` should filter on `status:"error"` first; documented in the variant JSDoc.
+6. **`route` label convention is bare `METHOD path`** — `"POST /api/ingest"`, `"PUT /api/ingest/[id]"`, `"POST /api/agent/ingest"`. The agent-ingest catch lives inside `dispatchTool` (not the outer HTTP handler), but the label is kept bare for `GROUP BY route` symmetry. If a future outer-handler 500 catch lands on the same path, a `phase?:string` field can be added then.
+
+**Invariant: no runtime changes to `logEvent()`.** The new variant supplies `latency_ms: number` and `cost_usd: number | null` correctly; the existing two runtime guards fire uniformly across all four variants. Any future variant added to the union MUST also satisfy this invariant or `logEvent()` needs an explicit type-narrowing branch.
+
+**No consumer migration window.** No M5 dashboard exists yet; the old `kind:"voyage", model:"route"` tuple has no downstream consumer pattern-matching on it. Clean swap.
+
+**`tool_dispatch` site scope expansion.** The original BACKLOG entry named only the two ingest-route 500-paths; the agent-ingest `dispatchTool` recovery catch was added to the same slice because it shared the identical pollution pattern. The variant JSDoc reflects this: "route-layer-or-dispatch error not attributable to a single vendor call," broader than the original "500-path catch-all" framing.
+
+**Test coverage.** [lib/log.test.ts](../../lib/log.test.ts) gains 7 cases for the new variant mirroring the Amendment 2026-05-23 sibling block: NDJSON shape pin (with raw-line assertions catching `undefined`-key spread regressions), optional-field omission, `latency_ms` guard inheritance, `cost_usd` guard inheritance, redact-then-truncate on `error`, `ts?:never` runtime non-overridable via structural-cast smuggle, sink-throw-swallow. The three call-site swaps have no pre-existing test assertions on the old tuple (greped: zero hits in `app/**/*.test.ts`), so no assertion churn outside `lib/log.test.ts`.
