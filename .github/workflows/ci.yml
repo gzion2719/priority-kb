@@ -17,7 +17,9 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/priority_kb
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        # Pinned in lockstep with docker-compose.yml's `services.db.image`.
+        # See that file for the bump procedure.
+        image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

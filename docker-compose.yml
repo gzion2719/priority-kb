@@ -1,6 +1,12 @@
 services:
   db:
-    image: pgvector/pgvector:pg16
+    # Pinned to the multi-arch OCI image index digest as of 2026-05-26 for
+    # reproducibility (per BACKLOG: "Pin pgvector/pgvector:pg16 image by
+    # digest"). Bump along with major Postgres version moves. Verify a new
+    # digest by:
+    #   docker buildx imagetools inspect pgvector/pgvector:pg16
+    # Keep this in lockstep with .github/workflows/ci.yml's `services.postgres.image`.
+    image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
     container_name: priority-kb-db
     environment:
       POSTGRES_USER: postgres
