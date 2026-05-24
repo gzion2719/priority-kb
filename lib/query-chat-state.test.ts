@@ -226,10 +226,37 @@ describe("applyEvent — terminal chunks_only path (ADR-0012 §3 synth-down rows
 });
 
 describe("applyEvent — terminal no_content path", () => {
-  it("no_content lands without candidates and without answer", () => {
+  it("bare no_content lands without candidates, answer, or degraded flags", () => {
     let s = startStream(initialQueryState, "q with no match");
     s = applyEvent(s, { kind: "no_content" });
     expect(s.status).toBe("no_content");
+    expect(s.candidates).toEqual([]);
+    expect(s.answer).toBe("");
+    expect(s.citations).toEqual([]);
+    expect(s.error).toBeUndefined();
+    // Back-compat: a bare no_content (structural empty — embed-OK content
+    // gap OR SQL-WHERE-filtered) MUST NOT synthesize degraded flags. A
+    // regression that always set them would make the UI render a misleading
+    // "outage" banner on a healthy empty result. Pin the absence.
+    expect("degraded" in s).toBe(false);
+    expect("degradedReason" in s).toBe(false);
+  });
+
+  it("no_content with degraded_reason synthesizes degraded:true and carries the reason", () => {
+    // ADR-0013 §3 special row: embed-fail + zero-keyword. The wire shape
+    // carries reason-only (mirrors chunks_only); the reducer synthesizes
+    // `degraded:true` so the UI banner gate
+    // (`state.degraded === true && state.degradedReason !== undefined`,
+    // app/query/page.tsx:179) is satisfied with one wire field.
+    let s = startStream(initialQueryState, "q under embed outage");
+    s = applyEvent(s, {
+      kind: "no_content",
+      degraded_reason: "no_keyword_match_under_embed_outage",
+    });
+    expect(s.status).toBe("no_content");
+    expect(s.degraded).toBe(true);
+    expect(s.degradedReason).toBe("no_keyword_match_under_embed_outage");
+    // Non-degraded fields unchanged.
     expect(s.candidates).toEqual([]);
     expect(s.answer).toBe("");
     expect(s.citations).toEqual([]);

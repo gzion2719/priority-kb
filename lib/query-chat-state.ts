@@ -8,7 +8,7 @@
 //   {kind:"answer_delta", text:    string}                   // 1+ deltas; stub synth emits exactly 1
 //   {kind:"done",         citation_ids, degraded?, degraded_reason?}  // terminal happy path
 //   {kind:"chunks_only",  entries: QueryChunkSnippet[]}      // terminal: synth-down rows (ADR-0012 §3)
-//   {kind:"no_content"}                                      // terminal: empty candidate set
+//   {kind:"no_content",   degraded_reason?}                  // terminal: empty candidate set (reason set on embed-outage row, ADR-0013 §3)
 //   {kind:"error",        code: "internal"|"db"|"synth_unavailable"|"citation_validation_failed"}  // terminal failure
 //
 // Plus client-side terminal transitions for SSE-transport failure:
@@ -102,7 +102,23 @@ export type QueryEvent =
        */
       degraded_reason?: DegradedReasonCode;
     }
-  | { kind: "no_content" }
+  | {
+      kind: "no_content";
+      /**
+       * Set on the ADR-0013 §3 special row (`!embedOk && !fusedNonEmpty` —
+       * embed lane failed AND keyword lane returned zero) to surface
+       * `no_keyword_match_under_embed_outage` to the UI banner. Optional so
+       * the structural-no-content case (embed-OK, both lanes empty for
+       * content reasons — no matching entries OR all matches filtered by
+       * SQL sensitivity WHERE) remains bare and back-compat.
+       *
+       * Wire shape mirrors `chunks_only`: reason-only on the wire, the
+       * reducer synthesizes `degraded:true` when present. Matches
+       * `chunks_only` policy so the reducer pairs `degraded + degradedReason`
+       * uniformly (lib/degraded-copy.ts:39-46 contract).
+       */
+      degraded_reason?: DegradedReasonCode;
+    }
   | {
       kind: "error";
       code: "internal" | "db" | "synth_unavailable" | "citation_validation_failed";
@@ -218,7 +234,19 @@ export function applyEvent(state: QueryState, event: QueryEvent): QueryState {
       };
 
     case "no_content":
-      return { ...state, status: "no_content" };
+      // Mirrors `chunks_only` (above): when the wire carries a
+      // degraded_reason, synthesize `degraded:true` alongside so the UI
+      // banner's invariant (`degraded === true && degradedReason !==
+      // undefined` — app/query/page.tsx:179) holds and the
+      // lib/degraded-copy.ts:39-46 contract ("never called with undefined
+      // when degraded:true") is preserved.
+      return {
+        ...state,
+        status: "no_content",
+        ...(event.degraded_reason !== undefined
+          ? { degradedReason: event.degraded_reason, degraded: true }
+          : {}),
+      };
 
     case "error":
       return { ...state, status: "error", error: errorMessageForCode(event.code) };

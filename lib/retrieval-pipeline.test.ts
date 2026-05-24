@@ -419,7 +419,7 @@ describe("retrievePipeline — edges", () => {
     expect(outcome.error).toContain("citation_validation_failed");
   });
 
-  it("embed-fail + empty keyword → no_content + no_keyword_match_under_embed_outage", async () => {
+  it("embed-fail + empty keyword → no_content event carries degraded_reason", async () => {
     const deps = buildDeps({
       embedder: buildEmbedder({ fail: true }),
       keyword: [],
@@ -427,14 +427,30 @@ describe("retrievePipeline — edges", () => {
     const { events, outcome } = await drainPipeline(
       retrievePipeline(deps, { query: "q", role: "user" }),
     );
-    expect(events).toEqual([{ kind: "no_content" }]);
+    // Strict event-object equality — proves the wire surface carries the
+    // reason. The all-healthy-empty test below is the flip-positive: same
+    // event kind, NO degraded_reason field. Dropping the `if (!embedOk)`
+    // branch in retrieval-pipeline.ts would make this test fail (yielded
+    // event would be bare).
+    expect(events).toEqual([
+      { kind: "no_content", degraded_reason: "no_keyword_match_under_embed_outage" },
+    ]);
     expect(outcome.degraded).toBe(true);
     expect(outcome.degraded_reason).toBe("no_keyword_match_under_embed_outage");
+    // Audit row + wire event MUST agree on the reason — replay
+    // reconstructability + UI/audit symmetry. A regression that hardcoded
+    // a different reason on one surface but not the other would slip past
+    // either assertion alone.
+    const noContentEvent = events[0];
+    if (noContentEvent.kind !== "no_content") throw new Error("expected no_content");
+    expect(noContentEvent.degraded_reason).toBe(outcome.degraded_reason);
   });
 
-  it("embed-ok + both lanes empty → no_content (NOT no_keyword_match_under_embed_outage)", async () => {
-    // Flip-positive against the previous test: the same no_content event but
-    // a different degraded shape proves the reason is gated on embed state.
+  it("embed-ok + both lanes empty → bare no_content (NOT no_keyword_match_under_embed_outage)", async () => {
+    // Flip-positive against the previous test: same event kind, but the
+    // wire shape MUST be bare — a regression that always set the reason
+    // would break this and the previous test would not catch it (the
+    // previous test asserts presence, not exclusivity).
     const deps = buildDeps({ ann: [], keyword: [] });
     const { events, outcome } = await drainPipeline(
       retrievePipeline(deps, { query: "q", role: "user" }),

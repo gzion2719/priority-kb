@@ -698,7 +698,15 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
       retrievePipeline(deps, { query: QUERY_ABSENT, role: "admin" }),
     );
 
-    expect(events.map((e) => e.kind)).toEqual(["no_content"]);
+    // Full event-object equality (not just .kind) — pins the wire surface
+    // carries `degraded_reason` so the UI banner reaches the
+    // `no_keyword_match_under_embed_outage` copy entry. Paired with the
+    // structural-no-content tests below (β4 + γ shape) which assert the
+    // bare event for the embed-OK case — together they're the flip-positive
+    // pair that distinguishes outage from content gap on the wire.
+    expect(events).toEqual([
+      { kind: "no_content", degraded_reason: "no_keyword_match_under_embed_outage" },
+    ]);
 
     expect(outcome.degraded).toBe(true);
     expect(outcome.degraded_reason).toBe("no_keyword_match_under_embed_outage");
@@ -1036,7 +1044,11 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     // discriminates: this case is `undefined` (embed succeeded, no rows is
     // a content gap, not an outage), whereas the embed-fail + zero-keyword
     // case at line 682 sets `no_keyword_match_under_embed_outage`.
-    expect(userRun.events.map((e) => e.kind)).toEqual(["no_content"]);
+    // Bare no_content event (embed succeeded — content gap, not outage) —
+    // flip-positive against the row-9 special case above which carries
+    // degraded_reason on the wire. Full event-object equality so a
+    // regression that leaked degraded_reason onto this row would surface.
+    expect(userRun.events).toEqual([{ kind: "no_content" }]);
     expect(userRun.outcome.ann_candidate_ids).toEqual([]);
     expect(userRun.outcome.keyword_candidate_ids).toEqual([]);
     expect(userRun.outcome.fused_ids).toEqual([]);
@@ -1162,8 +1174,12 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     expect(userRunPost.outcome.keyword_candidate_ids).toEqual([]);
     // Pin the terminal so a different bug returning empty lanes (e.g.,
     // seed truncation race, swallowed connection error) doesn't slip
-    // through as a vacuous .toEqual([]) pass.
-    expect(userRunPost.events.map((e) => e.kind)).toEqual(["no_content"]);
+    // through as a vacuous .toEqual([]) pass. Full event-object equality
+    // (not just .kind) also pins the absence of degraded_reason — embed
+    // succeeded, so this is a content gap (SQL-WHERE-filtered), not an
+    // outage; the row-9 special case above is the only path that carries
+    // degraded_reason on the wire.
+    expect(userRunPost.events).toEqual([{ kind: "no_content" }]);
     expect(userRunPost.outcome.degraded).toBe(false);
     expect(userRunPost.outcome.degraded_reason).toBeUndefined();
     expect(userRunPost.outcome.status).toBe("ok");

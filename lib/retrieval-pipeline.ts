@@ -455,14 +455,21 @@ export async function* retrievePipeline(
 
   // ── No candidates terminal ──────────────────────────────────────────────
   if (!fusedNonEmpty) {
-    yield { kind: "no_content" };
-    const out = buildBase();
+    // ADR-0013 §3 special row: embed lane failed AND keyword lane returned
+    // zero → wire-surface `no_keyword_match_under_embed_outage` so the UI
+    // banner can render reason-specific copy from lib/degraded-copy.ts.
+    // Wire shape mirrors chunks_only (reason-only; reducer synthesizes
+    // degraded:true). The structural-no-content case (embed-OK, both lanes
+    // empty) yields bare — content gap, not an outage.
     if (!embedOk) {
-      // ADR-0013 §3 special row.
+      yield { kind: "no_content", degraded_reason: "no_keyword_match_under_embed_outage" };
+      const out = buildBase();
       out.degraded = true;
       out.degraded_reason = "no_keyword_match_under_embed_outage";
+      return out;
     }
-    return out;
+    yield { kind: "no_content" };
+    return buildBase();
   }
 
   // ── Hydrate entry rows ──────────────────────────────────────────────────
