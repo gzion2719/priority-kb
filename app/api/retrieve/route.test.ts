@@ -565,7 +565,7 @@ describeIfDb("POST /api/retrieve — DB integration", () => {
     expect(rows).toHaveLength(2);
     const userRow = rows.find((r) => r.payload.role === "user")!;
     const adminRow = rows.find((r) => r.payload.role === "admin")!;
-    expect(userRow.payload.sensitivity_allowed).toEqual(["public"]);
+    expect(userRow.payload.sensitivity_allowed).toEqual(["public", "internal"]);
     expect(adminRow.payload.sensitivity_allowed).toEqual(["public", "internal", "restricted"]);
   });
 

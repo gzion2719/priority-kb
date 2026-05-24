@@ -260,8 +260,8 @@ describe("sensitivityAllowedForRole — iron-rule #6 mapping is total over Role"
     expect(sensitivityAllowedForRole("admin")).toEqual(["public", "internal", "restricted"]);
   });
 
-  it("user → public only", () => {
-    expect(sensitivityAllowedForRole("user")).toEqual(["public"]);
+  it("user → public + internal (per ADR-0012 §6 table)", () => {
+    expect(sensitivityAllowedForRole("user")).toEqual(["public", "internal"]);
   });
 
   it("never returns an empty array for a valid Role", () => {
@@ -276,12 +276,15 @@ describe("sensitivityAllowedForRole — iron-rule #6 mapping is total over Role"
     }
   });
 
-  it("user mapping omits 'internal' AND 'restricted' (negative-assertion)", () => {
-    // A regression that returned ['public', 'internal'] for user would
-    // expose internal entries via the keyword lane's SQL WHERE. The flip-
-    // positive companion lives at tests/retrieval-keyword.integration.test.ts.
+  it("user mapping omits 'restricted' (negative-assertion)", () => {
+    // The three-tier enum's design intent (ADR-0012 §6): `restricted` IS
+    // the admin-only escape hatch. A regression that returned
+    // ['public','internal','restricted'] for user would expose
+    // restricted entries via the keyword and ANN lane SQL WHEREs, breaking
+    // iron-rule #6's "restricted is admin-only" semantics. `internal` is
+    // org-internal and visible to authenticated end users by design — that
+    // is NOT a regression, see lib/auth.ts:175 JSDoc.
     const userAllowed = sensitivityAllowedForRole("user");
-    expect(userAllowed).not.toContain("internal");
     expect(userAllowed).not.toContain("restricted");
   });
 });
