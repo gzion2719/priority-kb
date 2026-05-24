@@ -34,12 +34,16 @@ import type {
   MessageParam,
   RawMessageStreamEvent,
   StopReason,
+  TextBlockParam,
   Tool,
+  ToolResultBlockParam,
+  ToolUseBlockParam,
 } from "@anthropic-ai/sdk/resources/messages";
 
 import {
   AgentUnavailableError,
   type AgentClient,
+  type AgentContentBlock,
   type AgentEvent,
   type AgentMessage,
   type AgentStreamInput,
@@ -91,15 +95,50 @@ export function createAnthropicAgent(options: CreateAnthropicAgentOptions): Agen
 }
 
 /**
- * Identity-shaped message conversion. AgentMessage / AgentContentBlock
- * already mirror Anthropic's wire shape (ADR-0010 §5 — adopted directly to
- * avoid a transformation layer). The `as` cast is structural — narrower-than-SDK
- * tool_result.content (string only, no content-block array) is intentional;
- * the route never emits the array form.
+ * Structural message conversion. AgentMessage / AgentContentBlock mirror
+ * Anthropic's wire shape (ADR-0010 §5 — adopted directly to avoid a
+ * transformation layer), but our `AgentContentBlock.tool_result.content`
+ * is `string`-only by design (no content-block array form). The per-block
+ * mapping below makes that narrower-than-SDK invariant compile-checked:
+ * the `toAnthropicBlock` return-type annotation forbids any block param
+ * type we haven't whitelisted, so a future broadening of either
+ * AgentContentBlock or the SDK's union surfaces here as a TS error.
+ *
+ * Exported via `__testHelpers` for `lib/agents-anthropic.test.ts` to pin
+ * the shape (BACKLOG: "Adapter: tighten toAnthropicMessages type boundary").
  */
 function toAnthropicMessages(messages: AgentMessage[]): MessageParam[] {
-  return messages as unknown as MessageParam[];
+  return messages.map((m) => ({
+    role: m.role,
+    content: typeof m.content === "string" ? m.content : m.content.map(toAnthropicBlock),
+  }));
 }
+
+function toAnthropicBlock(
+  b: AgentContentBlock,
+): TextBlockParam | ToolUseBlockParam | ToolResultBlockParam {
+  switch (b.type) {
+    case "text":
+      return { type: "text", text: b.text };
+    case "tool_use":
+      return { type: "tool_use", id: b.id, name: b.name, input: b.input };
+    case "tool_result":
+      return {
+        type: "tool_result",
+        tool_use_id: b.tool_use_id,
+        content: b.content,
+        is_error: b.is_error,
+      };
+  }
+}
+
+/**
+ * Test-only export of the otherwise-private message converter so
+ * `lib/agents-anthropic.test.ts` can pin the per-block mapping shape
+ * without going through a full `streamMessages` call. Not re-exported
+ * from the public surface (see `lib/agents.ts`).
+ */
+export const __testHelpers = { toAnthropicMessages };
 
 function toAnthropicTools(tools: readonly AgentToolDefinitionShape[]): Tool[] {
   return tools.map((t) => ({

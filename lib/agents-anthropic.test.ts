@@ -121,8 +121,18 @@ vi.mock("@anthropic-ai/sdk", () => ({
 }));
 
 // Import AFTER the mock declaration so the adapter binds to the mocks.
-import { ANTHROPIC_MODEL, ANTHROPIC_SDK_VERSION, createAnthropicAgent } from "./agents-anthropic";
-import { AgentUnavailableError, type AgentEvent, type AgentStreamInput } from "./agents";
+import {
+  ANTHROPIC_MODEL,
+  ANTHROPIC_SDK_VERSION,
+  createAnthropicAgent,
+  __testHelpers,
+} from "./agents-anthropic";
+import {
+  AgentUnavailableError,
+  type AgentEvent,
+  type AgentMessage,
+  type AgentStreamInput,
+} from "./agents";
 
 function makeInput(overrides?: Partial<AgentStreamInput>): AgentStreamInput {
   const ac = new AbortController();
@@ -496,6 +506,84 @@ describe("error mapping — iron rules #1 + #12 surface", () => {
 });
 
 // ── Source-file-no-live-import floor (iron rule #8 mirror) ────────────────
+
+describe("toAnthropicMessages — structural conversion (BACKLOG: type-boundary tightening)", () => {
+  const { toAnthropicMessages } = __testHelpers;
+
+  it("round-trips text content (string form) unchanged", () => {
+    const msgs: AgentMessage[] = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "world" },
+    ];
+    expect(toAnthropicMessages(msgs)).toEqual([
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "world" },
+    ]);
+  });
+
+  it("round-trips all three block types (text + tool_use + tool_result) per-block", () => {
+    const msgs: AgentMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "calling search" },
+          { type: "tool_use", id: "tu_1", name: "search_kb", input: { q: "invoice" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tu_1", content: "no matches" }],
+      },
+    ];
+    expect(toAnthropicMessages(msgs)).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "calling search" },
+          { type: "tool_use", id: "tu_1", name: "search_kb", input: { q: "invoice" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tu_1", content: "no matches", is_error: undefined },
+        ],
+      },
+    ]);
+  });
+
+  it("preserves tool_result.is_error when explicitly true", () => {
+    const msgs: AgentMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tu_err", content: "boom", is_error: true }],
+      },
+    ];
+    const out = toAnthropicMessages(msgs);
+    expect(out[0]?.content).toEqual([
+      { type: "tool_result", tool_use_id: "tu_err", content: "boom", is_error: true },
+    ]);
+  });
+
+  // Negative-assertion: the load-bearing invariant of this refactor is that
+  // tool_result.content stays `string` — never the SDK's `Array<...>` form.
+  // The type-system pins this at compile time (toAnthropicBlock's return-type
+  // annotation forbids any other block param shape). This runtime assertion
+  // catches a regression where someone replaces the per-block map with an
+  // identity-cast and the SDK's array form silently slips through.
+  it("emits string content for tool_result (NOT the SDK's array form)", () => {
+    const msgs: AgentMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tu_1", content: "plain string" }],
+      },
+    ];
+    const out = toAnthropicMessages(msgs);
+    const block = (out[0]?.content as Array<{ type: string; content: unknown }>)[0];
+    expect(typeof block?.content).toBe("string");
+    expect(Array.isArray(block?.content)).toBe(false);
+  });
+});
 
 describe("source file imports the SDK (counter-floor to lib/agents.ts)", () => {
   it("lib/agents-anthropic.ts DOES import @anthropic-ai/sdk — this is where the SDK lives", () => {
