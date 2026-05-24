@@ -16,7 +16,7 @@
 //   - #12 degraded: audit row payload has degraded=true and the slice's
 //     reason code; the no-content path still writes degraded:true.
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Pool } from "pg";
 
 import { POST, RETRIEVAL_RETRY_PREFIX_HASH } from "@/app/api/retrieve/route";
@@ -854,5 +854,100 @@ describeIfDb("POST /api/retrieve — retrieval_pipeline log line (DB-integration
     expect(rp[0]?.citation_validation_outcome).toBeNull();
     expect(rp[0]?.retry_attempted).toBe(false);
     expect(rp[0]?.keyword_only).toBe(false);
+  });
+});
+
+// Reads an SSE body once and returns BOTH parsed `data:` events AND the
+// count of `: keepalive` SSE comment lines. The default `readSseEvents`
+// at the top of this file discards comments; the keepalive test asserts
+// on comments specifically. Pattern mirrors agent/ingest/route.test.ts:98-116.
+async function readSseWithKeepalive(
+  res: Response,
+): Promise<{ events: unknown[]; keepaliveCount: number }> {
+  const text = await res.text();
+  const events: unknown[] = [];
+  let keepaliveCount = 0;
+  for (const block of text.split("\n")) {
+    if (block.startsWith("data: ")) {
+      events.push(JSON.parse(block.slice("data: ".length)));
+    } else if (block.startsWith(": keepalive")) {
+      keepaliveCount += 1;
+    }
+  }
+  return { events, keepaliveCount };
+}
+
+describeIfDb("POST /api/retrieve — keepalive", () => {
+  let pool: Pool;
+
+  beforeAll(() => {
+    pool = new Pool({ connectionString: databaseUrl });
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  beforeEach(() => {
+    resetSynthesizerForTests();
+  });
+
+  afterEach(async () => {
+    await pool.query("TRUNCATE audit_log, chunks, entries_versions, entries CASCADE");
+    resetSynthesizerForTests();
+    vi.unstubAllEnvs();
+  });
+
+  it("emits `: keepalive\\n\\n` comment lines when the stream idles past the keepalive interval", async () => {
+    // Drive a short keepalive interval so the test can observe ticks
+    // without inflating runtime. readPositiveInt validates so "20" is fine.
+    vi.stubEnv("RETRIEVAL_KEEPALIVE_MS", "20");
+
+    const realId = "77777777-7777-4777-8777-777777777777";
+    await pool.query(
+      `INSERT INTO entries (id, title, category, tags, body, source_pointer, last_verified_at, sensitivity)
+       VALUES ($1, 'Keepalive smoke', 'test', '{}'::text[], 'Body content for the keepalive smoke test.', 'src://test', now(), 'public')`,
+      [realId],
+    );
+
+    // Slow synth: forces the stream to idle past the 20ms keepalive
+    // interval before the terminal event arrives. ~100ms idle window
+    // → 4-5 expected ticks; assert >= 2 to give CI slack while still
+    // distinguishing "interval installed" from "interval missing"
+    // (the latter produces keepaliveCount === 0).
+    const slowSynth: Synthesizer = {
+      model: "test-synth",
+      version: "v1-test",
+      async synthesize(_prompt: string, _ctx: string[]) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return {
+          answer: `Answer [${realId}].\n\nSources: [${realId}]`,
+          tokens_in: 0,
+          tokens_out: 0,
+        };
+      },
+    };
+    injectSynth(slowSynth);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await POST(makeReq({ query: "keepalive" }, "user") as any, {});
+    expect(res.status).toBe(200);
+
+    const { events, keepaliveCount } = await readSseWithKeepalive(res);
+
+    // The terminal happy path still fires — keepalive does not perturb the
+    // data-event stream (parser ignores `:`-prefixed lines per WHATWG §9.2.6).
+    expect((events as Array<{ kind: string }>).map((e) => e.kind)).toEqual([
+      "candidates",
+      "answer_delta",
+      "done",
+    ]);
+
+    // Negative-assertion: without the `setInterval` install, keepaliveCount
+    // would be exactly 0 — a 100ms idle with no timer produces no comment
+    // lines. Asserting >= 2 distinguishes "installed and ticked" from
+    // "installed but never fired before stream closed" (which would also
+    // be a regression we want to catch).
+    expect(keepaliveCount).toBeGreaterThanOrEqual(2);
   });
 });
