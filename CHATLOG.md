@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-24 — Shape β + sensitivityAllowedForRole reconciliation (2 PR pairs)
+
+- **Shape β** via [#206](https://github.com/gzion2719/priority-kb/pull/206)→[#207](https://github.com/gzion2719/priority-kb/pull/207) (both merged): 4 new DB-gated tests in [tests/retrieval-pipeline.integration.test.ts](tests/retrieval-pipeline.integration.test.ts) proving iron-rule #6 SQL WHERE end-to-end across ANN + keyword lanes — mixed-sensitivity seed, direct helper-call per allow-list, Hebrew niqqud × non-public sensitivity, all-restricted → no_content terminal. Load-bearing iron-rule guard = user-lane exact-equality on the user-excluded tier.
+- **Drift reconciliation** via [#208](https://github.com/gzion2719/priority-kb/pull/208)→[#209](https://github.com/gzion2719/priority-kb/pull/209) (both merged): [lib/auth.ts:189](lib/auth.ts) flipped from `user→["public"]` to `user→["public","internal"]` per ADR-0012 §6. Atomic 7-file flip; `restricted` remains admin-only by design. β1 reshaped to set-equality `{E_PUB,E_INT}` with synth `cite` flipped; β1b NEW dedicated positive iron-rule-#6 case; β3 extended with restricted Hebrew entry. M5-BLOCKER BACKLOG entry closed same-day.
+- **Step 7b two-pass load-bearing on both pairs.** Shape β plan-CR reframed the user-exclusion linchpin (B1+B2: admin set-equality is non-discriminating because admin's allow-list is the full enum). Drift plan-CR drove keep-`E_HE_INT`-add-`E_HE_RES` β3 reshape (M2), β1 set-equality + synth wiring (M3), audit-row explicit non-action statement (M6), dedicated β1b positive case (Q1). No code-CR fired on either — implemented diffs matched plan-as-reviewed each time.
+- **Surface-completeness slip on #208.** Pre-plan grep was hand-picked; missed `tests/entries.integration.test.ts` (1-hop consumer of `sensitivityAllowedForRole` via `findEntryForRole`). CI caught it; fixup commit `3875a3c` restored green. One avoidable CI cycle. Plan-CR M2 had explicitly flagged the axis — reviewer also missed the surface.
+- **Session Score 9/10.** Code 4/4, Protocol 3/3, Efficiency 2/3 (−1: hand-picked grep). Ceiling: full-repo `git grep` of direct + 1-hop transitive callers when reconciling a contract — codified this session.
+- **Process improvement:** SESSION_PROTOCOL.md Step 7 gained the **Reconciliation-grep-completeness sub-rule** (see SESSION_PROTOCOL.md Step 7, codified 2026-05-24).
+- **Next session:** M3 shape γ — composite-FK divergence rejection tests (`chunks.sensitivity ≠ entries.sensitivity` rejected by composite FK at `drizzle/schema.ts:115-118`; deferred from β twice). Alternative: M3 items 6-7 eval-runner skeleton phase A. **Fresh chat fine** — both bounded single-PR slices.
+
+---
+
 ## 2026-05-24 — M3 2c-iii α — real-DB matrix integration tests (10 cases)
 
 - **Shape α delivered** via [#202](https://github.com/gzion2719/priority-kb/pull/202)→[#203](https://github.com/gzion2719/priority-kb/pull/203) (both open at close): new [tests/retrieval-pipeline.integration.test.ts](tests/retrieval-pipeline.integration.test.ts) drives the ADR-0013 §3 8-row matrix + zero-keyword special case + sensitivity-array propagation end-to-end against real Postgres (`annCandidates` + `keywordCandidates` SQL live; SDK boundaries stubbed per iron rule #8). Row 1 uses a reversing reranker so reranked_ids is distinguishable from the rerank-skip fallback; independent `expectedRrf` helper pins `outcome.fused_ids` without calling `rrfFuse`.
