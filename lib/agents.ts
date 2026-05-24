@@ -58,7 +58,13 @@ export type AgentEvent =
   | { kind: "tool_result"; name: string; ok: false; error: string }
   | {
       kind: "done";
-      stop_reason: "end_turn" | "tool_use" | "max_tokens" | "max_iterations" | "max_turns";
+      stop_reason:
+        | "end_turn"
+        | "tool_use"
+        | "max_tokens"
+        | "max_iterations"
+        | "max_turns"
+        | "refusal";
     }
   | { kind: "error"; code: string; message: string };
 
