@@ -32,6 +32,9 @@ function readStdinJson() {
 // Split a shell command into "logical" segments (commands separated by
 // `&&`, `||`, `;`, `|`, or newline), being careful not to split inside
 // single or double quotes. Returns an array of trimmed segments.
+//
+// Keep in sync with scripts/hook-gh-pr-merge-block.mjs splitShellSegments
+// — extract to a shared module on the 3rd consumer.
 function splitShellSegments(command) {
   const segments = [];
   let buf = "";
