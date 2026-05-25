@@ -495,12 +495,9 @@ export default function QueryPage(): React.ReactNode {
                       >
                         <strong>{c.title}</strong>
                         <span
-                          style={{
-                            fontSize: "0.75rem",
-                            padding: "0.125rem 0.375rem",
-                            borderRadius: "999px",
-                            border: "1px solid #555",
-                          }}
+                          className="sensitivity-pill"
+                          data-tier={c.sensitivity}
+                          data-testid="sensitivity-pill"
                         >
                           {c.sensitivity}
                         </span>
