@@ -79,7 +79,7 @@ Runs on every `pull_request: opened | reopened | edited` from this-repo branches
 ## Revisit triggers
 
 - A fifth PR-title failure of any shape → re-open this ADR; do not patch with prose.
-- `pr-title.yml` allowlist changes without `commitlint.config.cjs` matching → add a CI check that diffs the two.
+- ~~`pr-title.yml` allowlist changes without `commitlint.config.cjs` matching → add a CI check that diffs the two.~~ **RESOLVED 2026-05-25** by the drift-floor script — see Amendment 2026-05-25 — type-enum allowlist drift floor.
 - The Layer 2 normalizer makes an unintended rewrite → narrow its scope rather than disable it.
 
 ## Amendment 2026-05-25 — `gh pr merge` sibling floor
@@ -103,3 +103,22 @@ Considered (and rejected) during the post-revert CI cost-trim wave 2 evaluation:
 The 2-workflow design is therefore load-bearing for Layer 2 + Layer 3 separability. Keep both files; document the constraint here so a future cost-trim session doesn't re-attempt the merge.
 
 **If a single-workflow design ever becomes viable** (e.g., `amannn/action-semantic-pull-request` accepts a custom title input, OR we switch validate to a custom step that re-fetches the title from the API), revisit. Until then: 2 files, 1 runner per workflow, no merging.
+
+## Amendment 2026-05-25 — Type-enum allowlist drift floor
+
+Closes the "Revisit triggers" line above. `scripts/check-pr-title-allowlist-drift.mjs` ships chained into `npm run check`; mechanical floor for the "PR-title type allowlist drift" class.
+
+**Surfaces parsed (4):**
+1. `commitlint.config.cjs` — `type-enum` rule (source of truth). Parsed via `require()` not regex; survives any refactor (extracted constants, spreads, conditional rules) that text-parsing would miss.
+2. `.github/workflows/pr-title.yml` — `jobs.validate.steps[].with.types` literal-block. Parsed via the `yaml` package; survives reformat to flow syntax or other valid YAML shapes.
+3. `.github/workflows/pr-title-normalize.yml` — `prefix_re='^((TYPE|TYPE|...)...'` shell-regex alternation group. Load-bearing surface — a missing type here makes the Layer 2 normalizer silently skip the new type's PRs (`prefix` evaluates empty, "Title does not match conventional shape; leaving untouched" path).
+4. `scripts/hook-gh-pr-create-precheck.mjs` — `allowlist (TYPE|TYPE|...)` error-message phrase. Cosmetic surface (doesn't gate behavior) but included for completeness so the user-facing message stays truthful when types are added.
+
+**Canonical failure mode this prevents:** someone adds `perf` to `commitlint.config.cjs` (per the natural ADR-0004 "source of truth" reflex) but forgets one or more of the 3 dependent surfaces. Today's classes of failure that result:
+- Forgetting `pr-title.yml`: PR titled `perf(scope): foo` passes local precheck, fails CI server-side validate.
+- Forgetting `pr-title-normalize.yml`: PR titled `Perf: foo` is invisible to the Layer 2 normalizer, falls through to Layer 3 validate which rejects the uppercase subject. Worse than (a): the *normalizer existed to fix exactly this class of title* and now silently doesn't.
+- Forgetting `hook-gh-pr-create-precheck.mjs` message: cosmetic only — user sees a stale allowlist in the error, fixes the wrong thing.
+
+**Architecture.** Pure-function parsers exported for unit testing (`tests/scripts/check-pr-title-allowlist-drift.test.ts`); `compareTypeLists()` returns per-surface missing/extra diffs; `formatDriftMessage()` produces actionable output naming each drifting surface. Tests cover (a) aligned-state passes, (b) injected drift in `pr-title.yml` catches, (c) injected drift in normalize regex catches — the (b)/(c) pair is the negative-assertion floor (`SESSION_PROTOCOL.md` "Negative-assertion tests distinguish from the regression") proving the detector ACTUALLY catches drift, not just that it agrees on the aligned state.
+
+**Out of scope (queued in BACKLOG):** drift check as its own CI workflow on `pull_request` (would catch the case where a dependabot PR touches one of the 4 surfaces without anyone running `npm run check` locally). Drift check on `.pre-commit-config.yaml` vs `package.json` for the `@commitlint/config-conventional` version pin (different surface pair, different parser strategy).
