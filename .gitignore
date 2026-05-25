@@ -70,6 +70,14 @@ desktop.ini
 *.log
 logs/
 
+# --- Log fixture-recording (ADR-0005 Amendment 2026-05-30, BACKLOG:94) ---
+# lib/log.ts can tee logEvent NDJSON to a path when enabled via
+# enableFixtureRecording(). Files may contain post-redaction log lines;
+# treat as production log output (secret-redaction is best-effort per
+# ADR-0005). Default to NOT committing these.
+*.ndjson
+fixtures/
+
 # --- Local-only ---
 .local/
 scratch/

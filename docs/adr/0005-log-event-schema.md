@@ -201,3 +201,56 @@ The type re-uses `AgentEvent.done.stop_reason` via `Extract<…>` so this surfac
 **Test coverage.** [lib/log.test.ts](../../lib/log.test.ts) gains 3 cases for the new field: NDJSON shape pin with `stop_reason:"refusal"` present, omission test (the raw line does NOT contain `"stop_reason"` when the field is unset), and a type-level smoke test pinning the six-value union.
 
 **Call-site impact.** [app/api/agent/ingest/route.ts](../../app/api/agent/ingest/route.ts) is the only `LogEventClaude` writer with access to a per-turn `done.stop_reason` — the value is captured in the SSE-driver `for-await` loop and threaded into the `finally`-block `logEvent` call. The omit-when-undefined spread (`...(lastStopReason !== undefined ? { stop_reason: lastStopReason } : {})`) prevents the NDJSON line from carrying a `"stop_reason"` key when the stream threw before any `done` event landed (matches the existing `tool_iterations`/`streaming` omission discipline).
+
+---
+
+## Amendment 2026-05-30 — Fixture-recording tee on `logEvent`
+
+Closes [docs/BACKLOG.md](../BACKLOG.md):94 ("Fixture-recording hook on `logEvent`"). Foundation slice — ships the hook only; no consumer wiring (a future M2a test/replay surface will call `enableFixtureRecording` from a vitest setup file or a per-test bootstrap).
+
+**What ships.** `lib/log.ts` gains a module-level `fixturePath: string | null` (null by default) plus two exports:
+
+```ts
+export function enableFixtureRecording(path: string): void;  // throws if NODE_ENV=production
+export function disableFixtureRecording(): void;
+```
+
+When `fixturePath` is non-null, every `logEvent` call appends its formatted NDJSON line to `path` via `fs.appendFileSync` IN ADDITION to writing it to the primary `sink`. The tee fires AFTER the sink call inside an independent try/catch; fs errors are swallowed under the same observability-never-breaks-the-API invariant that already governs the sink call.
+
+**Design decisions.**
+
+1. **Tee captures what the sink received, including the degraded line.** When `JSON.stringify` fails (e.g. circular structure smuggled into `error` via `as any`), the helper's existing fallback emits a minimal `{"ts":..,"kind":..,"status":"error","error":"log serialization failed"}` line. The tee writes that line to the fixture file too. Recording fidelity is the goal — a replay tool wants the actual wire output, not a "correct" reconstruction of what should have been emitted. A negative-assertion test (`tees the degraded line on JSON.stringify failure`) pins this contract.
+
+2. **Tee fires AFTER the primary sink, regardless of sink outcome.** The two writes use independent try/catches. A sink throw does not skip the recording; a recording-fs throw does not affect the sink path. This is symmetric: both are observability sites that must NOT block the API call. The ordering (sink first, then tee) is documented but not load-bearing — neither write depends on the other's success.
+
+3. **Secret hygiene inherits — no new redaction.** The redact-then-truncate pass at `lib/log.ts:331-334` runs BEFORE the line is formatted, so both the sink and the tee see the post-redaction line. The tee adds NO new redaction. Callers MUST treat fixture files as production log output for hygiene purposes — the redaction floor is best-effort per the original ADR (`:65`), and a filesystem-persisted credential is higher blast radius than ephemeral stdout. `.gitignore` adds `*.ndjson` and `fixtures/` patterns by default to close the accidental-commit surface; the JSDoc on `enableFixtureRecording` and on the `fixturePath` module variable both warn explicitly.
+
+4. **Production guard — throws on `NODE_ENV=production`.** `appendFileSync` opens, writes, fsyncs (depending on flags), and closes per call. Under a hot route this measurably extends p99 latency on every observed request. The hook is a dev/test tool only; the guard refuses to enable in production with a one-line throw rather than silently degrading prod performance. No allow-prod escape hatch — keep simple; revisit if a production-recording use case actually emerges.
+
+5. **No `maybeEnableFromEnv` helper.** Earlier draft exported an env-var-auto-enable helper; dropped per Step 7b review as unnecessary surface area. Callers write `if (process.env.LOG_FIXTURE_RECORD) enableFixtureRecording(process.env.LOG_FIXTURE_RECORD)` in two lines; centralizing the env-var name in a helper would just create drift surface between the helper and any caller that wants a different env-var name. The env-var convention `LOG_FIXTURE_RECORD` is documented in the `enableFixtureRecording` JSDoc.
+
+6. **Tightens the Node-runtime contract.** The original ADR (`:59`) documents `lib/log.ts` as Node-only, with the runtime check at `lib/log.ts:289` providing silent degradation on edge (`process.stdout` unavailable). This amendment adds a top-level `import { appendFileSync } from "node:fs"` — the module's first Node-only top-level import. On any edge runtime that build-checks `node:fs` reachability, the import would fail at build time. Verified at amendment-time that zero files in the repo declare `runtime = "edge"` and all six production callers of `lib/log.ts` run on Node; the tightening is currently vacuous. **Contract update:** as of this amendment, `lib/log.ts` is Node-only at the IMPORT level, not just at the runtime level. A future edge route author cannot rely on silent degradation reaching this file.
+
+7. **Pure NDJSON, no header.** The file format is the same NDJSON wire format the sink emits — line-terminated with `\n`, one event per line, no header line, no schema-version preamble. A future replay tool will identify the schema by inspecting the `kind` discriminant and the field set; if a schema version is needed it lives in the `LogEvent` union type, not as a fixture-file header. Pinned here so a future "add a header line for version tracking" PR has a stated rejection to argue against.
+
+8. **Path posture — no traversal restriction.** `enableFixtureRecording("../../etc/passwd-ish")` is allowed; the hook is a dev/test tool only. Documented in the JSDoc rather than enforced via a path-validation pass.
+
+9. **Idempotence.** Re-calling `enableFixtureRecording(path)` replaces `fixturePath`; the prior path receives no further writes. Documented + tested. `appendFileSync` opens + closes on every call so there is no fd to leak on re-point.
+
+**Test coverage.** [lib/log.test.ts](../../lib/log.test.ts) gains 11 cases in a dedicated `describe("logEvent — fixture-recording tee", …)` block:
+
+- enable → write → file contains the NDJSON line (byte-for-byte equal to the sink-received line)
+- append mode (two events → two lines)
+- never-enabled negative assertion (file does not exist)
+- disable stops subsequent writes
+- re-enable to a new path: old path receives no further writes
+- composes with `defaultSink` (`vi.spyOn(process.stdout, "write")`)
+- composes with `setLogSink` (swapped capture sink)
+- fs error swallowed (unwritable path; primary sink still fires)
+- degraded line on `JSON.stringify` failure is teed (recording fidelity)
+- `NODE_ENV=production` throws
+- `NODE_ENV=test` / unset allows
+
+`afterEach` is block-level (not added to the file-level `resetLogSink` block), orthogonal-state principle.
+
+**No consumer wiring this slice.** The hook sits ready. The first replay/fixture-consumer test will add the env-var wiring at the appropriate boundary (vitest setup, per-test boot, or a route-handler bootstrap), and at that point any decision about per-route or per-call-site recording will be made in context. Holding the line on "hook only, no consumer" keeps the foundation PR focused and matches the BACKLOG entry's literal scope ("just needs an env-gated tee wrapper").
