@@ -81,3 +81,13 @@ Runs on every `pull_request: opened | reopened | edited` from this-repo branches
 - A fifth PR-title failure of any shape → re-open this ADR; do not patch with prose.
 - `pr-title.yml` allowlist changes without `commitlint.config.cjs` matching → add a CI check that diffs the two.
 - The Layer 2 normalizer makes an unintended rewrite → narrow its scope rather than disable it.
+
+## Amendment 2026-05-25 — `gh pr merge` sibling floor
+
+A second `PreToolUse` Bash hook ships alongside the title precheck: `scripts/hook-gh-pr-merge-block.mjs` blocks any `gh pr merge` invocation — including `--auto` — with exit 2. Same architecture as the create-side floor (segment isolation via duplicated `splitShellSegments` + anchored `^gh ... pr ... merge` regex after env-var stripping), tested via the same vitest stdin-payload pattern at `tests/hook-gh-pr-merge-block.test.ts`.
+
+Why a sibling rather than an extension of this ADR's three-layer model: the merge-side rule has no server-side or normalizer counterpart — it's purely a client-side discipline gate (the user's Merge click is the gate; GitHub doesn't need help enforcing it). Only Layer 1 (the `PreToolUse` hook) applies. Codifying the recurrence (PR #35 auto-merge, 2026-05-16) and the prose rule (`WORKFLOW.md` "Claude never merges its own PRs") here keeps the architectural breadcrumb in one place rather than splintering into a fresh ADR for one hook.
+
+Known bypass classes (consistent with the create-side hook): `bash -c "gh pr merge ..."`, `$(gh pr merge ...)`, backtick command substitution. These are out of scope; the floor is best-effort against accidental direct invocation.
+
+If a 3rd `PreToolUse` hook consumer arrives, extract `splitShellSegments` + `stripCommentSegment` to a shared module (currently inline-duplicated with a "keep in sync" comment in both hook scripts).
