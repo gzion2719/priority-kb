@@ -102,3 +102,25 @@ The script's surgical-DELETE approach preserves `required_status_checks.strict=f
 **Residual billing amplifier (consciously deferred).** The post-revert cost-trim wave 1 shipped 2026-05-21 (no-op `python` + `evals` lanes deleted, dependabot grouped). The `e2e` lane (added 2026-05-29 per ADR-0014) now runs in parallel with the `node` lane on every PR — Postgres service + `npm run build` + `next start` subprocess; ~2-3 min/run. Wave 2 trims (security.yml weekly cron, pr-title-workflow merge, e2e gating to `pull_request` only) stay queued in BACKLOG and fire on first observed billing recurrence post-revert. A 7-day billing-delta measurement via `gh api /repos/.../actions/billing/usage` is the empirical trigger.
 
 **Execution gating.** None of §"Revert trigger" conditions (a)/(b)/(c) has fired as of tooling-ship. The script may be run any time per the user's discretion; intended execution moment is "just before starting M2a item 8."
+
+## Amendment 2026-05-25 — Free-plan private-trap: revert blocked
+
+**Discovery.** Same session as the tooling ship: `--apply` was executed end-to-end against the real repo. Step 1 (visibility flip PUBLIC → PRIVATE) succeeded. Step 2 (`DELETE /repos/.../branches/main/protection/enforce_admins`) returned **HTTP 403 — "Upgrade to GitHub Pro or make this repository public to enable this feature."** Subsequent GETs on `/protection` also returned 403. The visibility flip itself had auto-removed the ADR-0002 §Decision protection rules with no API path to restore them on Free + Private.
+
+**Root cause.** GitHub Free does NOT expose the `branches/{branch}/protection` REST API on private personal-account repositories. The §Decision payload assumed protection would remain API-managed across the public ↔ private boundary — false on Free. Documented by GitHub at the same 403 message URL.
+
+**Immediate recovery.** Repo flipped back to PUBLIC via `gh repo edit ... --visibility public --accept-visibility-change-consequences`; protection re-applied verbatim from the §Decision JSON payload (`gh api -X PUT .../branches/{main,dev}/protection --input <payload>`). Post-recovery state matches §Decision exactly: `strict=false`, 3 contexts, `enforce_admins=true`, force-push + deletion disabled on both branches. Net session effect: zero state change to the repo, one important finding captured.
+
+**Revised revert decision.** Stay PUBLIC until one of:
+- **(i)** GitHub Pro is purchased (~$4/month) — restores private-repo branch-protection API access; revert tooling works as designed.
+- **(ii)** Cost-trim wave 2 + e2e-lane gating drops public-window CI consumption below the cap with margin — revert no longer needed.
+- **(iii)** M2a item 8 forces the hand; user accepts unmanaged protection on private (mechanical PreToolUse hooks become the *only* floor) and runs `npm run revert:private -- --apply --i-accept-free-plan-trap`.
+
+The original §"Revert trigger" (a)/(b)/(c) is amended to require ALSO satisfying one of (i)/(ii)/(iii) before the revert fires.
+
+**Script hardening (same fix PR).** `scripts/revert-to-private.mjs` gained `detectFreePlanPrivateTrap({planName, visibility})` precondition check that runs BEFORE the visibility flip. Reads `gh api user --jq .plan.name`; aborts with exit 1 + actionable message when plan is Free and visibility is PUBLIC. Bypass flag `--i-accept-free-plan-trap` exists for option (iii) above. Stub via `REVERT_STUB_USER_PLAN_NAME` for tests.
+
+**Cross-refs.**
+- ADR-0002 §"Branch protection" — the protection-rules contract that this finding shows is unenforceable via API on Free + Private.
+- BACKLOG "Post-revert: `e2e` CI lane billing watch" — wave-2 trim queued; relevant to option (ii).
+- The `scripts/check-repo-public-banner.mjs` warning remains accurate — public window persists indefinitely until one of (i)/(ii)/(iii) is satisfied.
