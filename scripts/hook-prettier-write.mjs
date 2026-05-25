@@ -105,7 +105,28 @@ if (!isInsideRepoRoot(absPath)) {
 // re-introduce quoting concerns on a path whose root contains a space
 // (the OneDrive root). Direct-node invocation mirrors the sibling hook
 // at scripts/hook-gh-pr-create-precheck.mjs:139.
-const prettierBin = resolve(repoRoot, "node_modules/prettier/bin/prettier.cjs");
+//
+// Test-only overrides (BOTH clearly suffixed `_FOR_TESTS`):
+//   • PRETTIER_HOOK_BIN_FOR_TESTS — substitute the prettier bin path,
+//     so tests/hook-prettier-write.test.ts can point at a hang stub to
+//     drive the ETIMEDOUT branch below without monkey-patching
+//     node_modules.
+//   • PRETTIER_HOOK_TIMEOUT_MS_FOR_TESTS — substitute the 10_000ms
+//     spawnSync timeout, so the ETIMEDOUT test runs in ~250ms instead
+//     of waiting 10s. Parsed defensively: NaN / non-positive / missing
+//     all fall back to the 10s default so a typo in the env var name
+//     can't silently drop the timeout (which is exactly the bug class
+//     the test exists to catch).
+const prettierBin =
+  process.env.PRETTIER_HOOK_BIN_FOR_TESTS ??
+  resolve(repoRoot, "node_modules/prettier/bin/prettier.cjs");
+
+const timeoutOverrideRaw = process.env.PRETTIER_HOOK_TIMEOUT_MS_FOR_TESTS;
+const timeoutOverrideParsed = timeoutOverrideRaw ? Number(timeoutOverrideRaw) : NaN;
+const timeoutMs =
+  Number.isFinite(timeoutOverrideParsed) && timeoutOverrideParsed > 0
+    ? timeoutOverrideParsed
+    : 10_000;
 if (!existsSync(prettierBin)) {
   // No local prettier (e.g., a freshly-cut worktree without `npm install`
   // yet). Best-effort: log once and exit 0; the gate will catch any
@@ -117,7 +138,7 @@ if (!existsSync(prettierBin)) {
 const result = spawnSync(process.execPath, [prettierBin, "--write", "--ignore-unknown", absPath], {
   cwd: repoRoot,
   encoding: "utf8",
-  timeout: 10_000,
+  timeout: timeoutMs,
 });
 
 const relPath = relative(repoRoot, absPath) || absPath;
@@ -128,7 +149,7 @@ const relPath = relative(repoRoot, absPath) || absPath;
 // non-zero exit from prettier itself (parse failure, internal error).
 if (result.error) {
   if (result.error.code === "ETIMEDOUT") {
-    log(`timeout (10s) — skipped ${relPath}`);
+    log(`timeout (${timeoutMs / 1000}s) — skipped ${relPath}`);
   } else {
     log(`spawn-error ${relPath}: ${result.error.code || result.error.message}`);
   }

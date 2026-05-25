@@ -9,11 +9,15 @@ const repoRoot = resolve(__dirname, "..");
 const hook = resolve(repoRoot, "scripts/hook-prettier-write.mjs");
 const prettierBin = resolve(repoRoot, "node_modules/prettier/bin/prettier.cjs");
 
-function runHook(payload: Record<string, unknown>): { code: number; stderr: string } {
+function runHook(
+  payload: Record<string, unknown>,
+  envExtras?: Record<string, string>,
+): { code: number; stderr: string } {
   const r = spawnSync(process.execPath, [hook], {
     cwd: repoRoot,
     input: JSON.stringify(payload),
     encoding: "utf8",
+    env: envExtras ? { ...process.env, ...envExtras } : process.env,
   });
   return { code: r.status ?? -1, stderr: r.stderr ?? "" };
 }
@@ -216,4 +220,81 @@ describe("hook-prettier-write — failure paths", () => {
     });
     expect(r.status).toBe(0);
   });
+});
+
+describe("hook-prettier-write — ETIMEDOUT branch (BACKLOG mechanical-floor)", () => {
+  // The hook's `result.error.code === "ETIMEDOUT"` branch at
+  // scripts/hook-prettier-write.mjs guards against a prettier child that
+  // hangs past the 10s spawnSync timeout. Without these tests, the
+  // branch is dead code in the test suite: a future regression that
+  // drops `timeout: <ms>` (silently disables the timeout) or breaks the
+  // `ETIMEDOUT` check (silently routes to the generic spawn-error log)
+  // would ship green. Drive the branch with a hang stub + a 200ms
+  // timeout override; assert the log message AND the always-exit-0
+  // contract.
+  //
+  // Failure-mode diagnosis: if vitest itself times out on these tests
+  // (rather than the expect() failing), the production `timeout:`
+  // option was likely dropped — vitest's per-test cap catches the
+  // never-returns-spawnSync. See per-test `{ timeout: 3000 }` below.
+  const hangStub = resolve(repoRoot, "tests/fixtures/hang-prettier.mjs");
+  const scratchDir = resolve(repoRoot, "tmp-hook-test-timeout");
+  const scratchFile = join(scratchDir, "sample.js");
+
+  beforeAll(() => {
+    mkdirSync(scratchDir, { recursive: true });
+  });
+
+  afterAll(() => {
+    rmSync(scratchDir, { recursive: true, force: true });
+  });
+
+  it(
+    "logs `timeout (0.2s) — skipped` when prettier bin hangs past the configured timeout",
+    () => {
+      writeFileSync(scratchFile, "const x=1;\n", "utf8");
+      const r = runHook(
+        { tool_name: "Write", tool_input: { file_path: scratchFile } },
+        {
+          PRETTIER_HOOK_BIN_FOR_TESTS: hangStub,
+          PRETTIER_HOOK_TIMEOUT_MS_FOR_TESTS: "200",
+        },
+      );
+      // Exact-decimal regex covers BOTH "ETIMEDOUT branch fires"
+      // (vs falling through to the generic spawn-error log) AND "log
+      // message reads the actual timeout, not hardcoded 10s". A future
+      // regression that hardcodes any specific value back into the
+      // log will fail this assertion.
+      expect(r.stderr).toMatch(/\[hook-prettier\] timeout \(0\.2s\) — skipped/);
+      // Always-exit-0 contract: hook MUST NOT propagate a non-zero
+      // exit even when prettier was killed mid-spawn.
+      expect(r.code).toBe(0);
+    },
+    { timeout: 3000 },
+  );
+
+  it(
+    "falls back to 10s default when PRETTIER_HOOK_TIMEOUT_MS_FOR_TESTS is malformed (no silent NaN timeout)",
+    () => {
+      // The most insidious failure: a future refactor that drops the
+      // `Number.isFinite() && > 0` guard would let `Number("abc") = NaN`
+      // pass through to spawnSync, which silently drops the timeout
+      // option — regressing to no-timeout protection. Verify the
+      // parser rejects garbage by running against a real (non-hanging)
+      // prettier with the malformed override: the hook completes
+      // silently on the happy path, proving the parser produced a
+      // valid timeout (not NaN) AND that the default was used.
+      writeFileSync(scratchFile, "const x=1;\n", "utf8");
+      const r = runHook(
+        { tool_name: "Write", tool_input: { file_path: scratchFile } },
+        { PRETTIER_HOOK_TIMEOUT_MS_FOR_TESTS: "abc" },
+      );
+      expect(r.code).toBe(0);
+      // If the parser fell back to default 10s AND prettier ran, the
+      // hook stays silent (happy-path contract). Either an error log
+      // or a non-zero exit would indicate parser leak.
+      expect(r.stderr).toBe("");
+    },
+    { timeout: 15000 },
+  );
 });
