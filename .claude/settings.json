@@ -19,6 +19,10 @@
           {
             "type": "command",
             "command": "node scripts/hook-gh-pr-create-precheck.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node scripts/hook-gh-pr-merge-block.mjs"
           }
         ]
       }
