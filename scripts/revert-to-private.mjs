@@ -129,6 +129,107 @@ function readCurrentState() {
   return { visibility, branches };
 }
 
+/**
+ * Detects the GitHub-Free-plan + private-repo branch-protection trap.
+ *
+ * GitHub Free does NOT expose the branches/{branch}/protection REST API on
+ * private personal-account repositories — GET and DELETE both return 403
+ * "Upgrade to GitHub Pro or make this repository public to enable this
+ * feature." Flipping a public repo to private under Free **wipes existing
+ * protection rules** with no way to re-apply via API.
+ *
+ * If we detect this combination at script-time, abort BEFORE the visibility
+ * flip. Discovered the hard way 2026-05-25; see ADR-0011 Amendment.
+ *
+ * Pure function — caller supplies `planName` (`gh api user --jq .plan.name`,
+ * may be null when the token lacks the `read:user` scope), `accountType`
+ * (`gh api user --jq .type` → "User"|"Organization"), and `visibility`.
+ * Returns null when safe; returns an Error-shaped object when the operation
+ * would trap the user OR when we cannot confirm it would not.
+ *
+ * Conservative default: unknown plan + personal account + PUBLIC → trap.
+ * Orgs and known Pro/Team/Enterprise plans proceed clean.
+ *
+ * @param {{planName: string|null, accountType: string|null, visibility: "PUBLIC"|"PRIVATE"}} input
+ * @returns {{trap: true, reason: "free-confirmed"|"plan-unknown-personal", message: string}|null}
+ */
+export function detectFreePlanPrivateTrap({ planName, accountType, visibility }) {
+  if (visibility !== "PUBLIC") return null;
+  const isFree = typeof planName === "string" && planName.toLowerCase() === "free";
+  const isOrg = accountType === "Organization";
+  const planKnownSafe =
+    typeof planName === "string" && ["pro", "team", "enterprise"].includes(planName.toLowerCase());
+
+  if (isFree) {
+    return {
+      trap: true,
+      reason: "free-confirmed",
+      message: [
+        "GitHub Free + flip-to-private would WIPE branch protection.",
+        "",
+        "GitHub Free does not expose the branches/.../protection REST API on",
+        "private personal-account repos. Flipping this repo to PRIVATE will",
+        "auto-remove the ADR-0002 §Decision protection rules with no API path",
+        "to restore them. The mechanical hooks (hook-gh-pr-create-precheck,",
+        "hook-gh-pr-merge-block) would become the ONLY floor.",
+        "",
+        "Options:",
+        "  1. Stay PUBLIC (the cost-trim wave 1 already shipped 2026-05-21,",
+        "     and wave 2 trims are queued in BACKLOG).",
+        "  2. Upgrade to GitHub Pro (~$4/month), then re-run this script.",
+        "  3. Accept unmanaged protection on private + only-mechanical-hooks-",
+        "     as-floor, then bypass this check with --i-accept-free-plan-trap.",
+        "",
+        "See ADR-0011 Amendment 2026-05-25 — Free-plan private trap.",
+      ].join("\n"),
+    };
+  }
+
+  if (!planKnownSafe && !isOrg) {
+    return {
+      trap: true,
+      reason: "plan-unknown-personal",
+      message: [
+        "Cannot confirm GitHub plan tier — refusing to flip a personal repo to PRIVATE.",
+        "",
+        "`gh api user --jq .plan.name` returned no plan (token likely lacks the",
+        "`read:user` scope). GitHub Free wipes private-repo branch protection",
+        "irreversibly, so this script refuses to proceed without confirming you",
+        "are on Pro+.",
+        "",
+        "Options:",
+        "  1. Refresh gh scope and retry:",
+        "       gh auth refresh -s read:user",
+        "       npm run revert:private -- --apply",
+        "  2. If you know you are on Pro/Team/Enterprise, bypass this check:",
+        "       npm run revert:private -- --apply --i-accept-free-plan-trap",
+        "  3. Stay PUBLIC.",
+        "",
+        "See ADR-0011 Amendment 2026-05-25 — Free-plan private trap.",
+      ].join("\n"),
+    };
+  }
+
+  return null;
+}
+
+function readUserContext() {
+  const planStub = process.env.REVERT_STUB_USER_PLAN_NAME;
+  const typeStub = process.env.REVERT_STUB_USER_ACCOUNT_TYPE;
+  if (planStub !== undefined || typeStub !== undefined) {
+    return {
+      planName: planStub !== undefined ? planStub || null : null,
+      accountType: typeStub !== undefined ? typeStub || null : null,
+    };
+  }
+  const planR = runGh(["api", "user", "--jq", ".plan.name"], { allowFailure: true });
+  const typeR = runGh(["api", "user", "--jq", ".type"], { allowFailure: true });
+  return {
+    planName: planR.ok ? planR.stdout.trim() || null : null,
+    accountType: typeR.ok ? typeR.stdout.trim() || null : null,
+  };
+}
+
 function preflight() {
   const v = runGh(["--version"], { allowFailure: true });
   if (!v.ok) {
@@ -256,6 +357,7 @@ function writeExecutedAmendment({ state, forks }) {
 
 async function main(argv) {
   const apply = argv.includes("--apply");
+  const bypassFreeTrap = argv.includes("--i-accept-free-plan-trap");
   console.error(`revert-to-private (${apply ? "APPLY" : "DRY-RUN"})`);
   console.error("");
   preflight();
@@ -271,6 +373,28 @@ async function main(argv) {
       console.error(
         `  ${branch}: enforce_admins=${b.enforce_admins} strict=${b.strict} contexts=${b.contexts.length}`,
       );
+    }
+  }
+  console.error("");
+
+  const { planName, accountType } = readUserContext();
+  console.error(`  account type: ${accountType ?? "(unknown)"}  plan: ${planName ?? "(unknown)"}`);
+  const trap = detectFreePlanPrivateTrap({
+    planName,
+    accountType,
+    visibility: currentState.visibility,
+  });
+  if (trap) {
+    if (bypassFreeTrap) {
+      console.error("");
+      console.error("⚠️  Free-plan private-trap bypass acknowledged (--i-accept-free-plan-trap).");
+      console.error("    Proceeding; branch protection will be wiped and unrecoverable via API.");
+    } else {
+      console.error("");
+      console.error("✗ ABORTED");
+      console.error("");
+      console.error(trap.message);
+      process.exit(1);
     }
   }
   console.error("");

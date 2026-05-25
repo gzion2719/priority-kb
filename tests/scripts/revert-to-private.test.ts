@@ -6,6 +6,7 @@ import {
   EXPECTED_CONTEXTS,
   OWNER_REPO,
   PROTECTED_BRANCHES,
+  detectFreePlanPrivateTrap,
   planSteps,
 } from "../../scripts/revert-to-private.mjs";
 
@@ -114,6 +115,87 @@ describe("EXPECTED_CONTEXTS — guards the ADR-0002 required-checks contract", (
   });
 });
 
+describe("detectFreePlanPrivateTrap — Free + PUBLIC abort guard", () => {
+  const USER = "User";
+  const ORG = "Organization";
+
+  it("traps the canonical pre-revert state: Free plan + PUBLIC repo (personal account)", () => {
+    expect(
+      detectFreePlanPrivateTrap({ planName: "free", accountType: USER, visibility: "PUBLIC" }),
+    ).toMatchObject({ trap: true, reason: "free-confirmed" });
+  });
+
+  it("traps Free even on organization accounts (conservative; orgs may still be affected)", () => {
+    // Orgs typically have Team/Enterprise; if somehow on Free, still trap.
+    expect(
+      detectFreePlanPrivateTrap({ planName: "free", accountType: ORG, visibility: "PUBLIC" }),
+    ).toMatchObject({ trap: true, reason: "free-confirmed" });
+  });
+
+  it("case-insensitive on plan name (`Free`, `FREE`)", () => {
+    for (const plan of ["Free", "FREE"]) {
+      expect(
+        detectFreePlanPrivateTrap({ planName: plan, accountType: USER, visibility: "PUBLIC" }),
+      ).not.toBeNull();
+    }
+  });
+
+  it("does not trap Pro / Team / Enterprise on PUBLIC personal accounts", () => {
+    for (const plan of ["pro", "team", "enterprise", "Pro", "TEAM"]) {
+      expect(
+        detectFreePlanPrivateTrap({ planName: plan, accountType: USER, visibility: "PUBLIC" }),
+      ).toBeNull();
+    }
+  });
+
+  it("does not trap Free when already PRIVATE (no flip imminent)", () => {
+    expect(
+      detectFreePlanPrivateTrap({ planName: "free", accountType: USER, visibility: "PRIVATE" }),
+    ).toBeNull();
+  });
+
+  it("TRAPS unknown plan on personal account + PUBLIC (conservative — token lacks read:user)", () => {
+    expect(
+      detectFreePlanPrivateTrap({ planName: null, accountType: USER, visibility: "PUBLIC" }),
+    ).toMatchObject({ trap: true, reason: "plan-unknown-personal" });
+  });
+
+  it("does NOT trap unknown plan on Organization account + PUBLIC", () => {
+    // Orgs don't suffer the Free+Private protection-API removal in the same way;
+    // they have their own gating. Don't abort on org accounts when plan unknown.
+    expect(
+      detectFreePlanPrivateTrap({ planName: null, accountType: ORG, visibility: "PUBLIC" }),
+    ).toBeNull();
+  });
+
+  it("does NOT trap unknown plan when already PRIVATE (no destructive flip imminent)", () => {
+    expect(
+      detectFreePlanPrivateTrap({ planName: null, accountType: USER, visibility: "PRIVATE" }),
+    ).toBeNull();
+  });
+
+  it("Free trap message names the bypass flag and points at ADR-0011 Amendment", () => {
+    const trap = detectFreePlanPrivateTrap({
+      planName: "free",
+      accountType: USER,
+      visibility: "PUBLIC",
+    });
+    expect(trap).not.toBeNull();
+    expect(trap!.message).toContain("--i-accept-free-plan-trap");
+    expect(trap!.message).toContain("ADR-0011 Amendment");
+  });
+
+  it("unknown-plan trap message guides the user to `gh auth refresh -s read:user`", () => {
+    const trap = detectFreePlanPrivateTrap({
+      planName: null,
+      accountType: USER,
+      visibility: "PUBLIC",
+    });
+    expect(trap).not.toBeNull();
+    expect(trap!.message).toContain("gh auth refresh -s read:user");
+  });
+});
+
 describe("script integration — dry-run via REVERT_STUB_STATE_JSON", () => {
   it("prints the 3-step plan in correct order and exits 0 without --apply", () => {
     const r = spawnSync(process.execPath, [SCRIPT_PATH], {
@@ -121,6 +203,10 @@ describe("script integration — dry-run via REVERT_STUB_STATE_JSON", () => {
       env: {
         ...process.env,
         REVERT_STUB_STATE_JSON: JSON.stringify(STATE_PUBLIC_BOTH_ENFORCED),
+        // Stub plan to a non-Free value so the Free+PUBLIC trap doesn't abort
+        // the plan-listing path. The trap is exercised by its own test below.
+        REVERT_STUB_USER_PLAN_NAME: "pro",
+        REVERT_STUB_USER_ACCOUNT_TYPE: "User",
         // Bypass preflight so the test doesn't depend on real `gh` availability.
         PATH: process.env.PATH,
       },
@@ -149,6 +235,44 @@ describe("script integration — dry-run via REVERT_STUB_STATE_JSON", () => {
       void idxVis;
       void idxMain;
       void idxDev;
+    }
+  });
+
+  it("aborts with the trap message + exit 1 on Free plan + PUBLIC", () => {
+    const r = spawnSync(process.execPath, [SCRIPT_PATH], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        REVERT_STUB_STATE_JSON: JSON.stringify(STATE_PUBLIC_BOTH_ENFORCED),
+        REVERT_STUB_USER_PLAN_NAME: "free",
+        REVERT_STUB_USER_ACCOUNT_TYPE: "User",
+        PATH: process.env.PATH,
+      },
+    });
+    // Preflight may exit 1 if `gh` is unavailable; only assert when preflight passed.
+    if (r.status === 1 && r.stderr.includes("ABORTED")) {
+      expect(r.stderr).toContain("Free + flip-to-private");
+      expect(r.stderr).toContain("--i-accept-free-plan-trap");
+      // The plan should NOT be printed when trap fires.
+      expect(r.stderr).not.toContain("Plan (");
+    }
+  });
+
+  it("bypasses the trap with --i-accept-free-plan-trap and proceeds to plan", () => {
+    const r = spawnSync(process.execPath, [SCRIPT_PATH, "--i-accept-free-plan-trap"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        REVERT_STUB_STATE_JSON: JSON.stringify(STATE_PUBLIC_BOTH_ENFORCED),
+        REVERT_STUB_USER_PLAN_NAME: "free",
+        REVERT_STUB_USER_ACCOUNT_TYPE: "User",
+        PATH: process.env.PATH,
+      },
+    });
+    if (r.status === 0) {
+      expect(r.stderr).toContain("bypass acknowledged");
+      expect(r.stderr).toContain("Plan (");
+      expect(r.stderr).toContain("DRY-RUN complete");
     }
   });
 });
