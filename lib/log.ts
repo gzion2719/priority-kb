@@ -37,6 +37,8 @@
  * See `docs/adr/0005-log-event-schema.md`.
  */
 
+import { appendFileSync } from "node:fs";
+
 import type { AgentEvent } from "@/lib/agents";
 import type { DegradedReasonCode } from "@/lib/retrieval-degraded";
 import type { CitationValidationOutcome } from "@/lib/retrieval";
@@ -305,6 +307,66 @@ export function resetLogSink(): void {
 }
 
 /**
+ * Optional fixture-recording tee. When non-null, every {@link logEvent} call
+ * appends its formatted NDJSON line to this path IN ADDITION to writing it to
+ * the primary {@link sink}. Per ADR-0005 Amendment 2026-05-30 (BACKLOG:94):
+ *
+ *   - The tee fires AFTER the primary sink call so a sink throw does not
+ *     skip the recording (observability-must-not-break-API invariant
+ *     extends to the recording side).
+ *   - The tee captures the SAME line the sink received — including the
+ *     degraded `"log serialization failed"` minimal line on stringify
+ *     failure. A replay tool wants fidelity to what the sink actually saw.
+ *   - The tee inherits the secret-redaction floor that runs before sink
+ *     formatting; it adds NO new redaction. Callers MUST treat fixture
+ *     files as production log output for hygiene purposes (do not commit;
+ *     `.gitignore` covers `*.ndjson` + `fixtures/` by default).
+ *   - The tee is a no-op until {@link enableFixtureRecording} is called.
+ *   - File format is pure NDJSON, append-mode, no header. Each line is
+ *     terminated with `\n` (matching the sink's wire format).
+ */
+let fixturePath: string | null = null;
+
+/**
+ * Enable the fixture-recording tee. Every subsequent {@link logEvent} call
+ * appends its NDJSON line to `path` via `fs.appendFileSync` IN ADDITION to
+ * the primary sink. Re-calling replaces the path; the prior path receives
+ * no further writes.
+ *
+ * Env-var convention: callers gate via their own env-var check, e.g.
+ * `if (process.env.LOG_FIXTURE_RECORD) enableFixtureRecording(process.env.LOG_FIXTURE_RECORD)`.
+ * No auto-enable helper is exported — keeps the surface minimal and the
+ * activation explicit.
+ *
+ * **Production guard.** Throws when `process.env.NODE_ENV === "production"`.
+ * `appendFileSync` blocks the event loop per call; enabling this in prod
+ * would extend p99 latency on every observed request. The hook is a
+ * dev/test tool only. The guard is evaluated only at enable time — do not
+ * mutate `NODE_ENV` after enabling and expect the guard to retroactively
+ * disable the tee.
+ *
+ * **Path posture.** No traversal restriction; the helper is dev/test only.
+ * Pass an absolute or `cwd`-relative path as appropriate for the caller.
+ *
+ * @throws Error when `NODE_ENV === "production"`.
+ */
+export function enableFixtureRecording(path: string): void {
+  if (typeof process !== "undefined" && process.env.NODE_ENV === "production") {
+    throw new Error(
+      "enableFixtureRecording: refused in production (NODE_ENV=production); " +
+        "fs.appendFileSync blocks the event loop on every log line. " +
+        "This hook is a dev/test tool only — see ADR-0005 Amendment 2026-05-30.",
+    );
+  }
+  fixturePath = path;
+}
+
+/** Disable the fixture-recording tee. Subsequent calls skip the file write. */
+export function disableFixtureRecording(): void {
+  fixturePath = null;
+}
+
+/**
  * Emit one structured-JSON log line for a Claude or Voyage API call.
  *
  * @throws TypeError if `latency_ms` is not a finite non-negative number,
@@ -350,5 +412,16 @@ export function logEvent(event: LogEvent): void {
     sink(line);
   } catch {
     // Observability must never break the API call path.
+  }
+
+  // Fixture-recording tee (ADR-0005 Amendment 2026-05-30, BACKLOG:94).
+  // Runs after the primary sink so a sink throw does not skip the
+  // recording. fs error swallowed — same invariant as the sink call.
+  if (fixturePath !== null) {
+    try {
+      appendFileSync(fixturePath, line);
+    } catch {
+      // Observability must never break the API call path.
+    }
   }
 }

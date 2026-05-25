@@ -1,6 +1,18 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ERROR_MAX_LEN, logEvent, resetLogSink, setLogSink, type LogEvent } from "@/lib/log";
+import {
+  ERROR_MAX_LEN,
+  disableFixtureRecording,
+  enableFixtureRecording,
+  logEvent,
+  resetLogSink,
+  setLogSink,
+  type LogEvent,
+} from "@/lib/log";
 
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -693,5 +705,212 @@ describe("logEvent — sink injection", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+// ── Fixture-recording tee (ADR-0005 Amendment 2026-05-30; BACKLOG:94) ─────
+//
+// The tee is a no-op until enableFixtureRecording(path) is called. When
+// enabled, every logEvent NDJSON line is also appended to `path` via
+// fs.appendFileSync. Same redaction + serialization pipeline as the sink;
+// fs errors swallowed (observability never breaks the API path).
+describe("logEvent — fixture-recording tee", () => {
+  let tmpDir: string;
+  let fixturePath: string;
+
+  function newFixturePath(): string {
+    return join(tmpDir, `fixture-${Date.now()}-${Math.random().toString(36).slice(2)}.ndjson`);
+  }
+
+  function readLines(p: string): string[] {
+    return readFileSync(p, "utf8").split("\n").filter(Boolean);
+  }
+
+  function basicVoyageEvent(): LogEvent {
+    return {
+      kind: "voyage",
+      model: "voyage-3-large",
+      model_version: "1",
+      latency_ms: 5,
+      cost_usd: null,
+    };
+  }
+
+  // Block-level afterEach — orthogonal to the file-level resetLogSink at
+  // line 21-23. Disable runs FIRST (LIFO), then file cleanup.
+  afterEach(() => {
+    disableFixtureRecording();
+    if (tmpDir) {
+      try {
+        rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
+    vi.unstubAllEnvs();
+  });
+
+  // Set up the tmpdir BEFORE each test runs (the path is built per-test
+  // inside each `it`; this just ensures the holding dir exists).
+  function freshTmpDir(): void {
+    tmpDir = mkdtempSync(join(tmpdir(), "log-fixture-test-"));
+    fixturePath = newFixturePath();
+  }
+
+  it("appends the NDJSON line to the fixture file when enabled", () => {
+    freshTmpDir();
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+    enableFixtureRecording(fixturePath);
+
+    logEvent(basicVoyageEvent());
+
+    expect(lines).toHaveLength(1);
+    const fileLines = readLines(fixturePath);
+    expect(fileLines).toHaveLength(1);
+    // Tee captures EXACTLY what the sink received — byte-for-byte equal.
+    expect(fileLines[0] + "\n").toBe(lines[0]);
+  });
+
+  it("appends two lines for two events (append mode, not truncate)", () => {
+    freshTmpDir();
+    setLogSink(captureLog().writer);
+    enableFixtureRecording(fixturePath);
+
+    logEvent(basicVoyageEvent());
+    logEvent({ ...basicVoyageEvent(), latency_ms: 7 });
+
+    const fileLines = readLines(fixturePath);
+    expect(fileLines).toHaveLength(2);
+    // Second line carries the second event's latency.
+    expect(fileLines[1]).toMatch(/"latency_ms":7/);
+  });
+
+  it("does NOT write to the file when never enabled — negative assertion", () => {
+    freshTmpDir();
+    setLogSink(captureLog().writer);
+
+    logEvent(basicVoyageEvent());
+
+    // File should not exist (enableFixtureRecording was never called).
+    expect(() => readFileSync(fixturePath, "utf8")).toThrow();
+  });
+
+  it("disable stops subsequent writes; the file is unchanged after disable", () => {
+    freshTmpDir();
+    setLogSink(captureLog().writer);
+    enableFixtureRecording(fixturePath);
+
+    logEvent(basicVoyageEvent());
+    const beforeDisable = readFileSync(fixturePath, "utf8");
+
+    disableFixtureRecording();
+    logEvent(basicVoyageEvent());
+
+    const afterDisable = readFileSync(fixturePath, "utf8");
+    expect(afterDisable).toBe(beforeDisable);
+  });
+
+  it("re-enable to a new path: old path receives no further writes", () => {
+    freshTmpDir();
+    const pathA = fixturePath;
+    const pathB = newFixturePath();
+    setLogSink(captureLog().writer);
+
+    enableFixtureRecording(pathA);
+    logEvent(basicVoyageEvent());
+    const beforeReenable = readFileSync(pathA, "utf8");
+
+    enableFixtureRecording(pathB);
+    logEvent(basicVoyageEvent());
+
+    expect(readFileSync(pathA, "utf8")).toBe(beforeReenable);
+    expect(readLines(pathB)).toHaveLength(1);
+  });
+
+  it("composes with the default sink: stdout receives the line AND the file gets it", () => {
+    freshTmpDir();
+    // Do NOT install a capture sink — use defaultSink (process.stdout).
+    const spy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    try {
+      enableFixtureRecording(fixturePath);
+      logEvent(basicVoyageEvent());
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(readLines(fixturePath)).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("composes with setLogSink: the swapped sink fires AND the file gets the line", () => {
+    freshTmpDir();
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+    enableFixtureRecording(fixturePath);
+
+    logEvent(basicVoyageEvent());
+
+    expect(lines).toHaveLength(1);
+    expect(readLines(fixturePath)).toHaveLength(1);
+  });
+
+  it("swallows fs errors — primary sink still receives its line when fixture path is unwritable", () => {
+    // Deliberately skip freshTmpDir — the unwritable path is the point of
+    // this test, and the file-level afterEach `if (tmpDir)` guard tolerates
+    // an undefined tmpDir cleanly.
+    const { lines, writer } = captureLog();
+    setLogSink(writer);
+    enableFixtureRecording("/nonexistent-dir-priorityKB-test/x.ndjson");
+
+    expect(() => logEvent(basicVoyageEvent())).not.toThrow();
+    expect(lines).toHaveLength(1);
+  });
+
+  it("tees the degraded line on JSON.stringify failure (recording fidelity)", () => {
+    freshTmpDir();
+    setLogSink(captureLog().writer);
+    enableFixtureRecording(fixturePath);
+
+    // Smuggle a circular structure via `as unknown` (the type contract
+    // says `error?:string` but we deliberately bypass to drive the
+    // stringify-failure branch at lib/log.ts:337-347).
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+    logEvent({
+      kind: "voyage",
+      model: "voyage-3-large",
+      model_version: "1",
+      latency_ms: 1,
+      cost_usd: null,
+      error: circular as unknown as string,
+    });
+
+    const fileLines = readLines(fixturePath);
+    expect(fileLines).toHaveLength(1);
+    expect(fileLines[0]).toContain('"error":"log serialization failed"');
+  });
+
+  it("refuses to enable when NODE_ENV=production (foot-gun guard)", () => {
+    freshTmpDir();
+    vi.stubEnv("NODE_ENV", "production");
+
+    expect(() => enableFixtureRecording(fixturePath)).toThrow(/refused in production/);
+  });
+
+  it("allows enable when NODE_ENV is any non-production value (test, dev, empty string)", () => {
+    // Three non-prod cases. Empty string is what vi.stubEnv("","") yields
+    // — close enough to "unset" for the guard's `=== "production"` check
+    // without leaning on vitest's undefined-stubbing nuances.
+    freshTmpDir();
+    vi.stubEnv("NODE_ENV", "test");
+    expect(() => enableFixtureRecording(fixturePath)).not.toThrow();
+
+    disableFixtureRecording();
+    vi.stubEnv("NODE_ENV", "development");
+    expect(() => enableFixtureRecording(fixturePath)).not.toThrow();
+
+    disableFixtureRecording();
+    vi.stubEnv("NODE_ENV", "");
+    expect(() => enableFixtureRecording(fixturePath)).not.toThrow();
   });
 });
