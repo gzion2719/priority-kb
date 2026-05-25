@@ -71,6 +71,56 @@ jobs:
       - name: npm audit (advisory)
         run: npm audit --audit-level=high || true
 
+  e2e:
+    name: E2E — page-status assertions (next start subprocess)
+    runs-on: ubuntu-latest
+    # Independent of the `node` job — both fire on the same events in
+    # parallel. e2e flake should not block lint/typecheck/unit-test signal.
+    # ADR-0014 §4 for the runtime decision.
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/priority_kb
+    services:
+      postgres:
+        # Same pinned digest as the `node` job above — bump in lockstep
+        # with docker-compose.yml.
+        image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: priority_kb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d priority_kb"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Apply db/init.sql (bootstrap)
+        run: psql "$DATABASE_URL" -f db/init.sql
+
+      - name: Run migrations
+        run: npm run db:migrate
+
+      # `next start` requires a built .next/ directory. Build once here
+      # so the e2e suite can spawn the server quickly per describe block.
+      - name: Build
+        run: npm run build
+
+      - name: E2E
+        run: npm run e2e
+
   # Python lane removed 2026-05-21 per ADR-0011 BACKLOG cost-trim entry.
   # Reintroduce when ROADMAP M2b line "Python FastAPI worker scaffolded at api/;
   # pyproject.toml activated" lands. The prior block ran an unconditional

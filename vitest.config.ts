@@ -10,7 +10,17 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["**/*.test.ts", "**/*.test.tsx"],
-    exclude: ["**/node_modules/**", "**/.next/**", ".claude/worktrees/**"],
+    // E2E specs (tests/*.e2e.test.ts) are excluded here — they run via
+    // their own config (vitest.e2e.config.ts) under `npm run e2e` because
+    // they spawn a `next start` subprocess + require DATABASE_URL +
+    // require a built .next/ directory. None of that is wanted in the
+    // default unit/integration loop. ADR-0014.
+    exclude: [
+      "**/node_modules/**",
+      "**/.next/**",
+      ".claude/worktrees/**",
+      "tests/**/*.e2e.test.ts",
+    ],
     // Multiple integration test files (tests/ingest.integration.test.ts,
     // tests/retrieval-keyword.integration.test.ts, tests/migration.test.ts) all
     // mutate the same shared Postgres schema and TRUNCATE between tests. Vitest's
