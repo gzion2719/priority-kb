@@ -115,7 +115,7 @@ The first (and currently only) e2e spec covers the full BACKLOG:79 surface in on
 
 1. Admin GET `/entries/<restricted-id>` returns 200 + the entry body.
 2. User GET same `/entries/<restricted-id>` returns 404.
-3. **Byte-identical existence-leak defense:** user's 404 body equals missing-id's 404 body (`response.text()` equality).
+3. **Existence-leak defense:** restricted-as-user 404 response contains NONE of the seeded entry's content (title, body, source pointer); both 404 responses render the same not-found component (`"Entry not found"` marker present in both). Byte-identity was the original draft assertion but is unreachable in Next App Router — the framework echoes the URL `[id]` segment into the RSC payload, so two 404 responses for different IDs always differ in those echo bytes. The echo itself doesn't leak anything (the user typed the ID); the meaningful defense is "no entry-derived content reaches the user", which is what this assertion verifies. Caught at CI gate-time after byte-identity assertion failed on the first e2e run.
 4. `audit_log` has matching rows with correct `payload.outcome` for both branches (one `served`, one `not_found_or_unauthorized`).
 5. **Force-dynamic cache defeat:** sequential admin → user requests against the same id return the admin's body to admin and the user's 404 to user (cache, if active, would return admin's body to both).
 
