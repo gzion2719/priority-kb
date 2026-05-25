@@ -92,3 +92,13 @@ If (c) fires before (a) or (b), re-affirm the public status in an ADR-0011 amend
 - Iron rule #1 (`CLAUDE.md`) — credentials never committed. Preserved unchanged; flip-time audit confirmed compliance.
 - ROADMAP M2a items 3 and 8 — the ingestion paths whose first real-content use is the revert trigger.
 - `scripts/check-repo-public-banner.mjs` — local mechanical reminder.
+
+## Amendment 2026-05-25 — Revert tooling shipped
+
+Revert tooling lives at [scripts/revert-to-private.mjs](../../scripts/revert-to-private.mjs), wired as `npm run revert:private` (dry-run default; `npm run revert:private -- --apply` to execute). Idempotent — re-runs against partial state heal only what's still drifting.
+
+The script's surgical-DELETE approach preserves `required_status_checks.strict=false` (ADR-0002 §"Required-checks `strict` policy" amended 2026-05-20) and the three required contexts (Node — lint, format, types, tests / gitleaks / Validate PR title), then verifies them post-execute. On success, the script appends an `## Amendment — Revert executed` block to this file with timestamp, post-state per branch, and a fork list (`gh api .../forks --jq .[].full_name`). Idempotent on the writeback too (skips if the block is already present).
+
+**Residual billing amplifier (consciously deferred).** The post-revert cost-trim wave 1 shipped 2026-05-21 (no-op `python` + `evals` lanes deleted, dependabot grouped). The `e2e` lane (added 2026-05-29 per ADR-0014) now runs in parallel with the `node` lane on every PR — Postgres service + `npm run build` + `next start` subprocess; ~2-3 min/run. Wave 2 trims (security.yml weekly cron, pr-title-workflow merge, e2e gating to `pull_request` only) stay queued in BACKLOG and fire on first observed billing recurrence post-revert. A 7-day billing-delta measurement via `gh api /repos/.../actions/billing/usage` is the empirical trigger.
+
+**Execution gating.** None of §"Revert trigger" conditions (a)/(b)/(c) has fired as of tooling-ship. The script may be run any time per the user's discretion; intended execution moment is "just before starting M2a item 8."
