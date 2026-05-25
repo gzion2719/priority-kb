@@ -91,3 +91,15 @@ Why a sibling rather than an extension of this ADR's three-layer model: the merg
 Known bypass classes (consistent with the create-side hook): `bash -c "gh pr merge ..."`, `$(gh pr merge ...)`, backtick command substitution. These are out of scope; the floor is best-effort against accidental direct invocation.
 
 If a 3rd `PreToolUse` hook consumer arrives, extract `splitShellSegments` + `stripCommentSegment` to a shared module (currently inline-duplicated with a "keep in sync" comment in both hook scripts).
+
+## Amendment 2026-05-25 — Why `pr-title.yml` and `pr-title-normalize.yml` stay as 2 workflows
+
+Considered (and rejected) during the post-revert CI cost-trim wave 2 evaluation: merging `pr-title.yml` (Layer 3 validate) + `pr-title-normalize.yml` (Layer 2 normalize) into a single workflow with two sequential steps to halve PR-edit runner spawns.
+
+**Not viable. Reason: event-replay dependency.** `amannn/action-semantic-pull-request@v6` reads the title from `github.event.pull_request.title` — the event payload as it was at workflow-start. In the current 2-workflow design, when `pr-title-normalize.yml` calls `gh pr edit --title "..."`, GitHub fires a fresh `pull_request: edited` event that re-fires `pr-title.yml` against the **post-normalize** title. In a hypothetical single-job flow, the validate step would still see the **pre-normalize** title from the workflow-start payload — defeating the entire normalize→validate chain.
+
+**Concrete failure mode** the merge would re-introduce: a PR opened via the GitHub UI with title `Dev` (the canonical PR #18/#20/#25 failure) would normalize to `dev` correctly via `gh pr edit`, but the validate step in the same job would still see `Dev` and fail — putting us back at the four-incident pattern this ADR exists to prevent.
+
+The 2-workflow design is therefore load-bearing for Layer 2 + Layer 3 separability. Keep both files; document the constraint here so a future cost-trim session doesn't re-attempt the merge.
+
+**If a single-workflow design ever becomes viable** (e.g., `amannn/action-semantic-pull-request` accepts a custom title input, OR we switch validate to a custom step that re-fetches the title from the API), revisit. Until then: 2 files, 1 runner per workflow, no merging.

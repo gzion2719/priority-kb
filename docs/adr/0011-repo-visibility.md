@@ -120,6 +120,24 @@ The original §"Revert trigger" (a)/(b)/(c) is amended to require ALSO satisfyin
 
 **Script hardening (same fix PR).** `scripts/revert-to-private.mjs` gained `detectFreePlanPrivateTrap({planName, visibility})` precondition check that runs BEFORE the visibility flip. Reads `gh api user --jq .plan.name`; aborts with exit 1 + actionable message when plan is Free and visibility is PUBLIC. Bypass flag `--i-accept-free-plan-trap` exists for option (iii) above. Stub via `REVERT_STUB_USER_PLAN_NAME` for tests.
 
+## Amendment 2026-05-25 — Wave-2 trim (partial): `ci.yml` push-trigger
+
+Materially closes option (ii) of the revised revert decision above. `.github/workflows/ci.yml` `on.push.branches: [main, dev]` → `[main]` — drops the redundant post-merge-to-dev CI cycle (both `node` + `e2e` jobs).
+
+**Rationale.** Every feature PR targeting `dev` already fires the `pull_request` trigger. We use merge commits (ADR-0002 §"Merge mechanics") so post-merge state == PR state + merge commit (no code change). The post-merge push-to-dev run was always redundant. `main` stays for post-release-merge confirmation on the deployable line.
+
+**Concurrency note (corrected from earlier draft).** The `concurrency: ci-${{ github.ref }} cancel-in-progress: true` directive does NOT auto-cancel push-to-dev runs when the next PR opens — PR events use `refs/pull/N/merge` as their ref, push-to-dev uses `refs/heads/dev`, different groups, no cross-group cancellation. The trim's actual savings are therefore *higher* than the initial estimate that assumed partial cancellation.
+
+**Required-checks interaction.** ADR-0011 §Decision pins three required contexts on `dev` (Node CI, gitleaks, Validate PR title). These gate **PR merges** (the `pull_request` event surface), not push events. Dropping `push: [dev]` does NOT affect the required_status_checks gate; PRs still fire all three required workflows.
+
+**Why `security.yml` is NOT trimmed in this PR.** `security.yml:49-70` runs gitleaks with `fetch-depth: 0` + full-history scan on push (vs. diff-range only on PR). The full-history scan on push-to-dev catches historical leaks that the PR diff-range can miss (e.g., a leak introduced in a commit on a long-lived branch that gets merged via PR after several base updates — the PR's diff range may not cover the leak's commit). Keep until a separate audit decides the cost-benefit.
+
+**This PR's own merge.** Will fire one last redundant push-to-dev run (because the change isn't in effect at trigger-evaluation time on its own merge). Savings start at the *next* feature-PR merge.
+
+**Verification.** Per verification-layer-matching sub-rule, this is a workflow YAML change; the real gate is the workflow's behavior on the next feature-PR cycle. Inherently merge-then-observe — `act` doesn't model GitHub's trigger evaluation faithfully enough for `on:` block changes.
+
+**Sibling decision (same PR):** merging `pr-title.yml` + `pr-title-normalize.yml` into a single workflow was considered and rejected. Event-replay dependency makes the 2-workflow design load-bearing. See [ADR-0004 Amendment 2026-05-25](0004-pr-title-mechanical-floor.md) for the full reasoning + concrete failure mode.
+
 **Cross-refs.**
 - ADR-0002 §"Branch protection" — the protection-rules contract that this finding shows is unenforceable via API on Free + Private.
 - BACKLOG "Post-revert: `e2e` CI lane billing watch" — wave-2 trim queued; relevant to option (ii).
