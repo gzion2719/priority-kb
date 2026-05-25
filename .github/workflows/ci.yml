@@ -2,7 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    # `dev` deliberately omitted: every PR targeting `dev` already fires
+    # the `pull_request` trigger below, and we use merge commits (ADR-0002
+    # §"Merge mechanics") so post-merge state == PR state + merge commit
+    # (no code change). The post-merge push-to-dev run was always
+    # redundant. `main` stays for post-release-merge confirmation on the
+    # deployable line. See ADR-0011 Amendment 2026-05-25 — wave-2 trim.
+    branches: [main]
   pull_request:
 
 concurrency:
