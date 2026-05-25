@@ -228,4 +228,24 @@ describe("non-negotiable #8 — no live API client imports in lib/embedding.ts",
     expect(src).not.toMatch(/voyageai/);
     expect(src).not.toMatch(/@anthropic-ai/);
   });
+
+  it("positive control: the regex set WOULD catch a synthetic voyageai import", () => {
+    // Guards against regex-rot: if a future edit accidentally weakens the
+    // pattern, the negative-assertion above would silently pass on an empty
+    // file. This positive control proves the regex is the one that triggers.
+    const synthetic = `import { Client } from "voyageai";\n`;
+    expect(synthetic).toMatch(/from\s+["']voyage(ai)?["']/);
+    expect(synthetic).toMatch(/voyageai/);
+  });
+
+  it("positive control: the regex set WOULD catch a synthetic @anthropic-ai/sdk import", () => {
+    const synthetic = `import Anthropic from "@anthropic-ai/sdk";\n`;
+    expect(synthetic).toMatch(/from\s+["']@anthropic[/-]/);
+    expect(synthetic).toMatch(/@anthropic-ai/);
+  });
+
+  it("positive control: the regex set WOULD catch a synthetic openai import", () => {
+    const synthetic = `import OpenAI from "openai";\n`;
+    expect(synthetic).toMatch(/from\s+["']openai["']/);
+  });
 });
