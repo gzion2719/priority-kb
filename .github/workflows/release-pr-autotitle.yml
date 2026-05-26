@@ -7,9 +7,11 @@ name: release-pr-autotitle
 # caused three live merge-gate failures (PR #18, #20, #25).
 #
 # This is the defense-in-depth complement to:
-# - SESSION_PROTOCOL.md Closing Step 5 "Worktree-mode override sub-rule"
-# - SESSION_PROTOCOL.md Closing Step 5 "Tooling-denial fallback sub-rule"
+# - CLOSE_SESSION_PROTOCOL.md Step 5 "Worktree-mode override sub-rule"
+# - CLOSE_SESSION_PROTOCOL.md Step 5 "Tooling-denial fallback sub-rule"
 # - WORKFLOW.md "Worktree commit-handoff rule"
+# (Both closing-side rules were in SESSION_PROTOCOL.md until 2026-05-26;
+# extracted to CLOSE_SESSION_PROTOCOL.md per ADR-0017.)
 #
 # Prose rules tell Claude to open the PR with the right title. This
 # action ensures that if any path (UI, manual gh, a different agent)

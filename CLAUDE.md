@@ -3,7 +3,7 @@
 > **On the first user message of this session, before any other response, you MUST execute the Opening Ritual defined in `SESSION_PROTOCOL.md` (Steps 1 through 7).**
 >
 > Order of operations on every fresh chat in this folder:
-> 1. Read `SESSION_PROTOCOL.md` end-to-end.
+> 1. Read `SESSION_PROTOCOL.md` end-to-end (Opening Ritual + Recurring Hygiene + Python pre-push + ADR Discipline + Session-wide rules). `CLOSE_SESSION_PROTOCOL.md` is read at close-time on farewell, not at open.
 > 2. Read `WORKFLOW.md`.
 > 3. Read the **last 3 entries** of `CHATLOG.md` (newest-first).
 > 4. Read `docs/ROADMAP.md`.
@@ -39,8 +39,10 @@
 
 **Always read first on a new chat:**
 1. This file (`CLAUDE.md`).
-2. `SESSION_PROTOCOL.md` — the strict ritual.
+2. `SESSION_PROTOCOL.md` — opening ritual + recurring hygiene + Python pre-push + ADR discipline + session-wide rules.
 3. `WORKFLOW.md` — chat archetypes, pre-push gate, red flags.
+
+`CLOSE_SESSION_PROTOCOL.md` (closing ritual + Session Score + Worked example) is loaded at close-time on explicit farewell — not at chat-start. Split per [ADR-0017](docs/adr/0017-protocol-split-closing.md) on 2026-05-26.
 
 ---
 
@@ -70,8 +72,8 @@ Every chat must leave the project **measurably better** on two axes:
 2. **How-we-work efficiency** — better protocol, better gates, faster orientation, fewer redos.
 
 This applies fractally — every session, every focus area. It's codified twice in the protocol:
-- **Opening Step 7** (planning leg): the planning self-critique asks "is there a smaller cleaner first increment? are iron rules covered? are there missed verification paths?"
-- **Closing Step 1** (retrospective leg): the closing ritual's first step is a structured retrospective whose OUTPUT is one concrete protocol/rule edit landed *in this same session*.
+- **`SESSION_PROTOCOL.md` Opening Step 7** (planning leg): the planning self-critique asks "is there a smaller cleaner first increment? are iron rules covered? are there missed verification paths?"
+- **`CLOSE_SESSION_PROTOCOL.md` Step 1** (retrospective leg): the closing ritual's first step is a structured retrospective whose OUTPUT is one concrete protocol/rule edit landed *in this same session*.
 
 If a session doesn't produce a concrete improvement, that's a signal, not a free pass.
 
@@ -92,7 +94,8 @@ If a session doesn't produce a concrete improvement, that's a signal, not a free
 ```
 C:\dev\PriorityKB\
 ├── CLAUDE.md                       ← this file
-├── SESSION_PROTOCOL.md             ← opening/closing rituals
+├── SESSION_PROTOCOL.md             ← opening ritual + recurring hygiene + Python pre-push + ADR discipline + session-wide rules
+├── CLOSE_SESSION_PROTOCOL.md       ← closing ritual + Session Score + Worked example (loaded at close-time only; see ADR-0017)
 ├── WORKFLOW.md                     ← chat archetypes, pre-push gate, red flags
 ├── CHATLOG.md                      ← session memory, newest-first
 ├── README.md                       ← vision, structure, mutual agreement

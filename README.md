@@ -37,7 +37,8 @@ See `CLAUDE.md` for the full list. The load-bearing ones:
 ```
 C:\dev\PriorityKB\
 ├── CLAUDE.md                 ← always-read-first
-├── SESSION_PROTOCOL.md       ← strict opening/closing rituals
+├── SESSION_PROTOCOL.md       ← opening ritual + recurring hygiene + Python pre-push + ADR discipline + session-wide rules
+├── CLOSE_SESSION_PROTOCOL.md ← closing ritual + Session Score + Worked example (loaded at close-time only; see ADR-0017)
 ├── WORKFLOW.md               ← chat archetypes, pre-push gate, red flags
 ├── CHATLOG.md                ← session memory (newest-first)
 ├── docs/

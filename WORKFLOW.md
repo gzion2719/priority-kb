@@ -62,7 +62,7 @@ Open a new chat when any of these hit:
 
 ## End-of-session phrase
 
-Any farewell triggers the closing ritual (see `SESSION_PROTOCOL.md` Closing Ritual). Examples:
+Any farewell triggers the closing ritual (see `CLOSE_SESSION_PROTOCOL.md` Closing Ritual). Examples:
 - "thanks for today"
 - "see you tomorrow"
 - "we're done"
@@ -247,7 +247,7 @@ History: this rule was previously *no empty-diff `dev → main` release PR* (cod
 
 **Claude never merges its own PRs.** `gh pr merge` (with or without `--auto`) is the user's click, not Claude's command. Claude runs the commit + push + `gh pr create`; the user clicks Merge in the GitHub UI (or runs the merge themselves). The wait between PR creation and merge is the **gate that forces second-look discipline** — it is the window in which Claude is supposed to think about whether another review fires (cross-ref `SESSION_PROTOCOL.md` Step 7b "Amplified covers review-induced plan changes"). Codified 2026-05-16 after Claude set `gh pr merge 35 --merge --auto`, CI passed in 90s, the auto-merge fired **before** Claude had pushed the code-CR fixes that the second Step 7b pass eventually surfaced — yielding a 2-PR fix slice (PR #36) where one cleaner PR would have sufficed. **Mechanical floor backing this rule:** `scripts/hook-gh-pr-merge-block.mjs` (declared in `.claude/settings.json` alongside the `gh pr create` precheck) intercepts any `gh pr merge` Bash invocation — including `--auto` — and blocks with exit 2. See ADR-0004 Amendment 2026-05-25.
 
-**Tooling-denial fallback (no compare URL for `dev → main`).** When `gh pr create --base main` is denied or fails for any tooling reason, Claude does **not** hand the user a `/compare/main...dev` URL. The fallback: (1) state the denial in one sentence; (2) write the PR body to a stable path (`/tmp/release-pr-body.md` or similar) and tell the user the path; (3) hand the user the exact `gh` one-liner to paste: `gh pr create --base main --head dev --title "release: dev → main (<scope summary>)" --body-file <path>`. Compare URLs never appear in the handoff for the `dev → main` leg. Cross-ref: `SESSION_PROTOCOL.md` Closing Step 5 "Tooling-denial fallback sub-rule"; design rationale in ADR-0004.
+**Tooling-denial fallback (no compare URL for `dev → main`).** When `gh pr create --base main` is denied or fails for any tooling reason, Claude does **not** hand the user a `/compare/main...dev` URL. The fallback: (1) state the denial in one sentence; (2) write the PR body to a stable path (`/tmp/release-pr-body.md` or similar) and tell the user the path; (3) hand the user the exact `gh` one-liner to paste: `gh pr create --base main --head dev --title "release: dev → main (<scope summary>)" --body-file <path>`. Compare URLs never appear in the handoff for the `dev → main` leg. Cross-ref: `CLOSE_SESSION_PROTOCOL.md` Step 5 "Tooling-denial fallback sub-rule"; design rationale in ADR-0004.
 
 **Mechanical floor — runs before Claude even gets to call `gh pr create`.** The Claude Code `PreToolUse` hook (`scripts/hook-gh-pr-create-precheck.mjs`, declared in `.claude/settings.json`) intercepts any `gh pr create` Bash invocation, extracts the `--title`, and runs `scripts/precheck-pr-title.mjs` against `commitlint.config.cjs`. If the title would fail, the tool call is blocked with exit 2. Server-side: `.github/workflows/release-pr-autotitle.yml` rewrites `dev → main` PRs missing the `release:` prefix; `.github/workflows/pr-title-normalize.yml` lowercases leading-uppercase subjects on any PR. Together these are the three-layer mechanical floor in ADR-0004. **If you find yourself manually fixing a title after the hook fires, the precheck did its job — fix the title and retry.**
 
@@ -255,7 +255,7 @@ History: this rule was previously *no empty-diff `dev → main` release PR* (cod
 
 Multi-line commit messages: use `git commit -F -` with a heredoc on Claude's side. **Never give the user a heredoc** — PowerShell parses it as a syntax error.
 
-This rule modifies — does not contradict — Closing Ritual Step 5: see the **Worktree-mode override** sub-rule there for how the handoff message reshapes.
+This rule modifies — does not contradict — `CLOSE_SESSION_PROTOCOL.md` Step 5: see the **Worktree-mode override** sub-rule there for how the handoff message reshapes.
 
 ---
 
