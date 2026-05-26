@@ -21,9 +21,9 @@ This ADR introduces no new types or test-helper signatures. ADR-with-new-types a
 
 Five additions to `SESSION_PROTOCOL.md`:
 
-1. **Closing — Pre-flight step-completeness check** (before Step 1). Enumerate all closing-ritual steps and confirm each will fire before Step 1 starts.
-2. **Closing Step 1 — Session Score** (3-axis 10/10 table + Ceiling line). Adapted deductions for PriorityKB: `npm run check` rounds, Step 7b skip-without-reason, gate-first commit-block shape, Two-PR rule, PR-title precheck self-check, proactive-recap-without-farewell, wasted token clusters.
-3. **Closing Step 1 — Goal-delivery verification sub-rule.** When the session named a measurable goal, Step 1 measures actual delivery with concrete numbers before composing the CHATLOG entry.
+1. **`CLOSE_SESSION_PROTOCOL.md` Pre-flight step-completeness check** (before Step 1). Enumerate all closing-ritual steps and confirm each will fire before Step 1 starts.
+2. **`CLOSE_SESSION_PROTOCOL.md` Step 1 — Session Score** (3-axis 10/10 table + Ceiling line). Adapted deductions for PriorityKB: `npm run check` rounds, `SESSION_PROTOCOL.md` Step 7b skip-without-reason, gate-first commit-block shape, Two-PR rule, PR-title precheck self-check, proactive-recap-without-farewell, wasted token clusters.
+3. **`CLOSE_SESSION_PROTOCOL.md` Step 1 — Goal-delivery verification sub-rule.** When the session named a measurable goal, Step 1 measures actual delivery with concrete numbers before composing the CHATLOG entry.
 4. **Opening Step 7 Verify-before-finalize — Goal-quantification extension.** When the user states a measurable goal, the Step 7 plan quantifies predicted delivery on that metric before presenting for approval. Tucked under the existing Verify-before-finalize sub-rule rather than introduced as a separate named sub-rule (per reviewer M3).
 5. **New bottom section "Session-wide rules" — Context-exhaustion early-close.** When the user flags context length, STOP, no new tool calls, run the full closing ritual as the next action.
 
@@ -43,7 +43,7 @@ The external audit's surface that PriorityKB already covers, often more rigorous
 | Reconstruct-on-drift | Already in Step 5. |
 | Scope-sprawl audit (Step 6) | Already in Step 6. |
 | ADR-with-new-types / Test-helper-signature / ADR-design-document timing | Already in `SESSION_PROTOCOL.md` ADR Discipline section. |
-| Worktree commit-handoff + Tooling-denial fallback + Two-PR rule + PR-title mechanical floor | All in `WORKFLOW.md` and `SESSION_PROTOCOL.md` Closing Step 5; ADR-0004 has the full design. |
+| Worktree commit-handoff + Tooling-denial fallback + Two-PR rule + PR-title mechanical floor | All in `WORKFLOW.md` and `CLOSE_SESSION_PROTOCOL.md` Step 5; ADR-0004 has the full design. |
 | Stacked-PR + Describe-from-source + Secret-redaction | All in `WORKFLOW.md`. |
 | "Claude never merges its own PRs" (no `gh pr merge --auto`) | Codified 2026-05-16 in `WORKFLOW.md` Worktree commit-handoff rule. |
 | Plain-English Closing Step 7 | **Deliberately dropped 2026-05-16** ("not earning its keep" — see CHATLOG and `SESSION_PROTOCOL.md` Step 6 trailing note). Not re-imported. |
@@ -92,7 +92,7 @@ The external audit's surface that PriorityKB already covers, often more rigorous
 
 ## References
 
-- `SESSION_PROTOCOL.md` Closing Pre-flight, Step 1 Session Score, Step 1 Goal-delivery sub-rule, Step 7 Goal-quantification extension, Session-wide rules — Context-exhaustion.
+- `CLOSE_SESSION_PROTOCOL.md` Pre-flight, Step 1 Session Score, Step 1 Goal-delivery sub-rule (closing-leg rules; extracted from `SESSION_PROTOCOL.md` 2026-05-26 per ADR-0017). `SESSION_PROTOCOL.md` Step 7 Goal-quantification extension, Session-wide rules — Context-exhaustion (opening + during-session rules; stay in `SESSION_PROTOCOL.md`).
 - `CLAUDE.md` language convention block (see ADR-0007).
 - `docs/PYTHON_RULES_DRAFT.md` — parked Python rules.
 - `docs/BACKLOG.md` — deferred items.
@@ -111,3 +111,13 @@ ADR-0016 §8 also synthesizes 3 net-new iron-rule mirror rules (CLAUDE.md non-ne
 The DRAFT itself flips to imported-for-archaeology status as part of the same PR; the verbatim text is preserved.
 
 Also lifted: ADR-0006 §Deliberately-not-done deferred the SESSION_PROTOCOL.md three-file split; ADR-0016's Python pre-push section pushes the file from ~42KB to ~55KB, well past the 14KB audit threshold this ADR set. The split is filed to BACKLOG as a near-term protocol-hygiene PR.
+
+## Amendment 2026-05-26 — Closing-ritual extraction (sub-shape (c) of the three-file split)
+
+The §Deliberately-not-done block above deferred the YuTom-style three-file split (navigation stub + Open + Close + Rules) "until the file crosses ~20KB; track in BACKLOG. After this commit's additions, re-measure SESSION_PROTOCOL.md size — if it crosses 14KB, audit the split threshold."
+
+That trigger fired silently before this session and was made explicit by ADR-0016's Python pre-push addition (~42KB → ~60KB the same day). [ADR-0017](0017-protocol-split-closing.md) (2026-05-26) ships **sub-shape (c)** — closing ritual + Worked example extracted to `CLOSE_SESSION_PROTOCOL.md` — as the first concrete step. `SESSION_PROTOCOL.md` goes from 60,370 bytes to 44,936 bytes (−25.6%).
+
+ADR-0017 also codifies the cross-file pointer convention (prose pointer form `OTHER_FILE.md Step N — Section title`, no markdown auto-anchors) that future extractions inherit. Sub-shapes (b) Python pre-push extraction and (a) full 4-file split remain BACKLOG candidates; the residual `SESSION_PROTOCOL.md` at ~44KB is still over the 20KB split-trigger.
+
+Forward-going `SESSION_PROTOCOL.md Closing *` references in this ADR were retargeted to `CLOSE_SESSION_PROTOCOL.md *` in the same PR. Historical CHATLOG entries that reference `SESSION_PROTOCOL.md Closing Step *` stay verbatim per ADR-0017 §2 historical-pointer carve-out.

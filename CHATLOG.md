@@ -1,6 +1,6 @@
 # CHATLOG.md — Priority Knowledge Base
 
-Session memory, **newest-first**. Each entry: max 5 content bullets + `Process improvement` + `Next session`. See `SESSION_PROTOCOL.md` Closing Ritual Step 2 for the exact format and constraints.
+Session memory, **newest-first**. Each entry: max 5 content bullets + `Process improvement` + `Next session`. See `CLOSE_SESSION_PROTOCOL.md` Step 2 for the exact format and constraints (split out of `SESSION_PROTOCOL.md` per ADR-0017 on 2026-05-26; older CHATLOG entries that reference `SESSION_PROTOCOL.md Closing Step *` are historical pointers — see ADR-0017 §2 cross-file pointer convention).
 
 This file is read every chat (last 3 entries, per opening Step 4). Every 10 sessions, the older entries get archived to `docs/CHATLOG_ARCHIVE.md`.
 
