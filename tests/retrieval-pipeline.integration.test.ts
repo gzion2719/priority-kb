@@ -125,13 +125,23 @@ type SeedEntry = {
   title: string;
   body: string;
   sensitivity: "public" | "internal" | "restricted";
+  // Optional so existing call sites in this file that don't care about
+  // hover-preview projection (rows 2-9, β/γ seeds) keep working unchanged.
+  // The row-1 hover-preview assertion at line ~516 requires at least one
+  // candidate to carry non-empty tags AND a distinguishable source_pointer;
+  // seedFourEntries supplies both. Defaults are non-empty so the M4 #6
+  // wire-projection assertion stays non-vacuous on any caller.
+  tags?: string[];
+  source_pointer?: string;
 };
 
 async function insertEntry(pool: Pool, e: SeedEntry): Promise<void> {
+  const tags = e.tags ?? ["seeded-tag"];
+  const sourcePointer = e.source_pointer ?? "src://test";
   await pool.query(
     `INSERT INTO entries (id, title, category, tags, body, source_pointer, last_verified_at, sensitivity)
-     VALUES ($1, $2, 'test', ARRAY[]::text[], $3, 'src://test', now(), $4)`,
-    [e.id, e.title, e.body, e.sensitivity],
+     VALUES ($1, $2, 'test', $3::text[], $4, $5, now(), $6)`,
+    [e.id, e.title, tags, e.body, sourcePointer, e.sensitivity],
   );
 }
 
@@ -167,6 +177,8 @@ async function seedFourEntries(pool: Pool): Promise<void> {
     title: "Priority overview",
     body: "priority workflow",
     sensitivity: "public",
+    tags: ["workflow", "overview"],
+    source_pointer: "src://e1-overview",
   });
   // E2 medium body, single term occurrence — lower cover density than E1.
   await insertEntry(pool, {
@@ -174,6 +186,8 @@ async function seedFourEntries(pool: Pool): Promise<void> {
     title: "Invoice",
     body: "creating an invoice in the priority erp involves several steps",
     sensitivity: "public",
+    tags: ["invoice", "erp"],
+    source_pointer: "src://e2-invoice",
   });
   // E3 long body, multiple term occurrences — repetition lifts ts_rank_cd.
   await insertEntry(pool, {
@@ -181,6 +195,8 @@ async function seedFourEntries(pool: Pool): Promise<void> {
     title: "Docs",
     body: "priority priority documentation references the priority manual",
     sensitivity: "public",
+    tags: ["docs"],
+    source_pointer: "src://e3-docs",
   });
   // E4 long body, single term occurrence near the end.
   await insertEntry(pool, {
@@ -188,6 +204,8 @@ async function seedFourEntries(pool: Pool): Promise<void> {
     title: "Misc",
     body: "see the section about the priority module at the end of the appendix",
     sensitivity: "public",
+    tags: ["misc"],
+    source_pointer: "src://e4-misc",
   });
 
   // ANN distance from query vector vec(0.5) is monotone in |first-slot - 0.5|
