@@ -260,6 +260,75 @@ Audit row schema is pinned in stage E above. Cross-ref ADR-0005 for the per-call
 
 ---
 
+## Amendment 2026-05-26 — Candidates wire-shape extension (M4 #6 citation hover preview)
+
+**Scope:** ROADMAP M4 #6 — citation hover preview on `/query`. Extends the `candidates` SSE event (defined at §2 stage B emission point) with three new fields projected from the same `boundaries[].body` the reranker/synth see. Cross-refs ADR-0013 §2.3 step 4 because the keyword-only entry's `body_snippet` is sourced from `synthesizeKeywordOnlyRepresentative` output (with the title prefix stripped — see §C below).
+
+### §A — Type skeleton (per ADR-with-new-types sub-rule)
+
+```ts
+export type QueryCandidate = {
+  entry_id: string;
+  title: string;
+  category: string;
+  sensitivity: "public" | "internal" | "restricted";
+  last_verified_at: string;          // ISO timestamp
+  body_snippet: string;              // NEW — capped at 240 chars + ellipsis
+  tags: string[];                    // NEW — entry tags verbatim
+  source_pointer: string;            // NEW — entry source verbatim, plain text
+};
+```
+
+### §B — Projection source: `boundaries[]`, not `orderedRows[]`
+
+The orchestrator's `boundaries[]` array (built pre-rerank in [lib/retrieval-pipeline.ts](../../lib/retrieval-pipeline.ts)) carries the EXACT body string the reranker and synth see for each entry — `annBestChunkBodyByEntry` slice for ANN-lane entries; `synthesizeKeywordOnlyRepresentative(title, body)` for keyword-only entries. Re-using this string for the user-facing hover preview means the popup matches what the model scored — no parallel "snippet for the human" vs "snippet for the model" surface to drift.
+
+**Emission timing.** The candidates event is yielded BEFORE the rerank stage (stage C), so `boundaries[i]` and `orderedRows[i]` correspond to the same fused-top-N entry at the same index at emission time. This invariant is preserved by the orchestrator's structure — never reorder `boundaries` after build.
+
+### §C — Title-prefix strip on the keyword-only path
+
+`synthesizeKeywordOnlyRepresentative` prepends `# ${title}\n` to its output. The candidate card already shows the title above the preview, so leaving the prefix in `body_snippet` would double the title in the UI. [lib/snippet.ts](../../lib/snippet.ts) `projectCandidateSnippet` strips the prefix only when an exact-title match is present at the head — a regression that pattern-stripped any leading `# …\n` line would silently delete real h1 markdown from a chunk.
+
+### §D — 240-char cap with grapheme-safe back-off
+
+Cap = 240 chars (~2-4 sentences in either Hebrew or English; ~50 English words or ~60 Hebrew words). Picked by readability for v1; BACKLOG holds a follow-up to size against the real entry-body distribution once M2a #8 lands real Priority entries. The cap is applied with a back-off step (`safeSnippetSlice`) that:
+- Avoids splitting Unicode combining sequences (`\p{M}`) — Hebrew niqqud (U+05B0-U+05C7) are separate code points under NFC; a naïve `slice(0, 240)` could leave an orphan base letter on the edge.
+- Avoids orphaning a UTF-16 high surrogate (0xD800-0xDBFF) at the snippet edge.
+
+### §E — Required, not optional
+
+Unlike `degraded?` / `degraded_reason?` (added incrementally as wire-evolution opt-ins), the three new fields are **required**. Justification:
+- The orchestrator is the only emitter in the repo; there is no out-of-repo consumer and no rolling-window deploy that would see a slice-1 client paired with a slice-3 server (single Next.js app, lockstep deploy).
+- Zero-length sentinels (`""`, `[]`) carry meaning ("no snippet/tags/source available") — optional would force needless `?? ""` / `?? []` handling at every reader.
+- Required-field type-errors on test fixtures are the desired surface-completeness signal per the Reconciliation-grep-completeness sub-rule.
+
+### §F — Iron-rule #6 (sensitivity) — same data plane
+
+The candidate row already passed sensitivity SQL `WHERE` filtering in stage B (and ADR-0013's keyword-lane SQL). Projecting `body_snippet` / `tags` / `source_pointer` onto the wire surfaces no new sensitivity territory beyond what `chunks_only.snippet` already does. Non-negotiables #6 and #7 treat the entry row as the sensitivity unit — there is no finer-grained per-field policy for tags or source_pointer. (Per-field ACLs are post-M5 territory, same line as per-entry ACLs.)
+
+### §G — Audit-row shape unaffected
+
+`audit_log.payload` for `kind:"agent_retrieval"` carries `ann_candidate_ids` / `keyword_candidate_ids` / `fused_ids` / `citation_ids` (UUID arrays) — no wire-event shape. Adding fields to the wire `candidates` event does NOT touch audit columns. Confirmed by grep of `lib/retrieval-audit*.ts`.
+
+### §H — Performance
+
+240 chars × top-N=5 + small tag arrays = ~1.2 KB extra per first SSE frame. Negligible against the ~3.5K-token synth input that follows it. No new audit-write volume (the entry_view audit fires only on click-through to `/entries/[id]`, unchanged).
+
+### §I — Snippet precedence on `chunks_only` terminal
+
+The orchestrator already emits `chunks_only` with per-rank `snippet` strings (post-rerank order). Once `candidates` also carries `body_snippet` (pre-rerank), the page must define precedence:
+
+- `state.status === "chunks_only"` → prefer `chunkSnippets[].snippet` (post-rerank, matches the order the user already sees in chunks_only UX).
+- All other states → use `candidates[].body_snippet`.
+
+Aligned by `entry_id`; chunks_only entries are a subset of candidates by construction. **Fallback when chunks_only path is active but the entry is NOT in `chunkSnippets`** (i.e., the candidate was emitted pre-rerank but didn't survive rerank): use `c.body_snippet`. The card is still rendered (the candidates list — not `chunks_only.entries` — is the visible surface), so the user gets the pre-rerank preview rather than a popup with no content. Trade-off: the snippet won't match chunks_only's rank-specific ordering for that card. Acceptable v1; alternative considered was to hide the popup entirely on this fallback path — rejected as worse UX. Codified in [app/query/page.tsx](../../app/query/page.tsx).
+
+### §J — 2-pass code review expected
+
+Wire-discriminant extension touches strict-equality test assertions across multiple test files. Per SESSION_PROTOCOL.md Step 7b "Amplified covers review-induced plan changes", a fresh code-CR on the implemented diff is the default expectation, not the exception.
+
+---
+
 ## References
 
 - ROADMAP M3 items 1-8 ([docs/ROADMAP.md §M3](../ROADMAP.md)).
