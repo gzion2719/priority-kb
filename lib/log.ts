@@ -265,7 +265,81 @@ export interface LogEventRoute {
   ts?: never;
 }
 
-export type LogEvent = LogEventClaude | LogEventVoyage | LogEventRetrievalPipeline | LogEventRoute;
+/**
+ * Job-queue state-transition event emitted by ADR-0019 M2b #3 callers.
+ * Fires from the Node enqueue path ({@link import("./jobs").enqueueJob}) on
+ * `"enqueued"` transitions; the Python worker (api/jobs.py) writes audit_log
+ * rows directly but does NOT emit this variant in M2b #3 — the Python
+ * LogEvent emitter lands in M2b #4 per ADR-0019 §D7 and ADR-0018. Until
+ * then, `"claimed"`/`"done"`/`"failed"`/`"dead"` transitions are observable
+ * via `audit_log` discriminators (`job_dispatched`/`job_done`/`job_failed`/
+ * `job_dead`), not via this LogEvent variant.
+ *
+ * Intentionally does NOT extend {@link LogEventBase}: there is no vendor
+ * `model`/`model_version` to attribute — the queue is plumbing, not a
+ * vendor call. Same carve-out as {@link LogEventRoute} and
+ * {@link LogEventRetrievalPipeline} (ADR-0005 Amendment 2026-05-27 §6:
+ * "extend `LogEventBase` if and only if exactly one vendor call is being
+ * attributed").
+ *
+ * `cost_usd` is always `null` — no vendor cost. Field is present so the
+ * {@link logEvent} cost-type runtime guard permits the line uniformly
+ * across variants (ADR-0005 Amendment 2026-05-27 §2 + invariant).
+ */
+export interface LogEventJob {
+  kind: "job";
+  /** Logical queue name — `"ingest"`, `"ocr"`, etc. Matches `jobs.queue_name`. */
+  queue_name: string;
+  /** UUID of the row in the `jobs` table. */
+  job_id: string;
+  /**
+   * State-machine transition. `"failed"` is the non-terminal bump-attempts
+   * step; `"dead"` is the terminal max-attempts promotion (audit_log row
+   * shapes differ — `job_failed` vs `job_dead`).
+   */
+  transition: "enqueued" | "claimed" | "done" | "failed" | "dead";
+  /** Current `jobs.attempts` value after the transition committed. */
+  attempts?: number;
+  /**
+   * Short class/category label (e.g., `"OcrTimeout"`, `"NetworkError"`).
+   * Intentionally NOT passed through {@link redactSecrets} — the field is a
+   * caller-controlled stable identifier, not free-text. Callers MUST NOT
+   * stuff a raw error message in here; use a sibling `error?: string` field
+   * if the redact pipeline is needed (deferred to M2b #4 when the worker
+   * surfaces real OCR/network exception text).
+   */
+  error_class?: string;
+  /** Finite, non-negative. Typically the transition's commit latency. */
+  latency_ms: number;
+  /**
+   * Always `null` for this variant — no vendor invoked, no cost. Field is
+   * present so the runtime cost-type guard permits the line uniformly
+   * across variants.
+   */
+  cost_usd: number | null;
+  status?: LogStatus;
+  /**
+   * @internal — `error?: never` blocks callers from passing a free-text
+   * error to this variant. The redact pipeline in {@link logEvent} fires
+   * on `event.error` across all variants; LogEventJob carries the stable
+   * {@link LogEventJob.error_class} label instead, which is NOT
+   * redacted-then-truncated. Free-text exception surface is M2b #4 work.
+   */
+  error?: never;
+  /**
+   * @internal — the helper injects `ts` itself; `ts?: never` blocks
+   * callers from passing one even when widening through a structural
+   * cast.
+   */
+  ts?: never;
+}
+
+export type LogEvent =
+  | LogEventClaude
+  | LogEventVoyage
+  | LogEventRetrievalPipeline
+  | LogEventRoute
+  | LogEventJob;
 
 /** Maximum length of the `error` field after redaction; longer is truncated. */
 export const ERROR_MAX_LEN = 500;
@@ -390,6 +464,13 @@ export function logEvent(event: LogEvent): void {
     ts: new Date().toISOString(),
   };
 
+  // Free-text error surface contract (code-CR M3, 2026-05-26): any new
+  // LogEvent variant that surfaces caller-supplied free text MUST name the
+  // field `error` so this redact+truncate pipeline catches it. A variant
+  // that wants raw passthrough MUST declare `error?: never` AND ship a
+  // sibling field (e.g., {@link LogEventJob.error_class}) for its non-redacted
+  // label. Forgetting `error?: never` on a variant that uses `error` for a
+  // different shape would silently route caller text through redactSecrets.
   if (typeof event.error === "string") {
     const redacted = redactSecrets(event.error);
     payload.error = redacted.length > ERROR_MAX_LEN ? redacted.slice(0, ERROR_MAX_LEN) : redacted;

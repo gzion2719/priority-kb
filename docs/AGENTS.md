@@ -26,6 +26,8 @@ This file is **Step-4b reading**, not Step-4 — only load when the current focu
 - Never writes raw DB; only calls the validated ingestion endpoint.
 - Logs all model calls via the structured observability helper (tokens, latency, cost, prompt hash).
 
+**Media-ingest surface (M2b #3 onward).** When the admin attaches a file (screenshot, PDF, Word doc), the route layer enqueues a job via `lib/jobs.ts` `enqueueJob` rather than calling the parsing/OCR pipeline inline — the Python FastAPI worker (`api/jobs.py`) consumes the queue and produces the entry asynchronously. The enqueue path stays admin-gated (`withAdmin` HOF on the route); the worker is not publicly reachable. The job payload is a control-plane envelope (`entry_id`, `blob_storage_path`, `content_type`, metadata) — never the binary itself — and MUST NOT carry a `sensitivity` snapshot at any depth (iron-rule #6 mechanical floor; the worker re-reads `entries.sensitivity` at chunk-write time, so a payload-borne snapshot would let a stale tier slip through if the entry is re-tagged during queue dwell). See [ADR-0019](adr/0019-job-queue.md).
+
 ---
 
 ## Retrieval Agent
