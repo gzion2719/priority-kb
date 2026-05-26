@@ -27,6 +27,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 
 import type { Role } from "@/lib/auth";
+import type { QueryCandidate } from "@/lib/query-chat-state";
 import {
   EmbeddingUnavailableError,
   STUB_DIMENSIONS,
@@ -124,13 +125,23 @@ type SeedEntry = {
   title: string;
   body: string;
   sensitivity: "public" | "internal" | "restricted";
+  // Optional so existing call sites in this file that don't care about
+  // hover-preview projection (rows 2-9, β/γ seeds) keep working unchanged.
+  // The row-1 hover-preview assertion at line ~516 requires at least one
+  // candidate to carry non-empty tags AND a distinguishable source_pointer;
+  // seedFourEntries supplies both. Defaults are non-empty so the M4 #6
+  // wire-projection assertion stays non-vacuous on any caller.
+  tags?: string[];
+  source_pointer?: string;
 };
 
 async function insertEntry(pool: Pool, e: SeedEntry): Promise<void> {
+  const tags = e.tags ?? ["seeded-tag"];
+  const sourcePointer = e.source_pointer ?? "src://test";
   await pool.query(
     `INSERT INTO entries (id, title, category, tags, body, source_pointer, last_verified_at, sensitivity)
-     VALUES ($1, $2, 'test', ARRAY[]::text[], $3, 'src://test', now(), $4)`,
-    [e.id, e.title, e.body, e.sensitivity],
+     VALUES ($1, $2, 'test', $3::text[], $4, $5, now(), $6)`,
+    [e.id, e.title, tags, e.body, sourcePointer, e.sensitivity],
   );
 }
 
@@ -166,6 +177,8 @@ async function seedFourEntries(pool: Pool): Promise<void> {
     title: "Priority overview",
     body: "priority workflow",
     sensitivity: "public",
+    tags: ["workflow", "overview"],
+    source_pointer: "src://e1-overview",
   });
   // E2 medium body, single term occurrence — lower cover density than E1.
   await insertEntry(pool, {
@@ -173,6 +186,8 @@ async function seedFourEntries(pool: Pool): Promise<void> {
     title: "Invoice",
     body: "creating an invoice in the priority erp involves several steps",
     sensitivity: "public",
+    tags: ["invoice", "erp"],
+    source_pointer: "src://e2-invoice",
   });
   // E3 long body, multiple term occurrences — repetition lifts ts_rank_cd.
   await insertEntry(pool, {
@@ -180,6 +195,8 @@ async function seedFourEntries(pool: Pool): Promise<void> {
     title: "Docs",
     body: "priority priority documentation references the priority manual",
     sensitivity: "public",
+    tags: ["docs"],
+    source_pointer: "src://e3-docs",
   });
   // E4 long body, single term occurrence near the end.
   await insertEntry(pool, {
@@ -187,6 +204,8 @@ async function seedFourEntries(pool: Pool): Promise<void> {
     title: "Misc",
     body: "see the section about the priority module at the end of the appendix",
     sensitivity: "public",
+    tags: ["misc"],
+    source_pointer: "src://e4-misc",
   });
 
   // ANN distance from query vector vec(0.5) is monotone in |first-slot - 0.5|
@@ -491,6 +510,30 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     expect(outcome.tokens.embed).toBe(7);
     expect(outcome.tokens.synth_input).toBe(100);
     expect(outcome.tokens.synth_output).toBe(200);
+
+    // M4 #6 hover-preview projection: candidates event carries the new
+    // body_snippet/tags/source_pointer fields end-to-end (real DB → wire).
+    // Negative-assertion: a regression that dropped any field from the
+    // projection fires on the explicit-content checks below — `typeof ===
+    // "string"` checks alone are vacuous against TypeScript-required
+    // fields, so we also assert at least one candidate carries non-empty
+    // tags + non-empty source_pointer (the seed sets both).
+    const candidates = (events[0] as { kind: "candidates"; entries: QueryCandidate[] }).entries;
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const c of candidates) {
+      // Snippet must NEVER carry the synth-rep title prefix on the wire
+      // (row 1 is ANN+keyword healthy — no keyword-only path here, but
+      // the strip is mechanical and should hold on both paths).
+      expect(c.body_snippet.startsWith("# ")).toBe(false);
+      // 240 cap + ellipsis = 241 max.
+      expect(c.body_snippet.length).toBeLessThanOrEqual(241);
+    }
+    // Explicit-content checks — regression that wired `tags: []` /
+    // `source_pointer: ""` / `body_snippet: ""` for every candidate
+    // would pass the per-candidate loop above but fail here.
+    expect(candidates.some((c) => c.tags.length > 0)).toBe(true);
+    expect(candidates.some((c) => c.source_pointer.length > 0)).toBe(true);
+    expect(candidates.some((c) => c.body_snippet.length > 0)).toBe(true);
   });
 
   // ── Row 2: embed ok + rerank ok + synth FAIL ──────────────────────────────
@@ -659,6 +702,17 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     expect(outcome.tokens.embed).toBe(0);
     expect(outcome.reranked_ids.length).toBeGreaterThan(0);
     expect(outcome.citation_ids).toEqual([]);
+
+    // M4 #6 — keyword-only path stripping the `# title\n` synth-rep prefix
+    // is exercised end-to-end here (real DB, real keyword lane, real
+    // synthesizeKeywordOnlyRepresentative source). Negative-assertion:
+    // a regression that removed the strip would surface every candidate
+    // body_snippet beginning with "# ".
+    const candidates = (events[0] as { kind: "candidates"; entries: QueryCandidate[] }).entries;
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const c of candidates) {
+      expect(c.body_snippet.startsWith("# ")).toBe(false);
+    }
   });
 
   // ── Row 8: embed FAIL + rerank FAIL + synth FAIL ──────────────────────────

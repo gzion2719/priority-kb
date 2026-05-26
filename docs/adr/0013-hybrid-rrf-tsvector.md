@@ -157,6 +157,8 @@ LIMIT 20;
 
 This collapse loses no ANN information that ADR-0012 had access to: stage B's K=50 over-fetch gives the collapse room to surface the top-ranked chunk per distinct entry, and stage C's per-entry rerank input is still the best ANN chunk when available. The keyword-only branch's "title + first 500 tokens" is degraded compared to a real chunk match, but only fires for entries that have no ANN hit at all — by definition, the ANN lane offered nothing better.
 
+> **Cross-reference (added 2026-05-26 with ADR-0012 Amendment 2026-05-26 — M4 #6):** the keyword-only branch's "title + first 500 tokens" synth-rep produced by `synthesizeKeywordOnlyRepresentative` is also the source string for the candidates SSE event's new `body_snippet` field (citation hover preview). [lib/snippet.ts](../../lib/snippet.ts) `projectCandidateSnippet` strips the `# ${title}\n` prefix and caps at 240 chars before wire emission, so the user sees real body content rather than a duplicated title. Snippet-content UX surprise (keyword-only hover shows body opening, not match-context) is noted in BACKLOG.
+
 ### §2.4 — RRF fusion
 
 Reciprocal Rank Fusion (Cormack, Clarke, Buettcher 2009 — *Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods*, SIGIR 2009):

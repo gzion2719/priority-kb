@@ -187,6 +187,14 @@ function replaceUrlQuery(query: string): void {
 export default function QueryPage(): React.ReactNode {
   const [state, setState] = useState<QueryState>(initialQueryState);
   const [input, setInput] = useState<string>("");
+  // Citation hover-preview state (M4 #6). Page-local — intentionally NOT
+  // in QueryState (no persistence value, doesn't survive stream restarts
+  // by design). Hover within a single `<li>` keeps the cursor inside the
+  // trigger element when it moves over the popup, satisfying WCAG 2.1
+  // SC 1.4.13 "hoverable" since onMouseLeave fires only when the cursor
+  // leaves both card AND popup. Touch devices have no hover events;
+  // touch-friendly affordance is queued in BACKLOG (M4 polish).
+  const [hoveredCitationId, setHoveredCitationId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Mount-time restore (BACKLOG:77). Reads URL ?q= for the query and
@@ -342,6 +350,11 @@ export default function QueryPage(): React.ReactNode {
     abortRef.current?.abort();
     setState(reset());
     setInput("");
+    // Clear hover state — if a citation popup is open while the user
+    // clears, the new empty answer section unmounts the card, but the
+    // hovered-id would survive and re-open a stale popup if the same
+    // entry_id appears in the next query. Cheap belt-and-suspenders.
+    setHoveredCitationId(null);
     // Clear URL + sessionStorage so a subsequent reload lands on a
     // fresh /query page, not the prior state. Symmetric inverse of
     // submit() (URL write) + the terminal-state persist effect (storage
@@ -464,56 +477,173 @@ export default function QueryPage(): React.ReactNode {
               <ul
                 style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}
               >
-                {state.candidates.map((c) => (
-                  <li
-                    key={c.entry_id}
-                    style={{
-                      border: "1px solid #555",
-                      borderRadius: "0.375rem",
-                    }}
-                  >
-                    {/*
-                      Whole card is the click target — M3 item 5. The
-                      detail page enforces iron-rule #6 sensitivity
-                      independently (lib/entries.ts), so a card surfaced
-                      to a user-role requester may still 404 on click if
-                      the candidate set ever races ahead of the role
-                      mapping (shouldn't, but the page is the gate).
-                    */}
-                    <Link
-                      href={`/entries/${c.entry_id}`}
-                      data-testid="citation-link"
+                {state.candidates.map((c, idx) => {
+                  const previewId = `citation-preview-${c.entry_id}`;
+                  const isHovered = hoveredCitationId === c.entry_id;
+                  const isLast = idx === state.candidates.length - 1;
+                  // Snippet precedence:
+                  //   - `chunks_only` terminal: prefer the per-rank snippet
+                  //     from `chunkSnippets[].snippet` (post-rerank order,
+                  //     matches the rank surface shown by chunks_only UX).
+                  //   - All other states: use `candidates[].body_snippet`
+                  //     (pre-rerank, ADR-0012 emission contract).
+                  //   - Fallback on chunks_only when the entry didn't
+                  //     survive rerank (not in `chunkSnippets`): use the
+                  //     pre-rerank `body_snippet`. INTENTIONAL — the card
+                  //     is still rendered (candidates list is the visible
+                  //     surface, not chunks_only.entries), so the user
+                  //     still gets a preview rather than a popup with no
+                  //     body content. The trade-off is that the hover
+                  //     snippet won't match chunks_only's rank ordering
+                  //     for that specific card; acceptable v1 (cross-ref
+                  //     ADR-0012 Amendment 2026-05-26 §I).
+                  // Aligned by entry_id — chunks_only entries are a subset
+                  // of candidates by construction.
+                  const snippet =
+                    state.status === "chunks_only"
+                      ? (state.chunkSnippets.find((s) => s.entry_id === c.entry_id)?.snippet ??
+                        c.body_snippet)
+                      : c.body_snippet;
+                  return (
+                    <li
+                      key={c.entry_id}
+                      data-testid="citation-card"
+                      onMouseEnter={() => setHoveredCitationId(c.entry_id)}
+                      onMouseLeave={() => setHoveredCitationId(null)}
                       style={{
-                        display: "block",
-                        padding: "0.5rem 0.75rem",
-                        color: "inherit",
-                        textDecoration: "none",
+                        border: "1px solid #555",
+                        borderRadius: "0.375rem",
+                        position: "relative",
                       }}
                     >
-                      <div
-                        style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}
+                      {/*
+                        Whole card is the click target — M3 item 5. The
+                        detail page enforces iron-rule #6 sensitivity
+                        independently (lib/entries.ts), so a card surfaced
+                        to a user-role requester may still 404 on click if
+                        the candidate set ever races ahead of the role
+                        mapping (shouldn't, but the page is the gate).
+                      */}
+                      <Link
+                        href={`/entries/${c.entry_id}`}
+                        data-testid="citation-link"
+                        aria-describedby={isHovered ? previewId : undefined}
+                        onFocus={() => setHoveredCitationId(c.entry_id)}
+                        onBlur={() => setHoveredCitationId(null)}
+                        style={{
+                          display: "block",
+                          padding: "0.5rem 0.75rem",
+                          color: "inherit",
+                          textDecoration: "none",
+                        }}
                       >
-                        <strong>{c.title}</strong>
-                        <span
-                          className="sensitivity-pill"
-                          data-tier={c.sensitivity}
-                          data-testid="sensitivity-pill"
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: "0.5rem",
+                          }}
                         >
-                          {c.sensitivity}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: "0.75rem", color: "#aaa", marginTop: "0.25rem" }}>
-                        <span>category: {c.category}</span>
-                        <span style={{ marginLeft: "0.75rem" }}>
-                          verified: {c.last_verified_at.slice(0, 10)}
-                        </span>
-                        <span style={{ marginLeft: "0.75rem", fontFamily: "monospace" }}>
-                          {c.entry_id.slice(0, 8)}…
-                        </span>
-                      </div>
-                    </Link>
-                  </li>
-                ))}
+                          <strong>{c.title}</strong>
+                          <span
+                            className="sensitivity-pill"
+                            data-tier={c.sensitivity}
+                            data-testid="sensitivity-pill"
+                          >
+                            {c.sensitivity}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: "0.75rem", color: "#aaa", marginTop: "0.25rem" }}>
+                          <span>category: {c.category}</span>
+                          <span style={{ marginLeft: "0.75rem" }}>
+                            verified: {c.last_verified_at.slice(0, 10)}
+                          </span>
+                          <span style={{ marginLeft: "0.75rem", fontFamily: "monospace" }}>
+                            {c.entry_id.slice(0, 8)}…
+                          </span>
+                        </div>
+                      </Link>
+                      {/*
+                        Hover/focus preview (M4 #6). Lives INSIDE the <li>
+                        so cursor-onto-popup keeps hover alive (WCAG 1.4.13
+                        "hoverable"). role="tooltip" + aria-describedby on
+                        the trigger Link. Last card flips upward to avoid
+                        viewport overflow when answer + cards push the
+                        list near the bottom of the page (M8 from plan-CR).
+                      */}
+                      {isHovered && (
+                        <div
+                          id={previewId}
+                          role="tooltip"
+                          data-testid="citation-preview"
+                          className="citation-preview"
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            right: 0,
+                            ...(isLast
+                              ? { bottom: "100%", marginBottom: "0.25rem" }
+                              : { top: "100%", marginTop: "0.25rem" }),
+                            zIndex: 10,
+                          }}
+                        >
+                          {snippet.length > 0 && (
+                            <div
+                              dir="auto"
+                              data-testid="citation-preview-snippet"
+                              style={{
+                                fontSize: "0.8125rem",
+                                whiteSpace: "pre-wrap",
+                                lineHeight: 1.4,
+                              }}
+                            >
+                              {snippet}
+                            </div>
+                          )}
+                          {c.tags.length > 0 && (
+                            <ul
+                              aria-label="Tags"
+                              data-testid="citation-preview-tags"
+                              style={{
+                                listStyle: "none",
+                                padding: 0,
+                                margin: "0.5rem 0 0",
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: "0.25rem",
+                              }}
+                            >
+                              {c.tags.map((tag) => (
+                                <li key={tag} className="citation-preview-tag">
+                                  {tag}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {c.source_pointer.length > 0 && (
+                            <div
+                              data-testid="citation-preview-source"
+                              style={{
+                                fontSize: "0.75rem",
+                                color: "var(--kramer-neutral)",
+                                marginTop: "0.5rem",
+                              }}
+                            >
+                              {/*
+                                Plain text — NOT linkified in v1. If a future
+                                source_pointer contains a URL with a token,
+                                rendering it as a link is a click-to-leak
+                                surface. Linkification with an allowlist is
+                                queued in BACKLOG.
+                              */}
+                              source: {c.source_pointer}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
