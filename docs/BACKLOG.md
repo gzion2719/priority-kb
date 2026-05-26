@@ -38,6 +38,8 @@ Categories chosen for this project's shape.
 - Vector index re-tuning playbook: HNSW `ef_construction` / `m` sweep when corpus passes 50k chunks.
 - Postgres → external vector store (Qdrant / Weaviate) cutover criteria — only if pgvector recall stops being acceptable.
 - Cold storage tier for entries older than 2 years that are rarely retrieved.
+- **`api/worker.py` connection pooling (`psycopg_pool.AsyncConnectionPool`).** ADR-0019 M2b #3 worker opens a fresh `psycopg.AsyncConnection` per poll iteration — at `poll_interval_s=1.0` that's ~86k connections/day per worker. Acceptable at M2b ingestion volumes (tens of uploads/day) but bumps `max_connections` pressure under multi-worker + dashboards-sharing-cluster setups. Add `psycopg_pool.AsyncConnectionPool` with `min_size=1, max_size=2`; gated on M5 prod tuning (or earlier if multi-worker M2b #4 setup needs it). Code-CR M1 (2026-05-26) on PR2 of M2b #3 stack.
+- **Pre-push pytest coverage threshold (`--cov-fail-under`).** [pyproject.toml](../pyproject.toml) `[tool.pytest.ini_options].addopts` has `--cov-report=term-missing` but no `--cov-fail-under` floor — the gate has nothing to bite on. Pick a starting threshold (e.g., 70% on `api/`) when `api/` has enough code to make the number meaningful. Code-CR n4 (2026-05-26) on PR2 of M2b #3 stack.
 
 ## Ingestion
 

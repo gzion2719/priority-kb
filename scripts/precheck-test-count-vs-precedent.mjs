@@ -22,7 +22,12 @@
 //            `describe(` (group, not case) is excluded by an in-loop filter.
 //            Chained `it.each.each(` is matched once (the `\.\w+` doesn't span
 //            multiple dots — only the first method-suffix counts).
-//       PY:  `^\s*def test_`  matches one-per-line.
+//       PY:  `^\s*(async\s+)?def test_` matches sync + async test functions,
+//            one-per-line. The `async\s+` group is optional so the same
+//            regex catches plain `def test_X` (sync) AND `async def test_X`
+//            (asyncio + pytest-asyncio). M2b #3's api/tests/test_jobs.py is
+//            the first file mostly-async; previously the regex silently
+//            counted 1 (the lone bare-def test).
 //     Source is comment-stripped before matching (line + block comments) so
 //     `// it("x")` inside a file does NOT inflate the count. String literals
 //     are NOT stripped — a test file that includes quoted source like
@@ -95,7 +100,7 @@ export const KNOWN_SMALL_FILES = [
 ];
 
 const TS_DECL_RE = /\b(it|test|describe)(\.\w+)?\(/g;
-const PY_DECL_RE = /^\s*def test_/gm;
+const PY_DECL_RE = /^\s*(async\s+)?def test_/gm;
 
 // Block comment + line comment strippers. Run before TS_DECL_RE so quoted
 // `// it("x")` in source doesn't inflate the count. Strings are intentionally
@@ -113,9 +118,9 @@ const PY_COMMENT_RE = /#[^\n]*/g;
  *        Includes `describe.each` (parametrized describe blocks count as a
  *        declaration; the `it()` calls inside count separately). Does NOT
  *        include bare `describe(` — that's a group, not a test case.
- *   PY:  matches `def test_*` at the start of any line (top-level functions
- *        AND methods on TestCase classes). Excludes `def _test_helper` and
- *        similar.
+ *   PY:  matches `def test_*` AND `async def test_*` at the start of any
+ *        line (top-level functions AND methods on TestCase classes; sync
+ *        and asyncio shapes). Excludes `def _test_helper` and similar.
  *
  * Approximate: does NOT expand `.each([rows])` row counts or stacked
  * `@pytest.mark.parametrize` Cartesian products. The undercount is intentional
