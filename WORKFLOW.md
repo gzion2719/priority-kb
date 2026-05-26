@@ -309,6 +309,17 @@ Resync = re-read the relevant rule file, restate the constraint, then continue.
 
 ---
 
+## Operating discipline (imported 2026-05-26)
+
+Rules ported from `docs/PYTHON_RULES_DRAFT.md` §"Migrated WORKFLOW.md sections" per [ADR-0016](docs/adr/0016-python-rules-adoption.md) §7. These are operating-discipline rules (not Python pre-push gates), already-relevant to PriorityKB today regardless of M2b status.
+
+- **External version lookups: prefer `WebSearch` over `WebFetch`.** When checking a third-party library's current version, latest changelog, or upstream behaviour, prefer `WebSearch` (returns summary + multiple sources) over a single `WebFetch` of a guessed URL. `WebFetch` against a guessed `/changelog`, `/releases`, or `/docs` path frequently 404s or returns stale-cached content; `WebSearch` surfaces the canonical URL first. *Imported 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016 §7).*
+- **Egress allowlist awareness.** Cowork sandbox blocks `WebFetch` on non-allowlisted domains; if a fetch unexpectedly fails with a network-style error rather than a 4xx/5xx response, suspect the allowlist before debugging the URL or the tool. Fall back to `WebSearch` (which has a broader effective allowlist) or surface the missing domain to the user for an allowlist addition. *Imported 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016 §7).*
+- **Never keyword-filter output when assessing process health.** When checking whether a long-running process is healthy (server log, CI run, background job), read the raw output; do not `grep` for `error` / `fail` / `success` first. Keyword filters silently miss the actual failure shape (a panic without `error` in the message; a "succeeded" line that's followed by a fatal three lines later). Read the bottom of the log first; keyword-grep is a second-pass tool, not a first-pass health check. *Imported 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016 §7).*
+- **Sequenced-instruction confirmation discipline.** When the user issues a multi-step sequenced instruction ("first do X, then Y, then Z"), confirm completion of step N before starting step N+1 — don't bundle the whole sequence into a single tool call. The user's mental model of "where you are" relies on the step boundary surfacing as a checkpoint; collapsing the steps into one action removes the redirect window if step 2 turns out to need a different shape than step 1 implied. *Imported 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016 §7).*
+
+---
+
 ## Emergency protocol
 
 If the KB is corrupted (bad data, schema drift, accidental admin mass-delete):
