@@ -35,3 +35,4 @@ The Context section describes the world the ADR addresses (what the spec require
 | 0013 | [Hybrid keyword lane + RRF fusion + Hebrew tsvector tokenization (M3 item 4)](0013-hybrid-rrf-tsvector.md) | Accepted |
 | 0014 | [End-to-end page-status testing: vitest + fetch + `next start` subprocess](0014-e2e-page-status-tests.md) | Accepted |
 | 0015 | [Browser-mediated e2e runtime: Playwright (BACKLOG:77 back-nav)](0015-back-nav-e2e-runner.md) | Accepted |
+| 0016 | [Python rules adoption from PYTHON_RULES_DRAFT.md (M2b #1)](0016-python-rules-adoption.md) | Accepted |
