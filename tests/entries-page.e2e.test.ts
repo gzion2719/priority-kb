@@ -47,13 +47,13 @@ describeIfDb("entries detail page — e2e HTTP-status assertions", () => {
   });
 
   /**
-   * Seed a single restricted entry via the production ingest path so the
-   * spec exercises the route under test rather than bypassing iron rule
-   * #2 with a raw INSERT. Returns the new entry's UUID for `/entries/[id]`
-   * URL construction. Stub-admin role per the same dev-time auth surface
-   * the unit tests use.
+   * Seed a single entry at the specified sensitivity tier via the
+   * production ingest path so the spec exercises the route under test
+   * rather than bypassing iron rule #2 with a raw INSERT. Returns the
+   * new entry's UUID for `/entries/[id]` URL construction. Stub-admin
+   * role per the same dev-time auth surface the unit tests use.
    */
-  async function seedRestrictedEntry(): Promise<string> {
+  async function seedEntry(sensitivity: "public" | "internal" | "restricted"): Promise<string> {
     const res = await fetch(`${server.baseUrl}/api/ingest`, {
       method: "POST",
       headers: {
@@ -61,21 +61,25 @@ describeIfDb("entries detail page — e2e HTTP-status assertions", () => {
         "x-stub-user-role": "admin",
       },
       body: JSON.stringify({
-        title: "Restricted Test Entry",
+        title: `${sensitivity[0].toUpperCase()}${sensitivity.slice(1)} Test Entry`,
         category: "test",
-        tags: ["e2e", "restricted"],
+        tags: ["e2e", sensitivity],
         body:
-          "This is a restricted-tier entry seeded by the e2e suite. " +
-          "Visible only to admins per iron rule #6 sensitivity enforcement.",
+          `This is a ${sensitivity}-tier entry seeded by the e2e suite. ` +
+          "Visible per iron rule #6 sensitivity mapping.",
         source_pointer: "ticket://e2e-test",
         last_verified_at: new Date().toISOString(),
-        sensitivity: "restricted",
+        sensitivity,
       }),
     });
     expect(res.status, "seed POST /api/ingest must return 201").toBe(201);
     const created = (await res.json()) as { id?: string };
     expect(typeof created.id, "seed response must include entry id").toBe("string");
     return created.id as string;
+  }
+
+  async function seedRestrictedEntry(): Promise<string> {
+    return seedEntry("restricted");
   }
 
   /**
@@ -105,6 +109,37 @@ describeIfDb("entries detail page — e2e HTTP-status assertions", () => {
     expect(status).toBe(200);
     expect(body).toContain("Restricted Test Entry");
     expect(body).toContain("restricted"); // the sensitivity pill renders the label
+    // Shared primitive contract: pill carries the `sensitivity-pill` class
+    // (CSS hooks into it from styles/kramer-brand.css) and the `data-tier`
+    // attribute drives the tier-specific color. Both must be present on
+    // every render — regressions on either break iron-rule-#6 visual
+    // scannability without breaking the text-level assertion above. The
+    // regex tolerates a sibling class being appended in the future without
+    // forcing a test rewrite.
+    expect(body).toMatch(/class="sensitivity-pill(?:\s[^"]*)?"/);
+    expect(body).toContain('data-tier="restricted"');
+  });
+
+  it("admin GETs public entry → pill renders data-tier='public' (tier-selector coverage)", async () => {
+    const id = await seedEntry("public");
+    const { status, body } = await getEntry(id, "admin");
+    expect(status).toBe(200);
+    // A typo in the `[data-tier="public"]` CSS selector would ship
+    // silently without this assertion. Proves the public-tier selector
+    // is reachable from the rendered HTML.
+    expect(body).toMatch(/class="sensitivity-pill(?:\s[^"]*)?"/);
+    expect(body).toContain('data-tier="public"');
+  });
+
+  it("admin GETs internal entry → pill renders data-tier='internal' (tier-selector coverage)", async () => {
+    const id = await seedEntry("internal");
+    const { status, body } = await getEntry(id, "admin");
+    expect(status).toBe(200);
+    // Same rationale as the public-tier case above — covers the third
+    // tier selector so the consolidation actually exercises all three
+    // attribute-selector branches the CSS extracts.
+    expect(body).toMatch(/class="sensitivity-pill(?:\s[^"]*)?"/);
+    expect(body).toContain('data-tier="internal"');
   });
 
   it("user GETs same restricted entry → 404 (iron rule #6 enforced at HTTP layer)", async () => {
