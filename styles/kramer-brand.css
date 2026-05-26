@@ -303,6 +303,31 @@ pre {
 }
 
 /*
+ * Citation hover preview (M4 #6)
+ * --------------------
+ * Glass-card surface shown on hover/focus of a citation card in /query.
+ * Renders inside the trigger <li> so cursor-onto-popup keeps hover alive
+ * (WCAG 2.1 SC 1.4.13 "hoverable"). Positioned by inline styles in
+ * app/query/page.tsx — top:100% for non-last cards, bottom:100% for the
+ * last card to avoid bottom-of-viewport overflow.
+ */
+.citation-preview {
+  background: rgba(220, 221, 222, 0.06);
+  border: 1px solid var(--kramer-neutral);
+  border-radius: 0.375rem;
+  padding: 0.625rem 0.75rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  color: var(--kramer-neutral);
+}
+.citation-preview-tag {
+  font-size: 0.6875rem;
+  padding: 0.0625rem 0.4375rem;
+  border-radius: 999px;
+  border: 1px solid var(--kramer-neutral);
+  opacity: 0.75;
+}
+
+/*
  * GT Eesti font loading
  * --------------------
  * GT Eesti is a commercial font by Grilli Type. If `.woff2` files are placed in

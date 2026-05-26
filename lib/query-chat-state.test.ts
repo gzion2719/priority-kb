@@ -19,6 +19,9 @@ const seedCandidate = (id: string, title: string): QueryCandidate => ({
   category: "howto",
   sensitivity: "public",
   last_verified_at: "2026-01-01T00:00:00Z",
+  body_snippet: "",
+  tags: [],
+  source_pointer: "",
 });
 
 const seedSnippet = (id: string, title: string, snippet: string): QueryChunkSnippet => ({
@@ -110,6 +113,26 @@ describe("applyEvent — full happy-path event sequence", () => {
     // Candidates and answer preserved at terminal:
     expect(s.candidates).toHaveLength(2);
     expect(s.answer).toBe("Hello world.");
+  });
+
+  it("candidates reducer carries new hover-preview fields (body_snippet/tags/source_pointer) verbatim — M4 #6", () => {
+    let s = startStream(initialQueryState, "q");
+    const enriched: QueryCandidate = {
+      entry_id: "aaaaaaaa-0000-4000-8000-000000000001",
+      title: "Enriched",
+      category: "howto",
+      sensitivity: "public",
+      last_verified_at: "2026-01-01T00:00:00Z",
+      body_snippet: "first 240 chars of body…",
+      tags: ["alpha", "beta"],
+      source_pointer: "TICKET-42",
+    };
+    s = applyEvent(s, { kind: "candidates", entries: [enriched] });
+    // Strict-equality on the full object — a regression that dropped or
+    // defaulted any of the three new fields fires here (negative
+    // assertion). The reducer is intentionally a pass-through; this test
+    // pins the contract.
+    expect(s.candidates).toEqual([enriched]);
   });
 });
 
