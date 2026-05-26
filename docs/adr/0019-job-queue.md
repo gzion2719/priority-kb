@@ -66,6 +66,7 @@ Per [ADR-0005](0005-log-event-schema.md) the LogEvent union is closed at [lib/lo
 - `job_enqueued` — admin-initiated enqueue via the Ingestion Agent UI or `/api/ingest` upload path.
 - `job_dispatched` — worker claimed and started the job (one per claim, not per attempt — the `claimed` LogEvent transition + this audit row cover the same moment).
 - `job_done` — worker terminal success.
+- `job_failed` — worker non-terminal failure (`mark_failed` bumps `attempts` but `attempts < max_attempts`, so the row stays retry-eligible). Per Amendment 2026-05-26 below; closes the asymmetry where the `failed` LogEvent transition had no audit-row counterpart.
 - `job_dead` — worker terminal failure after `max_attempts`.
 
 **None of these match `kind LIKE 'agent_%'`**, so the existing DB CHECK `audit_log_prompt_hash_required_for_agent` does not fire on worker writes — by design (see D8 below).
@@ -94,6 +95,8 @@ The `jobs` table + `job_state` enum + `jobs_dispatch_idx` ship as a **new Drizzl
 ### D12 — Row retention and GC
 
 **Decision:** `done` rows are pruned by a **separate cleanup cron** with a **7-day retention window** (operator gets a week to inspect successful jobs; `dead` rows retained indefinitely as the dead-letter audit surface). The cron implementation defers to the M2b #3 implementation PR; this ADR pins the retention number and the policy.
+
+**`failed`-not-yet-`dead` rows are intentionally NOT pruned by the cleanup cron.** They are actively being retried (the worker re-claims via `locked_until` expiry); pruning them mid-retry would silently drop work. Slow-failing rows that sit at `attempts < max_attempts` indefinitely are an uncommon shape in M2b scope — OCR/parse failures terminate quickly (either succeed or accumulate to `dead` within minutes). If this becomes a real storage pressure, ship a separate "stale-failed" sweep with its own (longer) retention window; do not extend the `done` cleanup's scope to cover `failed`. Cross-ref Amendment 2026-05-26 below.
 
 ### Queue table 10-line skeleton (per ADR-with-new-types sub-rule)
 
@@ -184,3 +187,50 @@ For M2b: **admin sees OCR'd text within 30s of upload at p95** (file upload + qu
 - [lib/auth.ts](../../lib/auth.ts) — `withAdmin` HOF gating the enqueue path per D8 iron-rule #2 interpretation.
 - [docs/AGENTS.md](../AGENTS.md) — Ingestion Agent interface; update is downstream-PR work, not on this PR.
 - [pgqueuer](https://github.com/janbjorge/pgqueuer) + [Procrastinate](https://github.com/procrastinate-org/procrastinate) — rejected library candidates per D1.
+
+---
+
+## Amendment 2026-05-26 — Plan-CR findings folded into the implementation contract
+
+Closes the asymmetries the M2b #3 implementation-PR plan-CR surfaced before any code landed (BLOCKING B2 + MINOR m3 from the unbiased reviewer).
+
+**§A — `job_failed` audit discriminator added (BLOCKING).** The original §D7 enumerated audit kinds `{job_enqueued, job_dispatched, job_done, job_dead}` while `LogEventJob.transition` included `"failed"` distinct from `"dead"` (the bump-attempts-but-not-yet-`dead` step). That left the non-terminal failure path observable only via the LogEvent emitter — and since the Python LogEvent emitter is deferred to M2b #4, the `failed` transition would have been *unobservable* via the in-DB audit surface for the entire M2b #3 window. §D7 above is now amended in-place to include `job_failed`; the implementation PR writes the audit row in `mark_failed` whenever the new `attempts` value remains below `max_attempts`. The terminal `job_dead` row fires when the same call promotes the state.
+
+**§B — `cleanup-jobs.mjs` scope pinned to `done` only (MINOR).** The original §D12 framing was silent on `failed`-not-yet-`dead` rows; the cleanup script intentionally excludes them. §D12 above now spells out the exclusion + the rationale (active retry, premature pruning would silently drop work). A future "stale-failed sweep" is named as a separate-script extension if storage pressure justifies it; the `done` cleanup script must not grow to cover `failed`.
+
+**§C — `idempotency_key` length bounded by DB CHECK (Q4).** Plan-CR Q4 flagged the unbounded `text UNIQUE` index size as a footgun for buggy or malicious callers. The implementation migration ships a `CHECK (length(idempotency_key) BETWEEN 1 AND 200)` constraint. ADR-0019 §D3's "stable input descriptor (e.g., sha256(blob_storage_path))" pattern produces 64-char keys, well within the bound; the bound exists to catch caller bugs at the storage boundary, not to constrain legitimate callers.
+
+**§D — `enqueueJob` accepts a transaction handle for outer-txn nesting (Q3).** The Node enqueue signature is `enqueueJob(db, args)` where `db` may be either the root `NodePgDatabase` or an active transaction handle (`tx`); drizzle's `db.transaction(...)` on a tx-handle opens a SAVEPOINT, so callers (e.g., M2b #4's `/api/ingest` blob-upload path) can wrap the entry insert + enqueue in a single outer txn. The enqueue's own INSERT + audit row remain atomic in either case. JSDoc on `enqueueJob` carries the contract.
+
+**§E — `enqueueJob` returns `existingState` on conflict (M5).** The original §D3 contract returned `{id, created:false}` on idempotency-key conflict, leaving callers unable to distinguish "queued, will run" from "already done, will not re-run." Implementation ships `EnqueueResult = {id, created:true} | {id, created:false, existingState:JobState}` so callers branch — primarily M2b #4's blob-upload UI ("the blob you re-uploaded is already processed; here's the existing entry"). No ADR-level decision change; the field is additive, the semantics are unchanged.
+
+**§F — `claim_one` query shape pinned (BLOCKING B3 + Q1 + Q2).** The Python `claim_one` SQL the implementation ships:
+
+```sql
+UPDATE jobs
+SET    state        = 'in_progress',
+       locked_until = now() + (vis_timeout_s || ' seconds')::interval,
+       locked_by    = $worker_id,
+       updated_at   = now()
+WHERE  id = (
+  SELECT id FROM jobs
+  WHERE  queue_name = $queue
+    AND  state = 'queued'
+    AND  run_after <= now()
+    AND  (locked_until IS NULL OR locked_until < now())
+  ORDER BY run_after
+  FOR UPDATE SKIP LOCKED
+  LIMIT 1
+)
+RETURNING *;
+```
+
+`run_after <= now()` honors back-off-scheduled retries; the expired-lock-reclaim clause is the visibility-timeout reclamation path from §D6. `mark_done` and `mark_failed` both set `locked_until = NULL` and `locked_by = NULL` on the terminal write — cosmetic on `done` but load-bearing on `failed`-not-`dead` (the next claim must see the lock as released, not still held by the prior worker until natural expiry).
+
+**§G — Iron-rule #6 mechanical floor is a recursive payload scan (M2).** The Node enqueue's Zod validator rejects any key matching `/sensitivity/i` at *any* depth (not just top-level). Caller bypasses via nested keys (`meta.sensitivity`, `payload.entry_sensitivity`) are closed. Tested with a `{meta:{sensitivity:"restricted"}}` payload that asserts rejection.
+
+**§H — `LogEventJob.cost_usd: number | null` always-null shape (m6).** Per ADR-0005 Amendment 2026-05-27 §4 invariant ("any future variant added to the union MUST satisfy [the runtime guards] or `logEvent()` needs an explicit type-narrowing branch"), `LogEventJob` carries `cost_usd: number | null` (always `null`). Mirrors `LogEventRoute`/`LogEventRetrievalPipeline`. The `latency_ms` runtime guard fires uniformly.
+
+**§I — `updated_at = now()` enforced caller-side at every UPDATE site (M1).** The `0001_updated_at_triggers.sql` auto-update trigger is intentionally NOT applied to `jobs` (§D10 unchanged). Callers — `claim_one`, `mark_done`, `mark_failed`, and any future state-transition helper — MUST include `updated_at = now()` in the UPDATE SET clause. The PR's integration tests assert `updated_at` advances after each transition; recurrence of the "forgot `updated_at`" class is caught at gate time rather than at audit-archaeology time.
+
+**Net effect on the implementation surface.** §A adds a fifth audit discriminator. §B-§I are clarifications + mechanical floors that change the implementation shape but not the architectural decision. ADR-0008 + ADR-0009 + ADR-0016 unchanged.
