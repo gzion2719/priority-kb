@@ -134,13 +134,43 @@ The DRAFT carries YuTom's discipline; YuTom has no iron-rule equivalents to Prio
 - **Three-file SESSION_PROTOCOL.md split BACKLOG entry** carries the post-PR size measurement and the audit trigger; next-session candidate.
 - **No `docs/AGENTS.md` or `prompts/*.md` updates required** — all imported rules are session-protocol or operating-discipline, not user-facing or agent-prompt content.
 
+## Amendment 2026-05-26 — M2b #2 scaffold floor walk + §6 logging primitive pinned
+
+Closes the §Mitigations #1 "first Python-touching PR walks the imported list" obligation in the form it can actually take on a scaffold-only PR. The substantive walk — where §2 rules either fire on real Python work or are demoted to BACKLOG — is deferred to M2b #3 (job queue + first real class definitions); see §2 sub-section below.
+
+### §3 deferred-UTC-import check closed
+
+[Bucket 3](#§3---bucket-3-rejection--partial-promotion--defer) "Sandbox `src/`-import stub requirement" was deferred pending the Python version pinned at M2b #2. `pyproject.toml` `[project] requires-python = ">=3.12"` resolves the question: `from datetime import UTC` is stable in stdlib since 3.11, so the version-conditional stub the DRAFT named is not needed. **Status flipped to "rejected as not-applicable; floor satisfied by `requires-python = ">=3.12"`."**
+
+### §6 log-init function name pinned
+
+The TBD log-init function name is now `api.log.init_logging`, pinned in [ADR-0018](0018-python-logging-primitive.md). The SESSION_PROTOCOL.md `py-script-logging-init` rule body is updated in the same PR to name the function explicitly rather than carrying TBD.
+
+### §Mitigations #1 floor walk (this PR)
+
+Scaffold-only PRs have very little surface for the §2 rules to fire against; an honest fired-or-silently-passed audit per rule would demote ~80% of §2 prematurely (the surfaces the rules name — `__post_init__` validators, registry-style dicts, side-effect-method greps, Test* class imports, periodic counters — don't exist yet because the worker has no real classes yet). Therefore this PR records the **floor walk**: machinery-and-anchors integrity, not surface-applied audit.
+
+| Class | Status this PR |
+|---|---|
+| §1 anchors (`py-immediate-black`, `py-zip-strict`, `py-nested-with-flatten`, `py-type-ignore-code`, `py-trailing-whitespace`, `py-pep563-unquoted`, `py-black-linelength-sync`, `py-black-version-sync`, `py-black-diff-first`, `py-i001-ruff-fix`, `py-smoke-test-fidelity`, `py-untyped-library-call`, `py-sandbox-ruff-sweep`, `py-registry-test-sweep`) | All resolvable in SESSION_PROTOCOL.md. `py-immediate-black` fired during this PR's implementation on every `.py` Edit/Write. `py-black-version-sync` ran (`python -m black --version` = 26.3.1 vs `black>=24.0` pin → satisfied). `py-black-linelength-sync` ran (`pyproject.toml [tool.black] line-length = 100`). `py-sandbox-ruff-sweep` fired (`python -m ruff check api/` after all edits). Remaining §1 rules silently passed — surface not present (no `zip()` calls, no nested `with`, no `# type: ignore` suppressions, no `from __future__ import annotations` in a file with quoted annotations, no I001 import-sort issue, no smoke-test fallback, no untyped-library call). |
+| §2 anchors | All resolvable. None fired — the surfaces they name (`api/`-defined dataclass, periodic counter, autouse fixture mixed-mode, third-party-library special case, sibling-bug sweep, unsupported-to-supported promotion, internal type construction grep, production-call-site kwarg sweep, composite-field string assertion, test-helper completeness check, `Test*` import alias, UTC test anchor, filter-kwarg alignment, side-effect addition, cross-cutting reconciliation, wall-clock → deterministic transition, silent-zero guard) do not exist on this PR. **Deferred to M2b #3 substantive walk.** |
+| §3 anchor (`py-sandbox-disk-chatlog`) | Resolvable. Implicitly applies to this session — CHATLOG.md is being written via the sandbox; close-time verify still ships per CLOSE_SESSION_PROTOCOL.md. |
+| §4 anchor (`py-script-logging-init`) | Resolvable. Name pinned this PR. |
+| §5 anchors (iron-rule mirrors) | `py-iron-rule-8-no-live-api-imports` **shipped this PR** as `api/tests/test_iron_rule_8_no_live_api_imports.py` — scans `api/__init__.py` + `api/log.py` + `api/main.py`; positive-control regex tests against synthetic `voyageai`/`anthropic`/`openai` import strings prevent regex-rot. `py-iron-rule-9-embedding-version-pinned` and `py-iron-rule-10-prompt-hash-sealed` deferred to M2b #4 (their surfaces — `chunks` row writes, Claude agent calls — don't exist yet). |
+
+### Trigger for the substantive walk (M2b #3)
+
+When M2b #3 (job queue) lands an actual `api/`-defined class with `__post_init__` validators or a registry-style dict mirrored by a test assertion, the substantive walk fires: each §2 rule gets a fired-or-demoted-to-BACKLOG audit recorded in another ADR-0016 Amendment. The dead-letter window is the M2b #2 → #3 gap and is bounded by the next ROADMAP item, not by a calendar threshold.
+
 ## References
 
 - [docs/PYTHON_RULES_DRAFT.md](../PYTHON_RULES_DRAFT.md) — the source rules.
 - [docs/ROADMAP.md](../ROADMAP.md) M2b checklist #1 — the trigger.
 - [ADR-0006](0006-process-alignment-with-external-audit.md) — the parent ADR that deferred this import; gains a trailing `Amendment 2026-05-26` pointer in the same PR.
+- [ADR-0018](0018-python-logging-primitive.md) — pins §6 log-init function name to `api.log.init_logging`.
 - [SESSION_PROTOCOL.md](../../SESSION_PROTOCOL.md) §Python pre-push — the new section housing the adopted rules.
 - [WORKFLOW.md](../../WORKFLOW.md) §Operating discipline (imported 2026-05-26) — the 4 newly-promoted operating-discipline rules from §7.
 - [CLAUDE.md](../../CLAUDE.md) non-negotiables 1–13 — the iron-rule surface §8 synthesizes mirrors for.
 - [lib/embedding.test.ts](../../lib/embedding.test.ts) lines 217–251 — Node-side source-file-no-import precedent for §8 #1 (scans the production library `lib/embedding.ts` for SDK imports + positive-control regex anti-rot tests).
 - [lib/prompts.ts](../../lib/prompts.ts) — Node-side sealed-at-boot precedent for §8 #3 (top-level `readFileSync` at line 77/132 + byte-roundtrip assertion at lines 79-89 / 134-146).
+- [api/tests/test_iron_rule_8_no_live_api_imports.py](../../api/tests/test_iron_rule_8_no_live_api_imports.py) — Python mirror of §8 #1 shipped at M2b #2.

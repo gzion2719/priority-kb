@@ -1,5 +1,5 @@
-# Python config — activated when M2b adds the FastAPI worker for document parsing/OCR/embedding jobs.
-# Until then, this file documents the future tooling shape so the contract is visible from day one.
+# Python config — activated 2026-05-26 at M2b #2 (FastAPI worker scaffold).
+# Subsequent M2b items pin additional deps (job queue, parsing, OCR, SDKs).
 
 [project]
 name = "priority-kb-api"
@@ -7,9 +7,9 @@ version = "0.0.1"
 description = "FastAPI worker for ingestion: document parsing, OCR, embedding, Claude calls, DB writes."
 requires-python = ">=3.12"
 dependencies = [
-  # Pinned in M2b. Anticipated:
-  # "fastapi",
-  # "uvicorn[standard]",
+  "fastapi==0.136.3",
+  "uvicorn[standard]==0.48.0",
+  # Pinned per M2b item. Anticipated additions:
   # "sqlalchemy",
   # "alembic",
   # "psycopg[binary]",
@@ -29,7 +29,16 @@ dev = [
   "mypy>=1.11",
   "pytest>=8.0",
   "pytest-cov>=5.0",
+  # TestClient transitive dep — pinned explicitly so the resolver doesn't
+  # gamble with fastapi/starlette's version floor.
+  "httpx==0.28.1",
 ]
+
+# Setuptools sits at the repo root alongside Node-side directories (app/, lib/, evals/, etc.).
+# Flat-layout autodiscovery would try to package those too — explicitly scope to api/.
+[tool.setuptools.packages.find]
+include = ["api*"]
+exclude = ["api.tests*"]
 
 [tool.ruff]
 line-length = 100
