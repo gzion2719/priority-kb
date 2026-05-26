@@ -38,3 +38,4 @@ The Context section describes the world the ADR addresses (what the spec require
 | 0016 | [Python rules adoption from PYTHON_RULES_DRAFT.md (M2b #1)](0016-python-rules-adoption.md) | Accepted |
 | 0017 | [Closing-ritual extraction to CLOSE_SESSION_PROTOCOL.md](0017-protocol-split-closing.md) | Accepted |
 | 0018 | [Python logging primitive for the FastAPI worker (M2b #2)](0018-python-logging-primitive.md) | Accepted |
+| 0019 | [Job queue: custom SKIP LOCKED + polling, single `jobs` table, Drizzle-owned schema (M2b #3)](0019-job-queue.md) | Accepted |
