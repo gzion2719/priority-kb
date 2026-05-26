@@ -39,7 +39,7 @@ The `CLAUDE.md` language-convention block is rewritten as follows:
 - **Scope:** operating language only — see scope table above.
 - **Rationale pointer:** "Codified 2026-05-16 at user's explicit request; supersedes the prior mirror policy."
 
-`SESSION_PROTOCOL.md` Opening Step 1 ("Greet — one line, warm…") is updated: "in English per `CLAUDE.md` language convention; no Hebrew in output, ever — even when greeting a Hebrew first-message." Closing Step 6 ("Close warmly") similarly cleaned of mirror wording: "in English per CLAUDE.md language convention."
+`SESSION_PROTOCOL.md` Opening Step 1 ("Greet — one line, warm…") is updated: "in English per `CLAUDE.md` language convention; no Hebrew in output, ever — even when greeting a Hebrew first-message." `CLOSE_SESSION_PROTOCOL.md` Step 6 ("Close warmly") similarly cleaned of mirror wording: "in English per CLAUDE.md language convention." (Closing Step 6 was in `SESSION_PROTOCOL.md` at the time of this ADR; extracted to `CLOSE_SESSION_PROTOCOL.md` 2026-05-26 per ADR-0017.)
 
 The opening-trigger header in `CLAUDE.md` (line ~10) replaces the parenthetical *"(Hebrew or English — mirror)"* with "reply in English per the language convention below."
 
@@ -69,6 +69,6 @@ The opening-trigger header in `CLAUDE.md` (line ~10) replaces the parenthetical 
 ## References
 
 - `CLAUDE.md` — language convention block.
-- `SESSION_PROTOCOL.md` Opening Step 1, Closing Step 6 — wording cleaned.
+- `SESSION_PROTOCOL.md` Opening Step 1, `CLOSE_SESSION_PROTOCOL.md` Step 6 — wording cleaned. (Closing Step 6 was in `SESSION_PROTOCOL.md` at the time of this ADR; extracted to `CLOSE_SESSION_PROTOCOL.md` 2026-05-26 per ADR-0017.)
 - CHATLOG 2026-05-16 — the process-alignment session entry will cite this ADR.
 - Source: this session's `AskUserQuestion` answer + the user's follow-up reinforcement message.
