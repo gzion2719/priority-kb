@@ -501,8 +501,8 @@ export default function QueryPage(): React.ReactNode {
                   // of candidates by construction.
                   const snippet =
                     state.status === "chunks_only"
-                      ? state.chunkSnippets.find((s) => s.entry_id === c.entry_id)?.snippet ??
-                        c.body_snippet
+                      ? (state.chunkSnippets.find((s) => s.entry_id === c.entry_id)?.snippet ??
+                        c.body_snippet)
                       : c.body_snippet;
                   return (
                     <li
