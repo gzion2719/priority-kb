@@ -147,7 +147,13 @@ function EntryView({ entry }: { entry: EntryDetail }): React.ReactNode {
           {entry.title}
         </h1>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
-          <SensitivityPill sensitivity={entry.sensitivity} />
+          <span
+            className="sensitivity-pill"
+            data-tier={entry.sensitivity}
+            data-testid="sensitivity-pill"
+          >
+            {entry.sensitivity}
+          </span>
           <span style={{ fontSize: "0.75rem", color: "var(--kramer-neutral)" }}>
             category: {entry.category}
           </span>
@@ -216,52 +222,5 @@ function EntryView({ entry }: { entry: EntryDetail }): React.ReactNode {
         <div style={{ fontFamily: "monospace" }}>id: {entry.id}</div>
       </footer>
     </main>
-  );
-}
-
-function SensitivityPill({
-  sensitivity,
-}: {
-  sensitivity: EntryDetail["sensitivity"];
-}): React.ReactNode {
-  // public/internal/restricted map to mint/purple/pink brand tokens.
-  // Same reasoning as app/query/page.tsx's inline sensitivity badge —
-  // a color shift makes the privilege level scannable.
-  const style: React.CSSProperties = (() => {
-    switch (sensitivity) {
-      case "public":
-        return {
-          background: "rgba(104, 255, 195, 0.12)",
-          color: "var(--kramer-mint)",
-          border: "1px solid rgba(104, 255, 195, 0.4)",
-        };
-      case "internal":
-        // Brand foreground matches the tint per public/restricted parity
-        // (mint-on-mint, pink-on-pink, purple-on-purple).
-        return {
-          background: "rgba(130, 0, 180, 0.12)",
-          color: "var(--kramer-purple)",
-          border: "1px solid rgba(130, 0, 180, 0.5)",
-        };
-      case "restricted":
-        return {
-          background: "rgba(190, 0, 120, 0.14)",
-          color: "var(--kramer-pink)",
-          border: "1px solid rgba(190, 0, 120, 0.5)",
-        };
-    }
-  })();
-  return (
-    <span
-      data-testid="sensitivity-pill"
-      style={{
-        fontSize: "0.75rem",
-        padding: "0.125rem 0.5rem",
-        borderRadius: "999px",
-        ...style,
-      }}
-    >
-      {sensitivity}
-    </span>
   );
 }

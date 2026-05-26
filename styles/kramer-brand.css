@@ -270,6 +270,39 @@ pre {
 }
 
 /*
+ * Sensitivity pill — shared primitive for iron-rule #6 tier labels.
+ * Used by `app/entries/[id]/page.tsx` (entry detail header) and
+ * `app/query/page.tsx` (citation card). Color tier is driven by the
+ * `data-tier` attribute; foreground / background / border tokens match
+ * the public=mint / internal=purple / restricted=pink brand mapping.
+ * Extend the tier selectors below when widening the `Sensitivity` union
+ * — unknown tiers fall back to a transparent border with inherited
+ * color (effectively invisible against the dark surface).
+ */
+.sensitivity-pill {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.sensitivity-pill[data-tier="public"] {
+  background: rgba(104, 255, 195, 0.12);
+  color: var(--kramer-mint);
+  border-color: rgba(104, 255, 195, 0.4);
+}
+.sensitivity-pill[data-tier="internal"] {
+  background: rgba(130, 0, 180, 0.12);
+  color: var(--kramer-purple);
+  border-color: rgba(130, 0, 180, 0.5);
+}
+.sensitivity-pill[data-tier="restricted"] {
+  background: rgba(190, 0, 120, 0.14);
+  color: var(--kramer-pink);
+  border-color: rgba(190, 0, 120, 0.5);
+}
+
+/*
  * GT Eesti font loading
  * --------------------
  * GT Eesti is a commercial font by Grilli Type. If `.woff2` files are placed in

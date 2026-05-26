@@ -28,10 +28,12 @@ Either path lands in the same place: Step 1 greeting → Step 2 folder confirm �
 ## Chat archetypes
 
 ### Build — implementing a milestone task
-Most chats are this. Pick one focus from the active ROADMAP milestone, do the planning self-critique, ship the narrowest E2E increment, close with the ritual.
+Most chats are this. Pick one focus from the active ROADMAP milestone (the lowest-numbered milestone with unstarted, unblocked items — see `SESSION_PROTOCOL.md` Step 6 Roadmap-first focus sub-rule), do the planning self-critique, ship the narrowest E2E increment, close with the ritual.
 
 **Starter prompt (paste):**
-> Build session. Focus: <task from ROADMAP / BACKLOG>. Run opening ritual, then propose smallest E2E increment and wait for go.
+> Build session. Focus: <task from active ROADMAP milestone>. Run opening ritual, then propose smallest E2E increment and wait for go.
+
+BACKLOG entries are side-slices, never the primary build target — they appear in Step 6 only as secondary options, and only when the user explicitly picks one over the surfaced ROADMAP item.
 
 ### Research — investigating a tool / pattern / dataset
 For when the path forward is unclear and we need to look at options or read existing code before committing. Outputs an ADR draft or a BACKLOG entry, not production code.
