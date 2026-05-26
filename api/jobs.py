@@ -33,6 +33,7 @@ from typing import Any
 from uuid import UUID
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ async def claim_one(
             "INSERT INTO audit_log (kind, payload) VALUES (%s, %s)",
             (
                 "job_dispatched",
-                psycopg.types.json.Jsonb(
+                Jsonb(
                     {
                         "queue_name": job.queue_name,
                         "job_id": str(job.id),
@@ -209,7 +210,7 @@ async def mark_done(
             return
         await cur.execute(
             "INSERT INTO audit_log (kind, payload) VALUES (%s, %s)",
-            ("job_done", psycopg.types.json.Jsonb({"job_id": str(job_id)})),
+            ("job_done", Jsonb({"job_id": str(job_id)})),
         )
         await conn.commit()
 
@@ -285,9 +286,7 @@ async def mark_failed(
                 "INSERT INTO audit_log (kind, payload) VALUES (%s, %s)",
                 (
                     "job_dead",
-                    psycopg.types.json.Jsonb(
-                        {"job_id": str(job_id), "attempts": attempts, "last_error": error}
-                    ),
+                    Jsonb({"job_id": str(job_id), "attempts": attempts, "last_error": error}),
                 ),
             )
         else:
@@ -300,9 +299,7 @@ async def mark_failed(
                 "INSERT INTO audit_log (kind, payload) VALUES (%s, %s)",
                 (
                     "job_failed",
-                    psycopg.types.json.Jsonb(
-                        {"job_id": str(job_id), "attempts": attempts, "last_error": error}
-                    ),
+                    Jsonb({"job_id": str(job_id), "attempts": attempts, "last_error": error}),
                 ),
             )
         await conn.commit()

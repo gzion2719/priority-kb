@@ -63,16 +63,14 @@ strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 
-# Third-party libs whose stubs aren't reliable across sandbox vs CI
-# environments. Sandbox lacks psycopg + pytest-asyncio entirely; CI
-# installs them. Override masks the import not-found error in both
-# places so the type-check is consistent. Note: per
-# `py-untyped-library-call` (SESSION_PROTOCOL.md §Python pre-push), if
-# a method's untypedness affects a call site, verify against installed
-# source before annotating with type: ignore.
-[[tool.mypy.overrides]]
-module = ["psycopg", "psycopg.*", "pytest_asyncio"]
-ignore_missing_imports = true
+# psycopg + pytest_asyncio ship typed; no mypy override needed.
+# Sandbox must `pip install -e ".[dev]"` (or the explicit deps
+# `psycopg[binary]==3.2.3 pytest-asyncio>=0.24`) for mypy --strict to
+# resolve their stubs. CI does this via the python job's install step;
+# local devs should mirror it. The previous version of this block
+# added a blanket `ignore_missing_imports = true` override for both
+# libs, which masked CI's "Unused type: ignore" errors and caused the
+# untyped-decorator regression that broke the first PR2 CI run.
 
 [tool.pytest.ini_options]
 addopts = "--cov=api --cov-report=term-missing"

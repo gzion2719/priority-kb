@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 import pytest_asyncio
+from psycopg.types.json import Jsonb
 
 from api.jobs import Job, claim_one, mark_done, mark_failed
 from api.worker import WorkerState, install_signal_handler
@@ -31,7 +32,7 @@ if IS_CI and DATABASE_URL is None:
 pytestmark = pytest.mark.skipif(DATABASE_URL is None, reason="DATABASE_URL not set")
 
 
-@pytest_asyncio.fixture  # type: ignore[untyped-decorator]
+@pytest_asyncio.fixture
 async def conn() -> AsyncIterator[psycopg.AsyncConnection[Any]]:
     """One psycopg async connection per test; truncated before each."""
     assert DATABASE_URL is not None
@@ -59,7 +60,7 @@ async def _seed_job(
             VALUES (%s, %s::jsonb, %s, %s)
             RETURNING id
             """,
-            (queue, psycopg.types.json.Jsonb(payload or {"entry_id": "x"}), key, max_attempts),
+            (queue, Jsonb(payload or {"entry_id": "x"}), key, max_attempts),
         )
         row = await cur.fetchone()
         assert row is not None
