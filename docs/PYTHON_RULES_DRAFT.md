@@ -1,6 +1,6 @@
 # PYTHON_RULES_DRAFT.md — parked Python rules for M2b
 
-**Status:** Draft. Parked 2026-05-16 from the external operating-rules audit (see ADR-0006). **Not active.** Each rule is reviewed and adapted at M2b import time, when the FastAPI worker scaffolds at `api/` and `pyproject.toml` is activated (see `docs/ROADMAP.md` M2b checklist).
+**Status:** Imported into `SESSION_PROTOCOL.md` per [ADR-0016](adr/0016-python-rules-adoption.md) on 2026-05-26; retained for archaeology. Every rule below has a recorded disposition in ADR-0016 §1–§8. The verbatim text is preserved so a future reader can audit the bucket assignments without losing the original source. (Original status header before import: *"Draft. Parked 2026-05-16 from the external operating-rules audit (see ADR-0006). Not active. Each rule is reviewed and adapted at M2b import time, when the FastAPI worker scaffolds at `api/` and `pyproject.toml` is activated."*)
 
 ## Why this file exists
 
@@ -16,7 +16,7 @@ So they're parked here verbatim. At M2b — when Python actually lands — each 
 - **Adapt** — strip YuTom-specific class names, keep the imperative + concrete trigger.
 - **Reject** — YuTom-codebase-specific patterns that don't generalise (e.g. `IndicatorSnapshot` schema-propagation sweep).
 
-Each rule that lands in PriorityKB's `SESSION_PROTOCOL.md` at M2b carries a `Codified 2026-MM-DD from PYTHON_RULES_DRAFT.md (see ADR-0006)` pointer so the lineage is traceable.
+Each rule that lands in PriorityKB's `SESSION_PROTOCOL.md` at M2b carries a `Codified 2026-MM-DD from PYTHON_RULES_DRAFT.md (see ADR-0016)` pointer so the lineage is traceable.
 
 ## Bucket 1 — likely adopt as-written (Python generic)
 
@@ -110,6 +110,8 @@ The audit-source also had a "Claude Sandbox Notes" section that includes some ru
 - **Stub-to-real transport swap requires producer audit.** Generic for any transport swap; reviewable at M2b when ingest worker lands.
 
 ## How to use this file at M2b import time
+
+*(Completed 2026-05-26 — see [ADR-0016](adr/0016-python-rules-adoption.md). The procedure below is preserved verbatim as the historical contract; every step has been executed and the dispositions live in ADR-0016 §§1–8.)*
 
 1. Read this file end-to-end.
 2. For each Bucket 1 rule: copy verbatim into `SESSION_PROTOCOL.md` under a `Python pre-push` sub-section, adapt paths (`api/` for source, `tests/` for tests).

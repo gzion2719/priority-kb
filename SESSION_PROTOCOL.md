@@ -91,6 +91,133 @@ Wait for **"go"**. For trivial focuses, a one-line ack is fine; for new content 
 
 ---
 
+## Python pre-push
+
+Rules imported 2026-05-26 from `docs/PYTHON_RULES_DRAFT.md` per [ADR-0016](docs/adr/0016-python-rules-adoption.md). Path-adaptation convention: `src/` → `api/`; `tests/` unchanged; `requirements-dev.txt` → `pyproject.toml [project.optional-dependencies].dev`. Most rules trigger from M2b #2 onward (when `api/` lands); the first substantive Python-touching PR walks this list and demotes non-firing rules to BACKLOG per ADR-0016 §Mitigations.
+
+Lineage convention: each rule below carries either `Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016)` (DRAFT-sourced) or `Synthesized 2026-05-26 in ADR-0016` (net-new mirrors of CLAUDE.md non-negotiables, no DRAFT origin).
+
+### §1 — Adopted verbatim from DRAFT Bucket 1
+
+<a name="py-immediate-black"></a>
+**Immediate black after each edit.** After every `Edit` / `Write` on a `.py` file, run `python -m black --fast <file>` in the same message. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-zip-strict"></a>
+**`zip()` strict parameter at write time.** Every `zip()` call must include `strict=True` or `strict=False`. Ruff B905 fires deterministically on bare `zip(a, b)`. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-nested-with-flatten"></a>
+**Nested-`with` SIM117 flatten at write time.** When the outer `with` block's body is only an inner `with` statement, flatten to `with A, B:` immediately rather than waiting for the linter. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-type-ignore-code"></a>
+**`# type: ignore` code verification.** Read mypy's exact error code from output; never guess `[return-value]` vs `[no-any-return]`. The wrong code is no suppression at all. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-trailing-whitespace"></a>
+**Trailing-whitespace grep on text edits.** Before declaring any `Edit` to a non-`.py` file done, `grep -n " $" <file>`. (Already implicitly applies to PriorityKB's `.md` edits today; codified explicitly when Python lands.) *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-pep563-unquoted"></a>
+**PEP-563 unquoted-annotation check.** When a file opens with `from __future__ import annotations`, never quote forward-reference annotations (ruff UP037 fires on `def f(x: "Foo")` when `Foo` could be bare). *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-black-linelength-sync"></a>
+**Black line-length sync.** Before any manual line-length check, `grep "line-length" pyproject.toml` (the project's pinned line length may differ from black's default 88). *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-black-version-sync"></a>
+**Black version sync.** Run `python3 -m black --version` and compare against the pin in `pyproject.toml [project.optional-dependencies].dev` before sandbox black checks. A version-mismatched local black "passes" a file CI's black will reformat. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-black-diff-first"></a>
+**Black `--diff` first diagnostic.** When pre-push fails on black, first action is `python -m black --diff <file>` — never read the file and guess at the reformat. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-i001-ruff-fix"></a>
+**I001 repair: always `ruff --fix` first.** Never manually re-sort imports; ruff's isort rules are not reliably hand-reproducible (group ordering, type-checking blocks, conditional imports). *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-smoke-test-fidelity"></a>
+**Smoke-test fidelity.** When pytest can't run in the sandbox and you fall back to a stdlib mirror, the mirror MUST use the same assertion mode as the real test (e.g., `re.search(PATTERN, str(e))` not substring `in`). A relaxed mirror that passes on substring while pytest requires regex match is worse than no smoke test. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-untyped-library-call"></a>
+**Untyped-library call annotation.** Before annotating direct method calls with `# type: ignore[no-untyped-call]` on a `[[tool.mypy.overrides]] ignore_missing_imports = true` library, verify the method actually is untyped via the installed source. The library may have shipped stubs that the override masks. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-sandbox-ruff-sweep"></a>
+**Sandbox ruff pre-handoff sweep.** When a session touches 4+ Python files, run `python3 -m ruff check <all-edited-files>` after all edits, before the handoff message. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-registry-test-sweep"></a>
+**Registry test sweep.** Whenever a registry-style dict's keys are mirrored by an `assert set(d.keys()) == ...` test assertion, grep the test file for that assertion before declaring done — registry additions silently break the assertion's expected-set membership. (Adapted from DRAFT's YuTom-named `EVENT_PAYLOAD_TYPES` rule; generalised to any registry pattern.) *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+### §2 — Adopted with PriorityKB-generic phrasing from DRAFT Bucket 2
+
+Bucket 2 rules originally named YuTom-specific classes / fields / commands; the imperative is generic and lifted here with PriorityKB-generic surface phrasing. Triggers that name a surface not yet present (`api/`-defined class, FastAPI worker) carry `(Trigger fires from M2b #2 onward when api/ lands)`.
+
+<a name="py-third-party-special"></a>
+**Third-party-library special case + first-call extension.** Before patching against a third-party lib (or making the first call to any newly-added library), inspect installed source. `pip show <pkg>` finds the path; read at least the function being called before assuming behaviour. *(Trigger fires from M2b #2 onward.) Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-sibling-bug-sweep"></a>
+**Sibling-bug sweep.** When a Python pre-push check catches a bug, grep sibling files (same directory, same module pattern) for the same bug shape and fix in the same commit. The same protocol slip rarely lives in only one file. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-unsupported-promotion"></a>
+**Unsupported-to-supported promotion sweep.** When a value is promoted from "raises `ValueError`" to "fully supported," grep the entire test suite for the literal — existing tests asserting the rejection path will silently invert. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-internal-type-grep"></a>
+**`api/`-internal type construction grep + `__post_init__` validator scan + attribute-access extension.** Before constructing any `api/`-defined class in a test, grep its `__init__` / dataclass field list to verify exact kwarg names AND its `__post_init__` for value-range validators AND its attribute fields for any `obj.field` assertion in tests. Three reads, one commit. *(Trigger fires from M2b #2 onward.) Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-prod-kwarg-sweep"></a>
+**Production-call-site kwarg sweep.** When adding new kwargs to an existing class `__init__`, grep ALL constructor call sites (including `scripts/` and one-off integration helpers). A new required kwarg without a default breaks every caller silently at runtime, not at type-check time if mypy is loose. *(Trigger fires from M2b #2 onward.) Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-composite-string-assert"></a>
+**Composite-field string assertion.** Before asserting `payload[field] == "exact_string"`, read the composite's source for string transformation (case, strip, normalisation). Asserting the input value against an output that's been NFC-normalised or lower-cased is a vacuous test. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-helper-completeness"></a>
+**Test-helper constructor-completeness check.** When writing a new test helper that wraps a class constructor, read the class's `__init__` signature and verify every kwarg is either forwarded or intentionally omitted with a comment. A helper that silently defaults a kwarg the class actually requires is a test-time foot-gun. (Adapted from DRAFT's YuTom-named `make_xxx_agent` rule.) *(Trigger fires from M2b #2 onward.) Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-test-class-alias"></a>
+**`Test*`-class import alias.** When a test file imports a class whose name starts with `Test`, alias it at import (`from foo import TestThing as TestThingImpl`) to avoid pytest's auto-collection treating it as a test class. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-autouse-patch-consistency"></a>
+**Autouse-fixture patch-mechanism consistency.** Mixed-mode patching (fixture via `unittest.mock.patch`, override via `monkeypatch.setattr`) produces unclear teardown ordering. Pick one mechanism per fixture and stay with it. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-counter-race-isolation"></a>
+**Periodic-counter race isolation + wall-clock-triggered reset extension.** Tests asserting accumulated counter state must set the reset interval to a safely long value (e.g., 1 hour) so that a slow test run doesn't cross a reset boundary. Tests of UTC-hour-triggered resets must use a trigger hour (e.g., 03:00 UTC) that doesn't fire during typical test-run wall-clock times. *(Trigger fires from M2b #2 onward.) Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-utc-test-anchor"></a>
+**UTC/local timezone mismatch in test anchors.** Tests setting a date/time anchor that pairs with UTC-using production code MUST use `datetime.now(UTC).date()`, never `date.today()`. A `date.today()` anchor silently passes near midnight UTC and silently fails the day after across the dateline. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-filter-kwarg-alignment"></a>
+**Filter-kwarg default alignment across helper + factory.** When adding a filter kwarg that gates which events / records reach an inner domain object, verify defaults align across the test helper and the snapshot/factory before writing tests. A helper that defaults `include_X=False` paired with a factory that defaults `include_X=True` produces inverted assertions per test class. (Adapted from DRAFT's "bus-citizen filter parameter alignment".) *(Trigger fires from M2b #2 onward.) Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-side-effect-grep"></a>
+**Side-effect addition grep.** When a previously-pure method gains a state-mutating side effect, grep existing tests for equality assertions on its return value. Tests asserting "same input → same output" silently fail when the method also mutates an enclosing object. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-cross-cutting-recon"></a>
+**Cross-cutting reconciliation file-enumeration sweep.** For any reconciliation spanning multiple files of the same shape (e.g., "every `api/*/handlers.py` declares the same response schema"), run a structural `git grep` across each candidate directory; don't rely on prior enumerations. The set of files of a given shape grows monotonically and a hand-picked list silently misses additions. (Same surface-completeness discipline as the Reconciliation-grep-completeness sub-rule under Step 7.) *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-wallclock-deterministic"></a>
+**Wall-clock → deterministic transition grep.** When changing a function from wall-clock-dependent to deterministic, grep the test file for `datetime.now` / `time.time` / `time.monotonic` near the affected class. Tests that pinned a wall-clock anchor against the old behaviour will pass for the wrong reason against the deterministic replacement. *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+<a name="py-silent-zero-guard"></a>
+**Silent-zero-result guard in smoke tests.** When running any function that produces a count / metric in a smoke test, assert `count > 0` (or the expected non-zero) before reading derived metrics. A silent-zero return produces division-by-zero or vacuous `mean(0)` downstream that masks the upstream failure. (Reframed from DRAFT's "backtest zero-trade guard".) *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+### §3 — Sandbox-disk text-edit close-time verify (Bucket 3 partial promotion)
+
+<a name="py-sandbox-disk-chatlog"></a>
+**Sandbox-disk text-edit close-time verify.** Before sending the Closing Step 5 handoff, verify the sandbox actually wrote the close-time text edits (CHATLOG entry, any other handoff-time edits) — `git --no-optional-locks status` showing the expected file as modified, and a `Read` of the first few lines to confirm content matches the planned entry. A sandbox-disk write that silently failed (permissions, mount drop, OneDrive sync conflict) presents at the next-session open as a missing CHATLOG entry that the Reconstruct-on-drift sub-rule then has to recover. (Promoted from DRAFT Bucket 3 compound entry "Sandbox-disk CHATLOG pre-check + ..."; the other two sub-rules of that compound — sandbox-black-skip + post-handoff black escalation — remain deferred per [ADR-0016](docs/adr/0016-python-rules-adoption.md) §3.) *Codified 2026-05-26 from PYTHON_RULES_DRAFT.md (see ADR-0016).*
+
+### §4 — Script logging initialisation (Rule 9 Python form)
+
+<a name="py-script-logging-init"></a>
+**Script logging initialisation.** Any `api/scripts/*.py` that imports a logger must call the project's chosen log-init function as the first line of `main()` — before any log call, before loading config. Without this, all log output is silently discarded (no terminal output, no file write). The log-init function name is TBD; pinned when the FastAPI worker logging primitive is chosen in M2b #2. *(Trigger fires from M2b #2 onward.) Codified 2026-05-26 from PYTHON_RULES_DRAFT.md §Rule 9 (see ADR-0016 §6).*
+
+### §5 — Iron-rule mirror rules (synthesized in ADR-0016, not in DRAFT)
+
+These three rules mirror CLAUDE.md non-negotiables #8, #9, #10 onto the Python side. YuTom has no iron-rule equivalents, so the DRAFT does not source them; ADR-0016 §8 synthesizes them and they land here.
+
+<a name="py-iron-rule-8-no-live-api-imports"></a>
+**Non-negotiable #8 mirror — Python source-file-no-import scan for live API SDKs.** Any `api/`-side production module that participates in the embedding / agent path MUST NOT import `voyageai`, `anthropic`, or `openai` directly; live API access flows only through a stub-by-default factory mirroring the Node precedent's `getEmbedder()` at `lib/embedding.ts`. The Node mechanical floor at `lib/embedding.test.ts:217-251` (the `non-negotiable #8` describe block) scans the production library source for SDK imports and ships positive-control regex tests against regex-rot — the Python mirror does the same against `api/`-side library modules (likely `api/embeddings.py` and `api/agents/*.py` once they land), with positive controls mirroring the precedent's lines 232-250 pattern. The scan is the mechanical floor backing CLAUDE.md non-negotiable #8 on the Python side. *(Trigger fires from M2b #2 onward when api/ lands.) Synthesized 2026-05-26 in ADR-0016 §8 #1 — not present in PYTHON_RULES_DRAFT.md; mirrors CLAUDE.md non-negotiable #8 for the Python side.*
+
+<a name="py-iron-rule-9-embedding-version-pinned"></a>
+**Non-negotiable #9 mirror — Python `chunks` write-path column-assertion.** Any Python ingest path that writes a `chunks` row MUST populate `embedding_model` + `embedding_version`. Enforced by the existing schema NOT NULL constraints (server-side floor) plus a unit-level assertion in the Python ingest helper that constructs the row (client-side floor — surfaces the mismatch at test time rather than waiting for the SQL error). *(Trigger fires from M2b #2 onward when api/ lands.) Synthesized 2026-05-26 in ADR-0016 §8 #2 — not present in PYTHON_RULES_DRAFT.md; mirrors CLAUDE.md non-negotiable #9 for the Python side.*
+
+<a name="py-iron-rule-10-prompt-hash-sealed"></a>
+**Non-negotiable #10 mirror — Python prompts loaded via sealed-at-boot helper.** Any Python invocation of a Claude agent MUST load the prompt via the Python analog of `lib/prompts.ts`, enforcing three invariants the Node precedent codifies: (a) **sealed at process boot** via a top-level synchronous file-read — precedent `readFileSync` at `lib/prompts.ts:77` (ingestion) and `:132` (retrieval); (b) **hash never supplied by caller** — the audit-row writer pins the hash to the boot-time module-export constant, not to a request-time argument; (c) **byte-roundtrip assertion at module init** — precedent at `lib/prompts.ts:79-89` (ingestion) and `:134-146` (retrieval) recomputes the hash from the in-memory string after the buffer-side hash is sealed and throws if the two diverge (catches encoding-drift attacks where the buffer hash is correct but the string-decoded prompt was altered). Plus: the DB CHECK `audit_log_prompt_hash_required_for_agent` server-side floor satisfied by both Node and Python ingest paths. *(Trigger fires from M2b #2 onward when api/ lands.) Synthesized 2026-05-26 in ADR-0016 §8 #3 — not present in PYTHON_RULES_DRAFT.md; mirrors CLAUDE.md non-negotiable #10 for the Python side.*
+
+---
+
 ## ADR Discipline
 
 ADRs live in `docs/adr/NNNN-<slug>.md`. Number monotonically. The README at `docs/adr/README.md` is the index.

@@ -99,3 +99,15 @@ The external audit's surface that PriorityKB already covers, often more rigorous
 - `docs/ROADMAP.md` M2b checklist — review of `PYTHON_RULES_DRAFT.md`.
 - CHATLOG 2026-05-16 — log helper session ("Step 7b dogfood failure" and "amplified covers review-induced plan changes").
 - Uploaded source files (session attachment): `OPEN_SESSION_PROTOCOL.md`, `CLOSE_SESSION_PROTOCOL.md`, `SESSION_RULES.md`, `SESSION_PROTOCOL.md` (navigation stub).
+
+## Amendment 2026-05-26 — Python rules adoption closes M2b #1
+
+The §Rejected block above noted that *"Rule 5 (~40 Python sub-rules), Rule 7 (C-extension coverage), Rule 9 (script logging init). Parked in `docs/PYTHON_RULES_DRAFT.md` for per-rule review when the M2b FastAPI worker lands. Some sub-rules may have Node analogues (e.g., the script-logging principle for the existing `scripts/*.mjs` files); flagged in BACKLOG."*
+
+That deferral is closed by [ADR-0016](0016-python-rules-adoption.md) (2026-05-26): every rule in `docs/PYTHON_RULES_DRAFT.md` has a recorded disposition — 14 Bucket-1-adopted-verbatim + 16 Bucket-2-adopted-with-PriorityKB-generic-phrasing + 1 Bucket-3-promoted-to-Bucket-1 (sandbox-disk text-edit close-time verify) + Rule 7 rejected as not-applicable (pure-Python wheels) + Rule 8 not-carried pointer (superseded by Step 7b) + Rule 9 adopted-in-Python-form + Node-analogue queued to BACKLOG. The 9-rule "Migrated WORKFLOW.md sections" block from the DRAFT got 4-adopted-now (into `WORKFLOW.md` §Operating discipline) + 4-deferred-with-trigger + 1-rejected.
+
+ADR-0016 §8 also synthesizes 3 net-new iron-rule mirror rules (CLAUDE.md non-negotiables #8/#9/#10) that the DRAFT did not source (YuTom has no iron-rule equivalents). These trigger from M2b #2 onward and are the mechanical-floor mirrors backing the project's existing iron rules on the Python side.
+
+The DRAFT itself flips to imported-for-archaeology status as part of the same PR; the verbatim text is preserved.
+
+Also lifted: ADR-0006 §Deliberately-not-done deferred the SESSION_PROTOCOL.md three-file split; ADR-0016's Python pre-push section pushes the file from ~42KB to ~55KB, well past the 14KB audit threshold this ADR set. The split is filed to BACKLOG as a near-term protocol-hygiene PR.
