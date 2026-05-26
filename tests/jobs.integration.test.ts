@@ -122,13 +122,19 @@ describeIfDb("jobs — integration against Postgres", () => {
   });
 
   it("CHECK constraint: rejects empty idempotency_key", async () => {
+    // DrizzleQueryError wraps pg's CheckViolationError — the constraint
+    // name is on `err.cause.constraint`, not in the wrapper's message
+    // (the wrapper's toString prints the failing SQL). Asserting on the
+    // cause's constraint property is the precise discriminator: it
+    // distinguishes the length-CHECK from any other constraint that
+    // might fail in a future schema change.
     await expect(
       enqueueJob(db, {
         queue: "ingest",
         payload: { entry_id: "abc" },
         idempotencyKey: "",
       }),
-    ).rejects.toThrow(/idempotency_key_length/);
+    ).rejects.toHaveProperty("cause.constraint", "jobs_idempotency_key_length_check");
   });
 
   it("CHECK constraint: rejects 201-char idempotency_key but accepts 200-char", async () => {
@@ -144,7 +150,8 @@ describeIfDb("jobs — integration against Postgres", () => {
     });
     expect(ok.created).toBe(true);
 
-    // 201 chars — one over, must fail.
+    // 201 chars — one over, must fail with the length CHECK (see prior
+    // test for assertion-shape rationale).
     const tooLong = "a".repeat(201);
     await expect(
       enqueueJob(db, {
@@ -152,7 +159,7 @@ describeIfDb("jobs — integration against Postgres", () => {
         payload: { entry_id: "abc" },
         idempotencyKey: tooLong,
       }),
-    ).rejects.toThrow(/idempotency_key_length/);
+    ).rejects.toHaveProperty("cause.constraint", "jobs_idempotency_key_length_check");
   });
 
   it("Zod recursive sensitivity scan fires before SQL", async () => {
@@ -192,9 +199,16 @@ describeIfDb("jobs — integration against Postgres", () => {
       `SELECT indexdef FROM pg_indexes WHERE indexname='jobs_dispatch_idx'`,
     );
     expect(res.rows).toHaveLength(1);
-    // Postgres normalizes the predicate; we match against the state enum
-    // values being restricted to non-terminal states only.
-    expect(res.rows[0]!.indexdef).toMatch(/WHERE \(state = ANY \(ARRAY\['queued'.*'in_progress'\]/);
+    // Postgres normalizes the predicate to the ANY(ARRAY[...]) shape
+    // with `::job_state` type casts on each enum literal, e.g.
+    //   WHERE (state = ANY (ARRAY['queued'::job_state, 'in_progress'::job_state]))
+    // We assert (a) queued + in_progress are both present (positive
+    // control), and (b) the terminal states are absent (negative
+    // assertion — if the predicate were widened, the dispatch index
+    // would silently bloat).
+    expect(res.rows[0]!.indexdef).toMatch(/'queued'/);
+    expect(res.rows[0]!.indexdef).toMatch(/'in_progress'/);
+    expect(res.rows[0]!.indexdef).toMatch(/state = ANY/);
     expect(res.rows[0]!.indexdef).not.toMatch(/'done'/);
     expect(res.rows[0]!.indexdef).not.toMatch(/'failed'/);
     expect(res.rows[0]!.indexdef).not.toMatch(/'dead'/);
