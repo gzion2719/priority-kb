@@ -27,6 +27,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 
 import type { Role } from "@/lib/auth";
+import type { QueryCandidate } from "@/lib/query-chat-state";
 import {
   EmbeddingUnavailableError,
   STUB_DIMENSIONS,
@@ -491,6 +492,30 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     expect(outcome.tokens.embed).toBe(7);
     expect(outcome.tokens.synth_input).toBe(100);
     expect(outcome.tokens.synth_output).toBe(200);
+
+    // M4 #6 hover-preview projection: candidates event carries the new
+    // body_snippet/tags/source_pointer fields end-to-end (real DB → wire).
+    // Negative-assertion: a regression that dropped any field from the
+    // projection fires on the explicit-content checks below — `typeof ===
+    // "string"` checks alone are vacuous against TypeScript-required
+    // fields, so we also assert at least one candidate carries non-empty
+    // tags + non-empty source_pointer (the seed sets both).
+    const candidates = (events[0] as { kind: "candidates"; entries: QueryCandidate[] }).entries;
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const c of candidates) {
+      // Snippet must NEVER carry the synth-rep title prefix on the wire
+      // (row 1 is ANN+keyword healthy — no keyword-only path here, but
+      // the strip is mechanical and should hold on both paths).
+      expect(c.body_snippet.startsWith("# ")).toBe(false);
+      // 240 cap + ellipsis = 241 max.
+      expect(c.body_snippet.length).toBeLessThanOrEqual(241);
+    }
+    // Explicit-content checks — regression that wired `tags: []` /
+    // `source_pointer: ""` / `body_snippet: ""` for every candidate
+    // would pass the per-candidate loop above but fail here.
+    expect(candidates.some((c) => c.tags.length > 0)).toBe(true);
+    expect(candidates.some((c) => c.source_pointer.length > 0)).toBe(true);
+    expect(candidates.some((c) => c.body_snippet.length > 0)).toBe(true);
   });
 
   // ── Row 2: embed ok + rerank ok + synth FAIL ──────────────────────────────
@@ -659,6 +684,17 @@ describeIfDb("retrievePipeline — ADR-0013 §3 matrix integration", () => {
     expect(outcome.tokens.embed).toBe(0);
     expect(outcome.reranked_ids.length).toBeGreaterThan(0);
     expect(outcome.citation_ids).toEqual([]);
+
+    // M4 #6 — keyword-only path stripping the `# title\n` synth-rep prefix
+    // is exercised end-to-end here (real DB, real keyword lane, real
+    // synthesizeKeywordOnlyRepresentative source). Negative-assertion:
+    // a regression that removed the strip would surface every candidate
+    // body_snippet beginning with "# ".
+    const candidates = (events[0] as { kind: "candidates"; entries: QueryCandidate[] }).entries;
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const c of candidates) {
+      expect(c.body_snippet.startsWith("# ")).toBe(false);
+    }
   });
 
   // ── Row 8: embed FAIL + rerank FAIL + synth FAIL ──────────────────────────

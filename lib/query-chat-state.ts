@@ -51,6 +51,50 @@ export type QueryCandidate = {
   category: string;
   sensitivity: "public" | "internal" | "restricted";
   last_verified_at: string; // ISO timestamp
+  /**
+   * Body excerpt for the citation hover preview (M4 #6). Server-projected
+   * from the SAME `boundaries[].body` the reranker/synth sees for this
+   * entry (lib/retrieval-pipeline.ts) — ANN-best-chunk slice on the
+   * embed-OK path, or `synthesizeKeywordOnlyRepresentative` on the
+   * keyword-only path with the `# ${title}\n` prefix stripped. Capped at
+   * `CANDIDATE_SNIPPET_MAX_CHARS` (240) chars via `safeSnippetSlice`
+   * which backs off Unicode combining sequences + UTF-16 surrogate pairs.
+   *
+   * Required (not optional) — three new fields below are informational
+   * projections the server always has, so optional would force the
+   * client into needless undefined-handling. Wire deviation from the
+   * `degraded_reason` optional precedent is deliberate: there is no
+   * out-of-repo emitter and no rolling-window deploy. Type-errors on
+   * test fixtures are the desired surface-completeness signal per
+   * Reconciliation-grep-completeness sub-rule.
+   *
+   * On the `chunks_only` terminal path the page MUST prefer the
+   * per-rank `chunkSnippets[].snippet` (post-rerank, possibly different
+   * order) over this pre-rerank `body_snippet` so the snippet shown
+   * matches the chunk that survived rerank. See app/query/page.tsx
+   * hover-render comment.
+   *
+   * Iron-rule #6: same data plane as the post-WHERE-filtered entry
+   * rows. The row already passed the sensitivity gate at the SQL layer
+   * (lib/retrieval-ann.ts + lib/retrieval-keyword.ts); projecting body
+   * content onto the wire is consistent with `chunks_only`'s existing
+   * `snippet` field.
+   */
+  body_snippet: string;
+  /**
+   * Entry tags verbatim from `entries.tags`. No per-field sensitivity
+   * policy — non-negotiables #6/#7 treat the entry row as the unit.
+   * Empty array when the entry has no tags.
+   */
+  tags: string[];
+  /**
+   * Entry source pointer (ticket #, doc link, conversation reference)
+   * verbatim from `entries.source_pointer`. Rendered as plain text in
+   * the hover preview — not linkified in v1, to avoid click-to-leak /
+   * SSRF surfaces if a future entry's source field contains a URL with
+   * a token. Linkification with allowlist queued in BACKLOG.
+   */
+  source_pointer: string;
 };
 
 /**

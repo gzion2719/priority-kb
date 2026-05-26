@@ -67,6 +67,7 @@ import { sensitivityAllowedForRole, type Role } from "@/lib/auth";
 import { getDb as defaultGetDb, getPool as defaultGetPool } from "@/lib/db";
 import { EmbeddingUnavailableError, type Embedder } from "@/lib/embedding";
 import { RETRIEVAL_AGENT_PROMPT } from "@/lib/prompts";
+import { projectCandidateSnippet } from "@/lib/snippet";
 import { annCandidates as defaultAnnFn, type AnnCandidate } from "@/lib/retrieval-ann";
 import { validateCitations, type CitationValidationResult } from "@/lib/retrieval-citations";
 import { type DegradedReasonCode } from "@/lib/retrieval-degraded";
@@ -519,14 +520,32 @@ export async function* retrievePipeline(
     };
   });
 
-  // Emit candidates event (always before any synth-side emission).
-  const candidateEvents: QueryCandidate[] = orderedRows.map((r) => ({
-    entry_id: r.id,
-    title: r.title,
-    category: r.category,
-    sensitivity: r.sensitivity,
-    last_verified_at: r.last_verified_at.toISOString(),
-  }));
+  // Emit candidates event (always before any synth-side emission — stays
+  // pre-rerank by construction, so `boundaries[i]` aligns with
+  // `orderedRows[i]` at this point: same .map source, no reordering yet).
+  //
+  // Project body_snippet/tags/source_pointer from `boundaries[]` (M4 #6).
+  // boundaries[i].body is the EXACT text the reranker/synth see for this
+  // entry (ANN best-chunk body OR synthesizeKeywordOnlyRepresentative for
+  // keyword-only entries) — projecting it as the hover preview gives the
+  // user a view of what the model scored, satisfying iron-rule #6
+  // same-data-plane (no new sensitivity surface beyond what the row
+  // already passed in SQL WHERE; same plane as `chunks_only.snippet`).
+  // Title prefix `# ${title}\n` on keyword-only path is stripped by
+  // `projectCandidateSnippet` to avoid doubling the title in the card.
+  const candidateEvents: QueryCandidate[] = orderedRows.map((r, i) => {
+    const b = boundaries[i]!;
+    return {
+      entry_id: r.id,
+      title: r.title,
+      category: r.category,
+      sensitivity: r.sensitivity,
+      last_verified_at: r.last_verified_at.toISOString(),
+      body_snippet: projectCandidateSnippet(b.body, r.title),
+      tags: r.tags,
+      source_pointer: r.source_pointer,
+    };
+  });
   yield { kind: "candidates", entries: candidateEvents };
 
   // ── Stage C: rerank ─────────────────────────────────────────────────────

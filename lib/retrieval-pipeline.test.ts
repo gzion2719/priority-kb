@@ -21,6 +21,7 @@ import {
   type Reranker,
   type Synthesizer,
 } from "@/lib/retrieval";
+import type { QueryCandidate } from "@/lib/query-chat-state";
 import type { AnnCandidate } from "@/lib/retrieval-ann";
 import type { KeywordCandidate } from "@/lib/retrieval-keyword";
 import {
@@ -675,5 +676,95 @@ describe("orchestrator constants", () => {
   it("matches ADR-0013 §2.3 K=20 + ADR-0012 §C top-N=5", () => {
     expect(TOP_K_ANN).toBe(20);
     expect(TOP_N_SYNTH).toBe(5);
+  });
+});
+
+// ── M4 #6 candidates event — body_snippet/tags/source_pointer projection ───
+//
+// These tests pin the wire-shape extension shipped with the citation-
+// hover-preview slice. The candidates event now carries three extra
+// fields projected from `boundaries[].body` — the SAME text the reranker
+// and synth see for each entry — so the hover popup matches what the
+// model scored. See ADR-0012 Amendment 2026-05-26.
+
+describe("retrievePipeline — candidates event hover-preview projection (M4 #6)", () => {
+  it("ANN-best-chunk path: body_snippet is sliced from the entry body, no `# title` prefix", async () => {
+    const body = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    const deps = buildDeps({
+      ann: [{ entry_id: E1, best_chunk_id: C1, ann_distance: 0.1, rank: 1 }],
+      keyword: [{ entry_id: E1, keyword_score: 0.8, rank: 1, raw_query: "q" }],
+      entries: [entryRow(E1, body)],
+      // ANN-best-chunk slice covers the first 20 chars of the body. The
+      // candidate snippet should reflect THAT slice, not the full body —
+      // this is how the user sees what the model scored.
+      chunks: [{ id: C1, entry_id: E1, content_start: 0, content_end: 20 }],
+    });
+    const { events } = await drainPipeline(retrievePipeline(deps, { query: "q", role: "user" }));
+    const candidatesEvent = events.find((e) => e.kind === "candidates")!;
+    const cand = (candidatesEvent as { entries: QueryCandidate[] }).entries[0]!;
+    expect(cand.body_snippet).toBe("alpha beta gamma del"); // 20-char slice
+    // Negative-assertion: ANN path must NEVER carry the synth-rep prefix.
+    // A regression that always synthesised the keyword-rep would emit
+    // "# title-...\n..." here.
+    expect(cand.body_snippet.startsWith("# ")).toBe(false);
+    expect(cand.tags).toEqual(["tag1"]);
+    expect(cand.source_pointer).toBe(`src-${E1.slice(0, 4)}`);
+  });
+
+  it("keyword-only path: body_snippet has the `# title\\n` synth-rep prefix STRIPPED", async () => {
+    // No ANN result for this entry — keyword-only path. boundaries[i].body
+    // becomes synthesizeKeywordOnlyRepresentative output: `# title-...\n` +
+    // body slice. The candidate snippet must strip the prefix so the
+    // hover popup doesn't double the title (the card already shows it).
+    const deps = buildDeps({
+      ann: [],
+      keyword: [{ entry_id: E1, keyword_score: 0.8, rank: 1, raw_query: "q" }],
+      entries: [entryRow(E1, "the actual body text")],
+      chunks: [],
+    });
+    const { events } = await drainPipeline(retrievePipeline(deps, { query: "q", role: "user" }));
+    const candidatesEvent = events.find((e) => e.kind === "candidates")!;
+    const cand = (candidatesEvent as { entries: QueryCandidate[] }).entries[0]!;
+    // Prefix gone:
+    expect(cand.body_snippet.startsWith("# ")).toBe(false);
+    // Real body content present (the synth-rep wraps the whole body for
+    // small inputs):
+    expect(cand.body_snippet).toContain("the actual body text");
+  });
+
+  it("snippet caps at 240 chars with ellipsis on a long body (no orphan boundary)", async () => {
+    const longBody = "x".repeat(300);
+    const deps = buildDeps({
+      ann: [{ entry_id: E1, best_chunk_id: C1, ann_distance: 0.1, rank: 1 }],
+      keyword: [{ entry_id: E1, keyword_score: 0.8, rank: 1, raw_query: "q" }],
+      entries: [entryRow(E1, longBody)],
+      chunks: [{ id: C1, entry_id: E1, content_start: 0, content_end: 300 }],
+    });
+    const { events } = await drainPipeline(retrievePipeline(deps, { query: "q", role: "user" }));
+    const cand = (events.find((e) => e.kind === "candidates") as { entries: QueryCandidate[] })
+      .entries[0]!;
+    // 240 chars + 1 ellipsis = 241 chars. A regression that returned the
+    // raw 300-char body (or sliced without the ellipsis) fires here.
+    expect(cand.body_snippet).toBe("x".repeat(240) + "…");
+  });
+
+  it("empty tags pass through as []; missing source has no effect (defensive shape)", async () => {
+    const deps = buildDeps({
+      ann: [{ entry_id: E1, best_chunk_id: C1, ann_distance: 0.1, rank: 1 }],
+      keyword: [{ entry_id: E1, keyword_score: 0.8, rank: 1, raw_query: "q" }],
+      entries: [
+        {
+          ...entryRow(E1, "body"),
+          tags: [],
+          source_pointer: "",
+        },
+      ],
+      chunks: [{ id: C1, entry_id: E1, content_start: 0, content_end: 4 }],
+    });
+    const { events } = await drainPipeline(retrievePipeline(deps, { query: "q", role: "user" }));
+    const cand = (events.find((e) => e.kind === "candidates") as { entries: QueryCandidate[] })
+      .entries[0]!;
+    expect(cand.tags).toEqual([]);
+    expect(cand.source_pointer).toBe("");
   });
 });
