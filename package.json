@@ -20,7 +20,7 @@
     "eval": "tsx evals/run.ts",
     "eval:lint": "tsx evals/run.ts --lint-only",
     "revert:private": "node scripts/revert-to-private.mjs",
-    "check": "node scripts/check-repo-public-banner.mjs && node scripts/check-pr-title-allowlist-drift.mjs && npm run lint && npm run format:check && npm run typecheck && npm run eval:lint && npm test",
+    "check": "node scripts/check-repo-public-banner.mjs && node scripts/check-pr-title-allowlist-drift.mjs && node scripts/precheck-test-count-vs-precedent.mjs && npm run lint && npm run format:check && npm run typecheck && npm run eval:lint && npm test",
     "pre-push": "npm run check"
   },
   "engines": {
