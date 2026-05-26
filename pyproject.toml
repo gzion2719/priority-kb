@@ -9,12 +9,15 @@ requires-python = ">=3.12"
 dependencies = [
   "fastapi==0.136.3",
   "uvicorn[standard]==0.48.0",
+  # ADR-0019 M2b #3 — Postgres async driver for the job-queue worker.
+  # psycopg v3 chosen over asyncpg per ADR-0008's minimum-surface posture;
+  # psycopg's sync+async symmetry pays off when M2b #5+ parsing pipelines
+  # don't need async, and pgvector's psycopg adapter lands cleanly here.
+  "psycopg[binary]==3.2.3",
   # Pinned per M2b item. Anticipated additions:
   # "sqlalchemy",
   # "alembic",
-  # "psycopg[binary]",
   # "pgvector",
-  # "pgqueuer",
   # "anthropic",
   # "voyageai",
   # "azure-ai-documentintelligence",
@@ -29,6 +32,9 @@ dev = [
   "mypy>=1.11",
   "pytest>=8.0",
   "pytest-cov>=5.0",
+  # ADR-0019 M2b #3 — api/jobs.py is async; api/tests/test_jobs.py needs
+  # the @pytest.mark.asyncio marker + pytest_asyncio fixture decorator.
+  "pytest-asyncio>=0.24",
   # TestClient transitive dep — pinned explicitly so the resolver doesn't
   # gamble with fastapi/starlette's version floor.
   "httpx==0.28.1",
@@ -57,6 +63,19 @@ strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 
+# psycopg + pytest_asyncio ship typed; no mypy override needed.
+# Sandbox must `pip install -e ".[dev]"` (or the explicit deps
+# `psycopg[binary]==3.2.3 pytest-asyncio>=0.24`) for mypy --strict to
+# resolve their stubs. CI does this via the python job's install step;
+# local devs should mirror it. The previous version of this block
+# added a blanket `ignore_missing_imports = true` override for both
+# libs, which masked CI's "Unused type: ignore" errors and caused the
+# untyped-decorator regression that broke the first PR2 CI run.
+
 [tool.pytest.ini_options]
 addopts = "--cov=api --cov-report=term-missing"
 testpaths = ["api/tests"]
+# ADR-0019 M2b #3 — pytest-asyncio strict mode (per the lib's recommended
+# default; opt-in `@pytest.mark.asyncio` on each async test rather than
+# auto-running every `async def`).
+asyncio_mode = "strict"

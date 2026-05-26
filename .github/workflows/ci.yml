@@ -136,6 +136,30 @@ jobs:
     # 2026-05-21 (ADR-0011 cost-trim) and reintroduced here at M2b #2 (FastAPI
     # worker scaffold) per ROADMAP line "Python FastAPI worker scaffolded at
     # api/; pyproject.toml activated."
+    #
+    # Postgres service added 2026-05-26 at M2b #3 (ADR-0019 job queue) —
+    # api/tests/test_jobs.py exercises real claim_one + mark_done + mark_failed
+    # SQL against the jobs table. Mirrors the node job's service block + the
+    # db/init.sql + npm run db:migrate sequence so the Python tests run
+    # against the same schema the Node tests see.
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/priority_kb
+    services:
+      postgres:
+        # Same pinned digest as the `node` + `e2e` jobs — bump in lockstep
+        # with docker-compose.yml.
+        image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: priority_kb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d priority_kb"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v6
 
@@ -144,10 +168,29 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install
+      - name: Setup Node (for drizzle-kit migrate)
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Python
         # Editable install so the api/ package + dev-extras are importable in
         # the same venv ruff / black / mypy / pytest run against.
         run: pip install -e ".[dev]"
+
+      - name: Install Node (for drizzle-kit migrate)
+        # Migrations are owned by drizzle-kit per ADR-0008; the Python job
+        # runs them via `npm run db:migrate` (same command the node + e2e
+        # jobs use) so the schema the Python tests see matches the Node
+        # tests' schema exactly.
+        run: npm ci
+
+      - name: Apply db/init.sql (bootstrap)
+        run: psql "$DATABASE_URL" -f db/init.sql
+
+      - name: Run migrations
+        run: npm run db:migrate
 
       - name: py-check
         # Single Make target chains ruff + black --check + mypy --strict + pytest;
