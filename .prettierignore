@@ -12,3 +12,11 @@ evals/**/*.yaml
 .claude/worktrees/
 .claude/settings.json
 drizzle/migrations/meta/**
+
+# --- Python (M2b #2+) ---
+# FastAPI worker scaffold lives under /api/; Python files are not Prettier-handled
+# (black + ruff own that surface via `make py-check`). Makefile is tab-sensitive
+# and must not be reformatted by Prettier.
+/api/
+/Makefile
+/pyproject.toml

@@ -37,3 +37,4 @@ The Context section describes the world the ADR addresses (what the spec require
 | 0015 | [Browser-mediated e2e runtime: Playwright (BACKLOG:77 back-nav)](0015-back-nav-e2e-runner.md) | Accepted |
 | 0016 | [Python rules adoption from PYTHON_RULES_DRAFT.md (M2b #1)](0016-python-rules-adoption.md) | Accepted |
 | 0017 | [Closing-ritual extraction to CLOSE_SESSION_PROTOCOL.md](0017-protocol-split-closing.md) | Accepted |
+| 0018 | [Python logging primitive for the FastAPI worker (M2b #2)](0018-python-logging-primitive.md) | Accepted |

@@ -201,7 +201,7 @@ Bucket 2 rules originally named YuTom-specific classes / fields / commands; the 
 ### §4 — Script logging initialisation (Rule 9 Python form)
 
 <a name="py-script-logging-init"></a>
-**Script logging initialisation.** Any `api/scripts/*.py` that imports a logger must call the project's chosen log-init function as the first line of `main()` — before any log call, before loading config. Without this, all log output is silently discarded (no terminal output, no file write). The log-init function name is TBD; pinned when the FastAPI worker logging primitive is chosen in M2b #2. *(Trigger fires from M2b #2 onward.) Codified 2026-05-26 from PYTHON_RULES_DRAFT.md §Rule 9 (see ADR-0016 §6).*
+**Script logging initialisation.** Any `api/scripts/*.py` that imports a logger must call `api.log.init_logging()` as the first line of `main()` — before any log call, before loading config. Without this, all log output is silently discarded (no terminal output, no file write). The log-init function is `api.log.init_logging` (pinned 2026-05-26 in [ADR-0018](docs/adr/0018-python-logging-primitive.md); ADR-0016 §6 Amendment 2026-05-26 cross-refs ADR-0018). *(Trigger fires from M2b #2 onward.) Codified 2026-05-26 from PYTHON_RULES_DRAFT.md §Rule 9 (see ADR-0016 §6).*
 
 ### §5 — Iron-rule mirror rules (synthesized in ADR-0016, not in DRAFT)
 

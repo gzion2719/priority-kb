@@ -75,7 +75,7 @@ On the golden eval set, retrieval recall@5 ≥ 0.8 and citation precision ≥ 0.
 
 ### Checklist
 - [x] **Review and adapt Python rules from [`docs/PYTHON_RULES_DRAFT.md`](PYTHON_RULES_DRAFT.md)** — three-bucket sort (adopt / adapt / reject) per the file's "How to use this file at M2b import time" section. Adopted rules land in [SESSION_PROTOCOL.md §Python pre-push](../SESSION_PROTOCOL.md#python-pre-push); bucket assignments + Rule 7 / 8 / 9 dispositions + 3 net-new iron-rule mirror rules in [ADR-0016](adr/0016-python-rules-adoption.md). DRAFT flipped to imported-for-archaeology status. Per [ADR-0006](adr/0006-process-alignment-with-external-audit.md).
-- [ ] Python FastAPI worker scaffolded at `api/`; `pyproject.toml` activated.
+- [x] Python FastAPI worker scaffolded at `api/`; `pyproject.toml` activated — see [api/main.py](../api/main.py) (FastAPI app + `/healthz`), [api/log.py](../api/log.py) ([ADR-0018](adr/0018-python-logging-primitive.md) — runtime logger, NOT the LogEvent emitter), [api/tests/test_iron_rule_8_no_live_api_imports.py](../api/tests/test_iron_rule_8_no_live_api_imports.py) (iron-rule #8 mirror per [ADR-0016](adr/0016-python-rules-adoption.md) §8 #1), [Makefile](../Makefile) `py-check` gate, [.github/workflows/ci.yml](../.github/workflows/ci.yml) `python` job. ADR-0016 §Mitigations #1 floor walk recorded in ADR-0016 Amendment 2026-05-26; substantive walk deferred to M2b #3.
 - [ ] `pgqueuer` (or equivalent) job queue table; Next.js enqueues, worker consumes.
 - [ ] File upload endpoint → blob storage (local FS in dev, prep S3 abstraction for prod).
 - [ ] PDF parsing (`pypdf`), Word parsing (`python-docx`).
