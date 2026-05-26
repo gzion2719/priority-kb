@@ -6,6 +6,7 @@ import {
   index,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -128,6 +129,46 @@ export const chunks = pgTable(
     ),
   }),
 );
+
+// ADR-0019 M2b #3 — job queue. Drizzle owns the schema (ADR-0008); the table is
+// consumed from both Node (lib/jobs.ts enqueue) and Python (api/jobs.py worker).
+// `updated_at` is caller-maintained — no auto-update trigger (ADR-0019
+// Amendment 2026-05-26 §I; §D10 cross-references).
+export const jobStateEnum = ["queued", "in_progress", "done", "failed", "dead"] as const;
+export type JobState = (typeof jobStateEnum)[number];
+export const jobState = pgEnum("job_state", jobStateEnum);
+
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    queue_name: text("queue_name").notNull(),
+    payload: jsonb("payload").notNull(),
+    idempotency_key: text("idempotency_key").notNull(),
+    state: jobState("state").notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    max_attempts: integer("max_attempts").notNull().default(5),
+    run_after: timestamp("run_after", { withTimezone: true }).notNull().defaultNow(),
+    locked_until: timestamp("locked_until", { withTimezone: true }),
+    locked_by: text("locked_by"),
+    last_error: text("last_error"),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    idempotencyKeyUnique: unique("jobs_idempotency_key_uq").on(t.idempotency_key),
+    idempotencyKeyLength: check(
+      "jobs_idempotency_key_length_check",
+      sql`length(${t.idempotency_key}) BETWEEN 1 AND 200`,
+    ),
+    dispatchIdx: index("jobs_dispatch_idx")
+      .on(t.queue_name, t.state, t.run_after)
+      .where(sql`${t.state} IN ('queued', 'in_progress')`),
+  }),
+);
+
+export type Job = typeof jobs.$inferSelect;
+export type NewJob = typeof jobs.$inferInsert;
 
 export const audit_log = pgTable(
   "audit_log",
