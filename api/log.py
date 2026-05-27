@@ -5,8 +5,11 @@ diagnostics (startup, shutdown, request lifecycle, unexpected errors).
 
 This is NOT the LogEvent emitter. The Python equivalent of ``lib/log.ts``
 ``logEvent`` (structured per-vendor records for Claude / Voyage / retrieval
-pipeline) lands separately in M2b #4 with its own ADR cross-referencing
-ADR-0005. See ADR-0018 §"Scope" for the boundary.
+pipeline) lives at ``api/log_event.py`` per
+[ADR-0020](../docs/adr/0020-python-log-event-emitter.md). The ``LogEventJob``
+variant ships today (M2b #3 closeout); vendor variants land alongside their
+first Python call site at M2b #5+. See ADR-0018 §"Scope" for the
+application-logger / LogEvent-emitter boundary.
 """
 
 from __future__ import annotations
