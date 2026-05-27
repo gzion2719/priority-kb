@@ -9,6 +9,12 @@ secrets/
 # --- Eval runner artifact (regenerated per run) ---
 evals/last-run.json
 
+# --- M2b #4 local blob storage (LocalFSBlobStore default root) ---
+# Admin-uploaded media lands here in dev (`BLOB_STORAGE_DIR` env override
+# in prod / S3 in M5). Never committed — content is admin-supplied
+# binaries that may carry sensitive Priority screenshots.
+blob-storage/
+
 # --- Node ---
 node_modules/
 .next/
