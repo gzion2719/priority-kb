@@ -39,9 +39,27 @@ class WorkerErrorClass(StrEnum):
     OCR'd version is the recovery path."""
 
     UnsupportedContentType = "unsupported_content_type"
-    """Job payload `content_type` is not one of the M2b #5 handlers'
-    known content types (PDF, DOCX). Image content types — PNG / JPG /
-    WEBP — defer to M2b #6 OCR; until that lands they fall here."""
+    """Job payload `content_type` is not in the union of supported
+    content-type sets (M2b #5 parsers: PDF + DOCX; M2b #6 OCR: PNG +
+    JPEG + WEBP). Catches operator misconfigurations and adversarial
+    uploads that slipped past the route allowlist. NOT retry-eligible
+    in steady state — the content_type won't become supported by
+    re-running the same job."""
+
+    OcrFailed = "ocr_failed"
+    """OCR adapter raised `OcrError("ocr_failed")` — Azure DI outage,
+    quota exhaustion, credential error, transient 5xx, or SDK import
+    failure. Retry-eligible per WorkerErrorClass attempts policy. See
+    ADR-0022 Amendment A1."""
+
+    OcrEmpty = "ocr_empty_result"
+    """OCR adapter raised `OcrError("empty_result")` — image was OCR'd
+    but no paragraphs / no content surfaced. Operator recovery: re-shoot
+    with higher resolution / better contrast / less occlusion. Does NOT
+    imply the source has no text — only that the vendor couldn't extract
+    any. Retry-eligible because operator intervention (re-upload) is the
+    standard recovery; the job stays in the dead queue until then. See
+    ADR-0022 Amendment A1."""
 
     BlobReadFailed = "blob_read_failed"
     """FS / IO error reading the blob from `BLOB_STORAGE_DIR`. Usually

@@ -32,9 +32,15 @@ if TYPE_CHECKING:
     from azure.ai.documentintelligence.models import AnalyzeResult
 
 
-# Image-only allowlist per ADR-0022 D3. PDFs continue routing through
-# parse_pdf (ADR-0021). Extension requires ADR-0022 amendment.
-_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset({"image/png", "image/jpeg", "image/webp"})
+# Canonical allowlist sourced from api.ocr (ADR-0022 Amendment A3 — single
+# source of truth). Local import-at-use to avoid the api.ocr → azure.py
+# import cycle (api.ocr.__init__ imports this module transitively via
+# factory.py's lazy branch).
+def _allowed_content_types() -> frozenset[str]:
+    from api.ocr import OCR_ALLOWED_CONTENT_TYPES
+
+    return OCR_ALLOWED_CONTENT_TYPES
+
 
 # Sealed at module init — see ADR-0022 D4.
 _MODEL_ID = "prebuilt-layout"
@@ -65,7 +71,7 @@ class AzureDocumentIntelligenceAdapter:
             OcrError("empty_result")             — Azure returned 0
                 paragraphs.
         """
-        if content_type not in _ALLOWED_CONTENT_TYPES:
+        if content_type not in _allowed_content_types():
             raise OcrError(
                 "unsupported_content_type",
                 f"Azure adapter does not accept content_type={content_type!r}",
