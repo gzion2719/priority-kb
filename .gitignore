@@ -86,9 +86,11 @@ fixtures/
 # But DO commit checked-in test fixtures (hand-written stubs, not
 # runtime-recorded artifacts). The `fixtures/` rule above is for the
 # enableFixtureRecording() output, not for hand-written test helpers
-# under tests/fixtures/.
+# under tests/fixtures/ or api/tests/fixtures/.
 !tests/fixtures/
 !tests/fixtures/**
+!api/tests/fixtures/
+!api/tests/fixtures/**
 
 # --- Local-only ---
 .local/

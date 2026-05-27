@@ -32,6 +32,10 @@ from uuid import UUID
 
 import psycopg
 
+from api.handlers import build_registry
+from api.handlers.ingest_api_client import build_client
+from api.handlers.media_ingest import make_handler as make_media_ingest_handler
+from api.handlers.media_ingest import resolve_blob_root, resolve_ingest_api_base_url
 from api.jobs import Job, claim_one, mark_failed
 from api.log import init_logging
 
@@ -201,9 +205,20 @@ def main() -> int:
         logger.error("worker: DATABASE_URL must be set")
         return 1
 
+    # M2b #5 — required env for the media-ingest handler. Fail loud at
+    # startup so a misconfigured deployment doesn't silently mark every
+    # ingest job failed via BlobReadFailed (ADR-0021 §D11).
+    try:
+        blob_root = resolve_blob_root()
+        ingest_api_base_url = resolve_ingest_api_base_url()
+    except RuntimeError as e:
+        logger.error("worker: %s", e)
+        return 1
+
     queue = os.environ.get("WORKER_QUEUE", "ingest")
     vis_timeout_s = int(os.environ.get("WORKER_VIS_TIMEOUT_S", "60"))
     poll_interval_s = float(os.environ.get("WORKER_POLL_INTERVAL_S", "1.0"))
+    ingest_api_timeout_s = float(os.environ.get("INGEST_API_TIMEOUT_S", "30.0"))
     worker_id = make_worker_id()
 
     state = WorkerState()
@@ -212,26 +227,51 @@ def main() -> int:
     def conn_factory() -> Any:
         return psycopg.AsyncConnection.connect(database_url)
 
+    # ADR-0021 §D10 — httpx.AsyncClient singleton per worker lifetime.
+    http_client = build_client(timeout_s=ingest_api_timeout_s)
+
+    media_ingest_handler = make_media_ingest_handler(
+        conn_factory=conn_factory,
+        worker_id=worker_id,
+        http_client=http_client,
+        ingest_api_base_url=ingest_api_base_url,
+        blob_root=blob_root,
+    )
+    registry = build_registry(media_ingest_handler=media_ingest_handler)
+
     logger.info(
         "worker starting",
         extra={"worker_id": worker_id, "queue": queue, "vis_timeout_s": vis_timeout_s},
     )
 
-    async def handler_with_factory(job: Job) -> None:
-        await _default_handler(job, conn_factory=conn_factory, worker_id=worker_id)
+    async def dispatch(job: Job) -> None:
+        handler_fn = registry.get(job.queue_name)
+        if handler_fn is None:
+            # Unknown queue — fall back to the explicit-fail default per
+            # ADR-0019 §D6. Preserves the "no silently rotting jobs"
+            # invariant even when a new queue lands without a handler.
+            await _default_handler(job, conn_factory=conn_factory, worker_id=worker_id)
+            return
+        await handler_fn(job)
 
-    try:
-        asyncio.run(
-            poll_loop(
+    async def run() -> None:
+        try:
+            await poll_loop(
                 state,
                 queue=queue,
                 worker_id=worker_id,
                 vis_timeout_s=vis_timeout_s,
                 poll_interval_s=poll_interval_s,
                 conn_factory=conn_factory,
-                handler=handler_with_factory,
+                handler=dispatch,
             )
-        )
+        finally:
+            # Drain the connection pool on shutdown so test runs + ops
+            # teardown don't leak sockets.
+            await http_client.aclose()
+
+    try:
+        asyncio.run(run())
     except KeyboardInterrupt:
         logger.info("worker: KeyboardInterrupt; exiting")
     return 0

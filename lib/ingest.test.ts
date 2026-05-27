@@ -529,6 +529,67 @@ describe("updateEntry — happy path: ordering + version increment + audit", () 
     expect(row.payload.version_no).toBe(3);
   });
 
+  it("ADR-0021 §D3: audit_extra.worker_id threads into audit_log.payload", async () => {
+    const mock = makeMockDb({ maxVersionNo: 2 });
+    const embedder = createStubEmbedder();
+    await updateEntry({
+      db: mock.db,
+      embedder,
+      id: "existing-entry-id",
+      input: baseInput(),
+      source: { kind: "direct" },
+      audit_extra: { worker_id: "worker-host-42-abcd" },
+    });
+    const row = mock.inserts.find((o) => o.table === "audit_log")!.rows[0] as {
+      payload: Record<string, unknown>;
+    };
+    expect(row.payload.worker_id).toBe("worker-host-42-abcd");
+    // Negative-assertion: dropping the conditional-include would leak a
+    // `job_id: undefined` key into the audit row, which dashboards
+    // grouping by `payload->>'job_id'` would mis-bucket. Pin the key-set.
+    expect("job_id" in row.payload).toBe(false);
+  });
+
+  it("ADR-0021 §D3: audit_extra with both worker_id + job_id lands in payload", async () => {
+    const mock = makeMockDb({ maxVersionNo: 2 });
+    const embedder = createStubEmbedder();
+    await updateEntry({
+      db: mock.db,
+      embedder,
+      id: "existing-entry-id",
+      input: baseInput(),
+      source: { kind: "direct" },
+      audit_extra: {
+        worker_id: "worker-host-42-abcd",
+        job_id: "00000000-1111-2222-3333-444444444444",
+      },
+    });
+    const row = mock.inserts.find((o) => o.table === "audit_log")!.rows[0] as {
+      payload: Record<string, unknown>;
+    };
+    expect(row.payload.worker_id).toBe("worker-host-42-abcd");
+    expect(row.payload.job_id).toBe("00000000-1111-2222-3333-444444444444");
+  });
+
+  it("ADR-0021 §D3: human-admin PUT (no audit_extra) writes the unchanged payload shape", async () => {
+    const mock = makeMockDb({ maxVersionNo: 2 });
+    const embedder = createStubEmbedder();
+    await updateEntry({
+      db: mock.db,
+      embedder,
+      id: "existing-entry-id",
+      input: baseInput(),
+      source: { kind: "direct" },
+      // audit_extra intentionally omitted
+    });
+    const row = mock.inserts.find((o) => o.table === "audit_log")!.rows[0] as {
+      payload: Record<string, unknown>;
+    };
+    // Pre-ADR-0021 shape: no worker_id / no job_id keys at all.
+    expect("worker_id" in row.payload).toBe(false);
+    expect("job_id" in row.payload).toBe(false);
+  });
+
   it("agent source: kind:'agent_ingest_update' + prompt_hash from lib/prompts", async () => {
     const mock = makeMockDb({ maxVersionNo: 2 });
     const embedder = createStubEmbedder();

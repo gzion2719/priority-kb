@@ -339,8 +339,17 @@ export async function updateEntry(args: {
   input: IngestInput;
   /** REQUIRED. See `createEntry` doc-comment for the rationale. */
   source: IngestSource;
+  /**
+   * Optional attribution payload merged into `audit_log.payload`. Per
+   * [ADR-0021 §D3](../docs/adr/0021-worker-http-callback-architecture.md):
+   * the M2b #5 worker passes its `worker_id` (and the originating
+   * `job_id`) so a post-mortem can tell a worker-issued PUT apart from
+   * a human-admin PUT. Human-admin PUTs omit this argument; the
+   * `audit_log.payload` shape is otherwise unchanged.
+   */
+  audit_extra?: { worker_id?: string; job_id?: string };
 }): Promise<IngestResult> {
-  const { db, embedder, id, input, source } = args;
+  const { db, embedder, id, input, source, audit_extra } = args;
   const audit = auditShapeFor(source, "ingest_update");
 
   // Pre-tx: scrub + chunk + embed. Throws `EmptyBodyAfterScrubError`
@@ -413,19 +422,28 @@ export async function updateEntry(args: {
       await tx.insert(schema.chunks).values(chunkRows);
     }
 
-    // Step 7: audit row.
+    // Step 7: audit row. `audit_extra` fields (worker_id, job_id) are
+    // only present when the M2b #5 worker is the caller — human-admin
+    // PUTs land without them, preserving the pre-ADR-0021 payload shape.
+    const auditPayload: Record<string, unknown> = {
+      source: audit.source_kind,
+      version_no: nextVersionNo,
+      chunk_count: derived.slices.length,
+      embedding_model: derived.embedModel,
+      embedding_version: derived.embedVersion,
+      chunking_policy_version: CHUNKING_POLICY_VERSION,
+    };
+    if (audit_extra?.worker_id !== undefined) {
+      auditPayload.worker_id = audit_extra.worker_id;
+    }
+    if (audit_extra?.job_id !== undefined) {
+      auditPayload.job_id = audit_extra.job_id;
+    }
     await tx.insert(schema.audit_log).values({
       kind: audit.kind,
       entry_id: id,
       prompt_hash: audit.prompt_hash,
-      payload: {
-        source: audit.source_kind,
-        version_no: nextVersionNo,
-        chunk_count: derived.slices.length,
-        embedding_model: derived.embedModel,
-        embedding_version: derived.embedVersion,
-        chunking_policy_version: CHUNKING_POLICY_VERSION,
-      },
+      payload: auditPayload,
     });
 
     return {

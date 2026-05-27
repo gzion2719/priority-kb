@@ -14,6 +14,15 @@ dependencies = [
   # psycopg's sync+async symmetry pays off when M2b #5+ parsing pipelines
   # don't need async, and pgvector's psycopg adapter lands cleanly here.
   "psycopg[binary]==3.2.3",
+  # M2b #5 — PDF + DOCX parsing (per ADR-0021 §"Option Y" architecture choice).
+  # pypdf is pure-Python (no native build); python-docx imports as `docx`.
+  "pypdf==6.12.2",
+  "python-docx==1.2.0",
+  # M2b #5 PR pair 2 — worker→Node HTTP callback for the Option Y ingest path.
+  # Promoted from [project.optional-dependencies].dev (where it landed at
+  # M2b #3 as a TestClient transitive) because PR pair 2 wires a runtime
+  # caller in api/handlers/ingest_api_client.py. Pin stays at 0.28.1.
+  "httpx==0.28.1",
   # Pinned per M2b item. Anticipated additions:
   # "sqlalchemy",
   # "alembic",
@@ -21,7 +30,6 @@ dependencies = [
   # "anthropic",
   # "voyageai",
   # "azure-ai-documentintelligence",
-  # "pypdf",
   # "pillow",
 ]
 
@@ -35,9 +43,9 @@ dev = [
   # ADR-0019 M2b #3 — api/jobs.py is async; api/tests/test_jobs.py needs
   # the @pytest.mark.asyncio marker + pytest_asyncio fixture decorator.
   "pytest-asyncio>=0.24",
-  # TestClient transitive dep — pinned explicitly so the resolver doesn't
-  # gamble with fastapi/starlette's version floor.
-  "httpx==0.28.1",
+  # httpx promoted to [project.dependencies] at M2b #5 — runtime caller in
+  # api/handlers/ingest_api_client.py. Still resolved here for dev installs
+  # by transitivity through fastapi's TestClient.
 ]
 
 # Setuptools sits at the repo root alongside Node-side directories (app/, lib/, evals/, etc.).
