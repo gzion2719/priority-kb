@@ -31,7 +31,10 @@ Iron-rule footprint:
     #6  Reads sensitivity from DB via `get_entry_metadata`; omits the
         field from the PUT body so Node preserves the post-dispatch
         freshest value (ADR-0021 §D4).
-    #8  No live API SDK imports — Voyage stays Node-side under Option Y.
+    #8  No live API SDK imports at module load — Voyage stays Node-side
+        under Option Y. Azure DI imports are lazy inside the adapter
+        (see ADR-0022 D7); api.ocr is not embedding/agent, so it is not
+        on the FORBIDDEN list scanned by the iron-rule-8 mechanical floor.
     #9  Does not write chunks; satisfied via Node delegation downstream.
     #10 No agent invocation.
     #12 Voyage outage surfaces as Node 5xx → `mark_failed(IngestApi5xx)`

@@ -304,19 +304,21 @@ amendment touches one constant, not three.
 ### A4 — Dispatch table (handler-internal)
 
 [api/handlers/media_ingest.py](../../api/handlers/media_ingest.py)
-swaps the existing `_PARSERS: dict[str, ParserFn]` for two MIME sets:
+keeps the existing `_PARSERS: dict[str, ParserFn]` (the dispatch still
+needs the parser-fn lookup) and adds a complementary MIME set imported
+from `api.ocr`:
 
 ```python
-_PARSER_TYPES: frozenset[str] = frozenset({
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-})
+_PARSERS: dict[str, ParserFn] = {
+    "application/pdf": parse_pdf,
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": parse_docx,
+}
 # OCR_ALLOWED_CONTENT_TYPES imported from api.ocr
 ```
 
 `_run`'s content-type branch:
 
-1. `content_type.lower() in _PARSER_TYPES` → parse via `parse_pdf` / `parse_docx`.
+1. `content_type.lower() in _PARSERS` → parse via `parse_pdf` / `parse_docx`.
 2. `content_type.lower() in OCR_ALLOWED_CONTENT_TYPES` → OCR via `asyncio.to_thread(ocr_adapter.ocr_bytes, ...)`.
 3. else → `UnsupportedContentType`.
 

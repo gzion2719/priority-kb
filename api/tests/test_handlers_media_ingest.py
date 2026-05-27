@@ -1178,8 +1178,8 @@ async def test_image_content_type_case_folded_to_lowercase_before_ocr(
     )
     response = httpx.Response(
         200,
-        json={"id": "00000000-0000-0000-0000-000000000000", "version_no": 2, "chunk_count": 1},
-        request=httpx.Request("PUT", "http://node/api/ingest/x"),
+        json={"id": job.payload["entry_id"], "version_no": 2, "chunk_count": 1},
+        request=httpx.Request("PUT", f"http://node/api/ingest/{job.payload['entry_id']}"),
     )
     http_client = _stub_http_client(response=response)
 

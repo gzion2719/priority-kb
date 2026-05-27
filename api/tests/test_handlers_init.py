@@ -106,6 +106,9 @@ def test_worker_error_class_str_serialization_matches_value() -> None:
         "IngestApiTimeout",
         "EntryMetadataNotFound",
         "HandlerCrashed",
+        # M2b #6 — ADR-0022 Amendment A1.
+        "OcrFailed",
+        "OcrEmpty",
     ],
 )
 def test_worker_error_class_member_accessible_by_name(name: str) -> None:
