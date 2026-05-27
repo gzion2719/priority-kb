@@ -23,13 +23,16 @@ dependencies = [
   # M2b #3 as a TestClient transitive) because PR pair 2 wires a runtime
   # caller in api/handlers/ingest_api_client.py. Pin stays at 0.28.1.
   "httpx==0.28.1",
+  # M2b #6 — Azure Document Intelligence OCR adapter (ADR-0022).
+  # prebuilt-layout + api-version 2024-11-30 per the M1 Hebrew-OCR spike
+  # PASS verdict (docs/BACKLOG.md:52-65). Upgrade requires ADR-0022 amendment.
+  "azure-ai-documentintelligence==1.0.2",
   # Pinned per M2b item. Anticipated additions:
   # "sqlalchemy",
   # "alembic",
   # "pgvector",
   # "anthropic",
   # "voyageai",
-  # "azure-ai-documentintelligence",
   # "pillow",
 ]
 
