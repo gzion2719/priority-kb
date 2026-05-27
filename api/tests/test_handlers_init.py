@@ -75,6 +75,9 @@ def test_worker_error_class_values_are_stable_strings() -> None:
         "ingest_api_timeout",
         "entry_metadata_not_found",
         "handler_crashed",
+        # M2b #6 — ADR-0022 Amendment A1.
+        "ocr_failed",
+        "ocr_empty_result",
     }
     actual = {member.value for member in WorkerErrorClass}
     assert actual == expected, (
@@ -103,6 +106,9 @@ def test_worker_error_class_str_serialization_matches_value() -> None:
         "IngestApiTimeout",
         "EntryMetadataNotFound",
         "HandlerCrashed",
+        # M2b #6 — ADR-0022 Amendment A1.
+        "OcrFailed",
+        "OcrEmpty",
     ],
 )
 def test_worker_error_class_member_accessible_by_name(name: str) -> None:

@@ -29,7 +29,15 @@ from api.ocr.factory import get_ocr_adapter
 from api.ocr.stub import StubOcrAdapter
 from api.ocr.types import OcrAdapter, OcrError, OcrResult
 
+# Canonical MIME allowlist for OCR-eligible content types. Single source
+# of truth per ADR-0022 Amendment A3 — stub.py + azure.py + the worker
+# handler all import this constant. Extension requires an ADR-0022
+# amendment (D3 contract).
+OCR_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset({"image/png", "image/jpeg", "image/webp"})
+
+
 __all__ = [
+    "OCR_ALLOWED_CONTENT_TYPES",
     "OcrAdapter",
     "OcrError",
     "OcrResult",

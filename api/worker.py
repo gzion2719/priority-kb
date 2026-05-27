@@ -38,6 +38,7 @@ from api.handlers.media_ingest import make_handler as make_media_ingest_handler
 from api.handlers.media_ingest import resolve_blob_root, resolve_ingest_api_base_url
 from api.jobs import Job, claim_one, mark_failed
 from api.log import init_logging
+from api.ocr import get_ocr_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -242,18 +243,32 @@ def main() -> int:
     # ADR-0021 §D10 — httpx.AsyncClient singleton per worker lifetime.
     http_client = build_client(timeout_s=ingest_api_timeout_s)
 
+    # ADR-0022 Amendment A5 — resolve OCR adapter from env at startup.
+    # get_ocr_adapter() returns StubOcrAdapter unless both
+    # AZURE_DOCINTEL_ENDPOINT + AZURE_DOCINTEL_KEY are set. Log the
+    # resolved class name so operators see immediately whether the
+    # production deployment picked up Azure credentials or fell back
+    # to stub (which would silently no-op real OCR in prod).
+    ocr_adapter = get_ocr_adapter()
+
     media_ingest_handler = make_media_ingest_handler(
         conn_factory=conn_factory,
         worker_id=worker_id,
         http_client=http_client,
         ingest_api_base_url=ingest_api_base_url,
         blob_root=blob_root,
+        ocr_adapter=ocr_adapter,
     )
     registry = build_registry(media_ingest_handler=media_ingest_handler)
 
     logger.info(
         "worker starting",
-        extra={"worker_id": worker_id, "queue": queue, "vis_timeout_s": vis_timeout_s},
+        extra={
+            "worker_id": worker_id,
+            "queue": queue,
+            "vis_timeout_s": vis_timeout_s,
+            "ocr_adapter": type(ocr_adapter).__name__,
+        },
     )
 
     async def dispatch(job: Job) -> None:
