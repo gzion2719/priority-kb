@@ -200,6 +200,18 @@ def main() -> int:
     """Entry point. Per py-script-logging-init, init_logging is line 1."""
     init_logging()
 
+    # Windows-only — psycopg v3 async mode is incompatible with the
+    # default ProactorEventLoop on Python 3.8+; it requires the selector
+    # loop. The fix MUST land before any `asyncio.run(...)` call further
+    # below. Linux + macOS already default to the compatible loop, so
+    # this is a no-op there. Caught at the M2b #5 manual-smoke step on
+    # 2026-05-27 — the test suite stubs `conn_factory` so it never hits
+    # the real psycopg adapter, and CI runs on Linux where the bug
+    # doesn't surface; the local Windows smoke was the only verification
+    # surface that exercises the real connect path.
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     database_url = os.environ.get("DATABASE_URL")
     if database_url is None:
         logger.error("worker: DATABASE_URL must be set")
