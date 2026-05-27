@@ -11,13 +11,15 @@
 //
 // Runtime is pinned to Node for the same reasons as the create route.
 
+import { eq } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { entries } from "@/drizzle/schema";
 import { withAdmin } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getEmbedder } from "@/lib/embedding";
 import { EmptyBodyAfterScrubError, EntryNotFoundError, updateEntry } from "@/lib/ingest";
-import { IngestBody, issuesFromZodError } from "@/lib/ingest-schema";
+import { IngestBodyForPut, issuesFromZodError } from "@/lib/ingest-schema";
 import { logEvent } from "@/lib/log";
 
 export const runtime = "nodejs";
@@ -49,7 +51,7 @@ async function handler(req: NextRequest, context: RouteContext): Promise<Respons
     );
   }
 
-  const result = IngestBody.safeParse(parsed);
+  const result = IngestBodyForPut.safeParse(parsed);
   if (!result.success) {
     return NextResponse.json(
       { error: "invalid_request", issues: issuesFromZodError(result.error) },
@@ -57,13 +59,50 @@ async function handler(req: NextRequest, context: RouteContext): Promise<Respons
     );
   }
 
+  // ADR-0021 §D4 — preserve current `entries.sensitivity` when PUT omits
+  // it (worker-initiated PUTs do so to close the dispatch-to-PUT
+  // downgrade race). Human-admin PUTs continue to supply sensitivity in
+  // the body and bypass this read entirely.
+  const db = getDb();
+  let resolvedSensitivity: (typeof result.data)["sensitivity"];
+  if (result.data.sensitivity !== undefined) {
+    resolvedSensitivity = result.data.sensitivity;
+  } else {
+    const rows = await db
+      .select({ sensitivity: entries.sensitivity })
+      .from(entries)
+      .where(eq(entries.id, id));
+    if (rows.length === 0) {
+      // Same shape as the EntryNotFoundError branch below — surface 404
+      // before reaching updateEntry (which would otherwise re-discover
+      // the missing row inside its FOR UPDATE).
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    resolvedSensitivity = rows[0]!.sensitivity;
+  }
+
+  // ADR-0021 §D3 — optional worker attribution headers logged into
+  // audit_log.payload. Browser PUTs omit them; worker PUTs supply both.
+  // Build the object so that ONLY defined keys land — passing
+  // `{ worker_id: "x", job_id: undefined }` would leak an explicit
+  // undefined into downstream consumers that use `"key" in obj` checks.
+  const workerId = req.headers.get("x-worker-id") ?? undefined;
+  const jobId = req.headers.get("x-worker-job-id") ?? undefined;
+  let audit_extra: { worker_id?: string; job_id?: string } | undefined;
+  if (workerId !== undefined || jobId !== undefined) {
+    audit_extra = {};
+    if (workerId !== undefined) audit_extra.worker_id = workerId;
+    if (jobId !== undefined) audit_extra.job_id = jobId;
+  }
+
   try {
     const updated = await updateEntry({
-      db: getDb(),
+      db,
       embedder: getEmbedder(),
       id,
-      input: result.data,
+      input: { ...result.data, sensitivity: resolvedSensitivity },
       source: { kind: "direct" },
+      audit_extra,
     });
     return NextResponse.json(updated, { status: 200 });
   } catch (err) {

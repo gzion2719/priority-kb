@@ -270,6 +270,7 @@ async def mark_failed(
     job_id: UUID,
     worker_id: str,
     error: str,
+    error_class: str | None = None,
 ) -> None:
     """Failure transition — bumps attempts; promotes to 'dead' when
     ``attempts >= max_attempts``.
@@ -295,6 +296,25 @@ async def mark_failed(
     audit_log INSERT run in a single transaction committed at the end.
     External readers see the transition atomically at commit. Code-CR B4
     (2026-05-26).
+
+    ``error_class`` is the stable-taxonomy label per
+    [ADR-0021 §D8](../docs/adr/0021-worker-http-callback-architecture.md)
+    (typically a ``WorkerErrorClass`` enum value). When supplied, it
+    threads into ``audit_log.payload.error_class`` and the emitted
+    ``LogEventJob.error_class``; dashboards can group dead-letter rows
+    by stable label without parsing the free-text ``last_error``. The
+    enum is closed at ``api/handlers/types.py``; new categories require
+    an ADR amendment.
+
+    Callers that DO NOT thread ``error_class`` (intentionally None):
+        - SIGTERM-triggered shutdown path in ``api/worker.py``: the
+          taxonomy is per-handler, not per-platform-signal; the
+          shutdown reason lives in the free-text ``error`` field.
+        - ``_default_handler`` in ``api/worker.py``: the "no handler
+          wired" case is operator misconfiguration, not a taxonomic
+          failure mode worth grouping in dashboards.
+    These two call sites legitimately leave ``error_class=None`` and
+    the existing ``test_mark_failed_*_emits_*`` tests pin that shape.
     """
     started_ms = time.perf_counter() * 1000.0
     async with conn.cursor() as cur:
@@ -331,6 +351,15 @@ async def mark_failed(
         max_attempts: int = row[1]
         queue_name: str = row[2]
         is_dead = attempts >= max_attempts
+        # error_class threads into audit_log.payload + LogEventJob (ADR-0021 §D8).
+        # Build the payload once so both terminal branches stay byte-equivalent.
+        audit_payload: dict[str, Any] = {
+            "job_id": str(job_id),
+            "attempts": attempts,
+            "last_error": error,
+        }
+        if error_class is not None:
+            audit_payload["error_class"] = error_class
         if is_dead:
             await cur.execute(
                 "UPDATE jobs SET state='dead', updated_at=now() WHERE id=%s",
@@ -338,10 +367,7 @@ async def mark_failed(
             )
             await cur.execute(
                 "INSERT INTO audit_log (kind, payload) VALUES (%s, %s)",
-                (
-                    "job_dead",
-                    Jsonb({"job_id": str(job_id), "attempts": attempts, "last_error": error}),
-                ),
+                ("job_dead", Jsonb(audit_payload)),
             )
         else:
             # Non-terminal failure — state goes back to 'queued' for retry.
@@ -351,10 +377,7 @@ async def mark_failed(
             )
             await cur.execute(
                 "INSERT INTO audit_log (kind, payload) VALUES (%s, %s)",
-                (
-                    "job_failed",
-                    Jsonb({"job_id": str(job_id), "attempts": attempts, "last_error": error}),
-                ),
+                ("job_failed", Jsonb(audit_payload)),
             )
         await conn.commit()
         # LogEvent emit AFTER commit per ADR-0020 §D4 — branch on
@@ -371,7 +394,7 @@ async def mark_failed(
                 latency_ms=time.perf_counter() * 1000.0 - started_ms,
                 cost_usd=None,
                 attempts=attempts,
-                error_class=None,
+                error_class=error_class,
                 status="error",
             )
         )
