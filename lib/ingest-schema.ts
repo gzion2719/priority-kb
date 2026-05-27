@@ -4,6 +4,21 @@
 // field constraints. Lives in `lib/` per project convention (lib/auth.ts,
 // lib/embedding.ts, lib/log.ts) — App Router would also tolerate this as
 // `app/api/ingest/_lib/`, but the existing convention wins.
+//
+// Two schemas live here. Pick the one matching the HTTP method:
+//   - `IngestBody` — full-record schema. Used by `POST /api/ingest`
+//     (create) and via the agent path through `ingestThroughAgent*`.
+//     `sensitivity` is REQUIRED (no prior value to preserve).
+//   - `IngestBodyForPut` — derived from `IngestBody` with
+//     `sensitivity` optional. Used by `PUT /api/ingest/[id]` (update)
+//     per ADR-0021 §D4 so the M2b #5 worker can omit the field and
+//     have the route preserve the current `entries.sensitivity` from
+//     the DB — closing the dispatch-to-PUT downgrade race.
+//
+// If you reach for `IngestBody` on the PUT path, you'll bounce admin
+// users who omit `sensitivity`; if you reach for `IngestBodyForPut` on
+// the POST path, you'll create entries with `sensitivity = undefined`
+// and explode at the DB CHECK. Pick deliberately.
 
 import { z } from "zod";
 
@@ -47,6 +62,21 @@ export const IngestBody = z.object({
       message: "future",
     }),
   sensitivity: z.enum(sensitivityEnum),
+});
+
+/**
+ * PUT-only variant: `sensitivity` is optional so the M2b #5 worker
+ * (per [ADR-0021 §D4](../docs/adr/0021-worker-http-callback-architecture.md))
+ * can omit the field and have the route preserve the current
+ * `entries.sensitivity` value. Closes the dispatch-to-PUT sensitivity-
+ * downgrade race where an admin re-tags an entry during the worker's
+ * dwell time.
+ *
+ * POST `/api/ingest` continues to use {@link IngestBody} — creates
+ * have no prior value to preserve, so `sensitivity` stays required.
+ */
+export const IngestBodyForPut = IngestBody.extend({
+  sensitivity: z.enum(sensitivityEnum).optional(),
 });
 
 /**

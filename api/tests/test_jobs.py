@@ -733,3 +733,97 @@ async def test_mark_failed_row_vanished_emits_no_logevent(
     await mark_failed(conn, job_id=job_id, worker_id="w-1", error="orphaned")
     # No new event from the vanished branch.
     assert len(captured_events) == pre_count
+
+
+# -----------------------------------------------------------------------
+# ADR-0021 §D8 — mark_failed(error_class=...) threading.
+# The OCR-handler taxonomy trigger satisfied at M2b #5 (ADR-0020 §D8
+# deferral closed). These tests pin both legs (queued-retry + dead) of
+# the audit_log.payload + LogEventJob 1:1 contract.
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_mark_failed_with_error_class_threads_to_audit_log_and_logevent_failed_branch(
+    conn: psycopg.AsyncConnection[Any],
+    captured_events: _LiveView,
+) -> None:
+    """ADR-0021 §D8: supplying error_class lands it in audit_log.payload
+    AND in LogEventJob.error_class on the queued-retry branch.
+
+    Negative-assertion: dropping the audit_payload["error_class"] = ...
+    line in api/jobs.py would fail the audit_log check; dropping the
+    error_class=error_class kwarg on LogEventJob(...) would fail the
+    NDJSON check. Both branches gated.
+    """
+    job_id = await _seed_job(conn, max_attempts=3)
+    await claim_one(conn, queue="ingest", worker_id="w-1", vis_timeout_s=60)
+    await mark_failed(
+        conn,
+        job_id=job_id,
+        worker_id="w-1",
+        error="ingest_api 5xx",
+        error_class="ingest_api_5xx",
+    )
+
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT payload FROM audit_log WHERE kind='job_failed' AND payload->>'job_id'=%s",
+            (str(job_id),),
+        )
+        row = await cur.fetchone()
+        assert row is not None
+        assert row[0]["error_class"] == "ingest_api_5xx"
+        assert row[0]["last_error"] == "ingest_api 5xx"
+
+    # claimed event + failed event = 2; failed is the second one.
+    assert len(captured_events.events) == 2
+    failed = captured_events.events[1]
+    assert failed["transition"] == "failed"
+    assert failed["error_class"] == "ingest_api_5xx"
+    assert failed["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_mark_failed_with_error_class_threads_to_audit_log_and_logevent_dead_branch(
+    conn: psycopg.AsyncConnection[Any],
+    captured_events: _LiveView,
+) -> None:
+    """ADR-0021 §D8: same threading on the dead branch — `job_dead`
+    audit row + LogEventJob `transition=dead` both carry the supplied
+    error_class. Symmetric to the failed-branch pin above.
+    """
+    job_id = await _seed_job(conn, max_attempts=2)
+    await claim_one(conn, queue="ingest", worker_id="w-1", vis_timeout_s=60)
+    await mark_failed(
+        conn,
+        job_id=job_id,
+        worker_id="w-1",
+        error="first attempt",
+        error_class="parse_failed",
+    )
+    await claim_one(conn, queue="ingest", worker_id="w-2", vis_timeout_s=60)
+    await mark_failed(
+        conn,
+        job_id=job_id,
+        worker_id="w-2",
+        error="final attempt",
+        error_class="parse_failed",
+    )
+
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT payload FROM audit_log WHERE kind='job_dead' AND payload->>'job_id'=%s",
+            (str(job_id),),
+        )
+        row = await cur.fetchone()
+        assert row is not None
+        assert row[0]["error_class"] == "parse_failed"
+        assert row[0]["last_error"] == "final attempt"
+
+    # 4 events: claimed, failed, claimed, dead.
+    assert len(captured_events.events) == 4
+    dead = captured_events.events[3]
+    assert dead["transition"] == "dead"
+    assert dead["error_class"] == "parse_failed"
+    assert dead["status"] == "error"
