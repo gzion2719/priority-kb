@@ -5,19 +5,23 @@
 # `npm run eval:lint` validates this file against it.
 #
 # Per-case `phase`:
-#   - "queued"   → expected_source_ids[] empty; Phase B will fill once real
-#                  entries are ingested (post-M2a item 8 + ADR-0011 revert).
-#                  Runner reports `skipped` for these in Phase A.
-#   - "ready"    → expected_source_ids[] populated with real UUID v4 entry IDs.
+#   - "queued"   → expected_source_ids[] empty; Phase B will fill once entries
+#                  are ingested (post-M2a item 8 — synthetic-fixture entries
+#                  per ADR-0011 Amendment 2026-05-27 are sufficient to unblock
+#                  development-stage Phase B). Runner reports `skipped` for
+#                  these in Phase A.
+#   - "ready"    → expected_source_ids[] populated with UUID v4 entry IDs.
 #                  Runner reports `measured`.
 #   - "negative" → query SHOULD return zero high-confidence matches
 #                  (AGENTS.md retrieval non-negotiable: "say so explicitly").
 #                  expected_source_ids[] is intentionally empty.
 #
 # Query content rules:
-#   - Generic Priority ERP terminology only. No customer names, vendor IDs,
-#     ticket numbers, or other specific business scenarios — those land in
-#     Phase B post-ADR-0011 revert.
+#   - Generic Priority ERP terminology only. No real customer names, real
+#     vendor IDs, real ticket numbers, or other identifiers tied to a
+#     specific Afikim-Kramer business scenario. Synthetic-fixture entries
+#     and queries that exercise the pipeline shape are fine; real-data
+#     measurement is a production-stage transition gate.
 #   - 30+ cases total (15 Hebrew + 15 English minimum), mixing procedural,
 #     diagnostic, conceptual, cross-lingual, and negative patterns.
 
