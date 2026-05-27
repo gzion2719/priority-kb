@@ -25,7 +25,7 @@
 #   - 30+ cases total (15 Hebrew + 15 English minimum), mixing procedural,
 #     diagnostic, conceptual, cross-lingual, and negative patterns.
 
-version: "0.2.0"
+version: "0.3.0"
 language_split:
   hebrew_target: 16
   english_target: 16
@@ -38,12 +38,13 @@ cases:
     query: "How do I fix duplicate customer codes when importing from Excel?"
     language: en
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "4f237dcc-7e47-422f-bb21-e7a51b4a4a9b"
     expected_answer_contains:
       - "Import wizard"
       - "duplicate"
-    notes: "Common admin issue; M2a smoke target."
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-27 (M2a #8)."
 
   - id: en-002
     query: "What does the F11 shortcut do in a Priority form?"
@@ -103,8 +104,10 @@ cases:
     query: "Error: 'cannot delete record - foreign key constraint' when removing a customer record"
     language: en
     category: diagnostic
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "8a054602-807a-4a62-adff-3665e81bd027"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-27 (M2a #8)."
 
   - id: en-010
     query: "Why is my custom report missing rows after the most recent Priority upgrade?"
@@ -187,8 +190,10 @@ cases:
     query: "צעדים להגדרת שנת כספים חדשה 2027 במודול הנהלת חשבונות"
     language: he
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "5b3a18ba-10e1-43e1-ad61-51baabda22ed"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-27 (M2a #8)."
 
   - id: he-004
     query: "איך מוסיפים מסך חדש לתפריט הראשי דרך מחולל המסכים?"
