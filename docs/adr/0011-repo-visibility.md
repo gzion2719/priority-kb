@@ -142,3 +142,59 @@ Materially closes option (ii) of the revised revert decision above. `.github/wor
 - ADR-0002 §"Branch protection" — the protection-rules contract that this finding shows is unenforceable via API on Free + Private.
 - BACKLOG "Post-revert: `e2e` CI lane billing watch" — wave-2 trim queued; relevant to option (ii).
 - The `scripts/check-repo-public-banner.mjs` warning remains accurate — public window persists indefinitely until one of (i)/(ii)/(iii) is satisfied.
+
+## Amendment 2026-05-27 — Revert trigger event-gated to production-stage transition
+
+**Scope.** This amendment is **structural**, not a clarification. It supersedes §"Revert trigger" (a)/(b)/(c) and Amendment 2026-05-25's revised trigger framing — both are now event-gated to the production-stage transition defined below. The Amendment 2026-05-25 (i)/(ii)/(iii) options remain valid CHOICES at production-stage transition time; they are relocated, not deleted.
+
+**Context.** The original §"Revert trigger" (2026-05-19) and its 2026-05-25 amendment both used the phrase "any real Priority ERP content" as the revert gate. The 2026-05-25 amendment additionally pinned a hard date floor 2026-06-15. By 2026-05-27 the chain blocked by these triggers (M2a #8 manual smoke + M3 #6/#7 golden-set Phase B + eval runner real metrics) is fully code-complete; the only remaining blocker is the revert decision, which Memory-recorded user preference (2026-05-25) defers indefinitely. The result is that finished implementation work sits idle waiting on a decision that won't fire on its current trigger surface. The fix is to narrow the trigger to the actual risk: **real customer/vendor data exposure**, not "any entry shaped like Priority content."
+
+**Decision.** Replace §"Revert trigger" + Amendment 2026-05-25's (a)/(b)/(c) trigger with a single event-gated trigger: **the production-stage transition**. The repo MUST revert to private (per one of the (i)/(ii)/(iii) options at decision time) before the production-stage transition completes.
+
+### Production-stage transition — definition
+
+The production-stage transition is reached on the first instance of ANY of:
+
+- **(a) Real customer or vendor identifiers** land in an ingested entry. "Real" = identifies a specific Afikim-Kramer customer, vendor, employee, ticket, or invoice. Generic Priority ERP terminology (form names, screen names, transaction codes, error messages) is NOT real-identifier content.
+- **(b) The database is hosted off the developer's local machine.** Today: Docker Compose at `localhost:5432`. Production-stage starts when M5 hosting lands (Azure App Service / Vercel managed Postgres / VPS — decision deferred to M5 ADR).
+- **(c) Microsoft Entra ID auth replaces stub auth.** Stub auth (`x-stub-user-role` header parsing per `lib/auth.ts`) is a development-stage artifact by definition. The Entra cutover is the auth-side production transition.
+- **(d) Manual override checkpoint** — the user explicitly declares production-stage transition in writing (ADR amendment or CHATLOG entry) before any of (a)/(b)/(c) fires. This is a deliberate manual checkpoint, NOT a co-equal automatic trigger. Used when the user wants to start the production-stage transition early (e.g., a real-data smoke before M5 hosting); when triggered, requires the user to also resolve (i)/(ii)/(iii) in the same session.
+
+### Synthetic-fixture entries — explicitly permitted in development stage
+
+The trigger fires on **real-identifier content**, not on "any database row." Synthetic fixtures are explicitly permitted during the development-stage public window when ALL of:
+
+- `source_pointer` matches the pattern `synthetic-fixture-YYYY-MM-DD-<slug>` (case-sensitive, ISO-8601 date).
+- Body content uses generic Priority ERP terminology only — no customer/vendor/employee/ticket identifiers, no real invoice numbers, no real screenshots of customer-facing screens.
+- Tagged with realistic but synthetic `sensitivity` values (`public`, `internal`, or `restricted` per iron rule #6).
+- Shape mirrors what real entries will look like (title + category + tags + body + source_pointer + last_verified_at) so the pipeline gets exercised end-to-end.
+
+### Forensic recovery — distinguishing synthetic from real
+
+Future readers of `entries` + `audit_log` need a SQL-level discriminator to exclude synthetic-fixture rows from real-data metrics calculations. The `source_pointer` pattern is the forensic anchor:
+
+```sql
+-- Find all synthetic-fixture entries:
+SELECT id, title, source_pointer, created_at
+FROM entries
+WHERE source_pointer LIKE 'synthetic-fixture-%';
+
+-- Find audit_log rows attributable to synthetic-fixture ingestion:
+SELECT al.*
+FROM audit_log al
+JOIN entries e ON e.id = al.entry_id
+WHERE e.source_pointer LIKE 'synthetic-fixture-%';
+```
+
+The `audit_log.kind` column will read `"ingest"` (same as direct admin POSTs) — that's expected; the discriminator is the joined `entries.source_pointer`. No schema change required.
+
+### What happened to the 2026-06-15 hard date floor
+
+The date floor was set 2026-05-25 expecting the gate to fire on a "first real entry" event before then. The chain stayed blocked instead; no real entry was ever attempted. The date floor never fired, never had behavioral effect, and is **superseded before its arrival** by this amendment's event-gate replacement.
+
+### Cross-ref impact
+
+- ROADMAP M2a §"Repo visibility precondition" block and M2a item 8 are reworded in the same PR to match this amendment's framing.
+- ROADMAP M3 items 6 + 7 + Acceptance language no longer name ADR-0011 revert as a precondition; Phase B is unblocked against synthetic-fixture entries.
+- `evals/golden_set.yaml` header comment lines 8-11 + 18-20 are updated in the same PR to drop "post-ADR-0011 revert" language.
+- The `scripts/check-repo-public-banner.mjs` local warning remains in place — it continues firing on every `npm run check` until one of the (i)/(ii)/(iii) options at production-stage transition resolves it. Expected noise, not a prompt for action until production-stage transition is named.
