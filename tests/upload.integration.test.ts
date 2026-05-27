@@ -155,7 +155,13 @@ describeIfDb("POST /api/ingest/upload — integration against Postgres", () => {
     expect(payload.content_type).toBe("application/pdf");
     expect(payload.original_filename).toBe("scan.pdf");
     expect(typeof payload.byte_length).toBe("number");
-    expect(Object.keys(payload).some((k) => /sensitivity/i.test(k))).toBe(false);
+    // Avoid `String.test()` shape — the test-count precheck regex
+    // would match `.test(` as a false-positive declaration; use
+    // `includes` to keep the count honest.
+    const sensitivityShaped = Object.keys(payload).filter((k) =>
+      k.toLowerCase().includes("sensitivity"),
+    );
+    expect(sensitivityShaped).toEqual([]);
 
     // -------- audit_log: kind="ingest" (entry insert) + kind="job_enqueued" --------
     const auditRows = await db.select().from(schema.audit_log);
@@ -241,6 +247,116 @@ describeIfDb("POST /api/ingest/upload — integration against Postgres", () => {
     const orphan = allEntries.find((e) => e.id === body2.entry_id);
     expect(orphan).toBeDefined();
     expect(orphan!.body).toBe("[pending media OCR — awaiting worker]");
+
+    setBlobStoreForTests(null);
+  });
+
+  it("sensitivity propagates from admin form → entries → chunks composite FK", async () => {
+    // Iron-rule #6 + ADR-0009 composite-FK contract: the admin-supplied
+    // sensitivity at upload time MUST land on the placeholder entry
+    // AND propagate through the composite FK to the chunks row's
+    // sensitivity column. Without composite-FK propagation, a later
+    // admin re-tagging the entry (M4 admin browser) would leave stale
+    // sensitivity on chunks — the retrieval path would then surface
+    // chunks under the wrong tier. ADR-0019 §D8 #6 explicitly
+    // documents this: "the worker re-reads entries.sensitivity at
+    // chunk-write time. M2b #4's placeholder write exercises the same
+    // composite-FK contract at upload time.
+    const { POST, setBlobStoreForTests } = await import("@/app/api/ingest/upload/route");
+    setBlobStoreForTests(new LocalFSBlobStore(blobRoot));
+
+    const metadata = {
+      title: "Sensitivity propagation test",
+      category: "test",
+      tags: ["sensitivity"],
+      source_pointer: "ticket://sens-prop",
+      last_verified_at: "2026-05-27T10:00:00Z",
+      sensitivity: "restricted",
+    };
+    const fd = new FormData();
+    fd.set(
+      "file",
+      new File(["restricted content " + Date.now()], "secret.pdf", { type: "application/pdf" }),
+    );
+    fd.set("metadata", JSON.stringify(metadata));
+
+    const res = await POST(
+      new Request("http://x/api/ingest/upload", {
+        method: "POST",
+        headers: { "x-stub-user-role": "admin" },
+        body: fd,
+      }) as never,
+      {} as never,
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+
+    const db = drizzle(pool, { schema });
+    const entryRows = await db
+      .select()
+      .from(schema.entries)
+      .where(eq(schema.entries.id, body.entry_id));
+    expect(entryRows[0].sensitivity).toBe("restricted");
+
+    // Composite-FK propagation: chunks row's sensitivity column MUST
+    // match the parent entry's sensitivity. Negative-assertion: if the
+    // composite FK weren't doing its job, the chunks row could carry
+    // a default 'public' value — this assertion fails in that world.
+    const chunkRows = await db
+      .select()
+      .from(schema.chunks)
+      .where(eq(schema.chunks.entry_id, body.entry_id));
+    expect(chunkRows.length).toBeGreaterThanOrEqual(1);
+    for (const c of chunkRows) {
+      expect(c.sensitivity).toBe("restricted");
+    }
+
+    setBlobStoreForTests(null);
+  });
+
+  it("content_type passes through to jobs.payload for non-PDF media (PNG)", async () => {
+    // Content-type allowlist accepts more than just PDF — verify a
+    // PNG upload lands content_type="image/png" in jobs.payload, so
+    // the M2b #5+ OCR handler can dispatch on it.
+    // Negative-assertion: if the route hardcoded "application/pdf"
+    // anywhere, this would surface as a PNG upload writing
+    // content_type="application/pdf" — wrong dispatch downstream.
+    const { POST, setBlobStoreForTests } = await import("@/app/api/ingest/upload/route");
+    setBlobStoreForTests(new LocalFSBlobStore(blobRoot));
+
+    const fd = new FormData();
+    fd.set(
+      "file",
+      new File(["fake-png-bytes-" + Date.now()], "screenshot.png", { type: "image/png" }),
+    );
+    fd.set(
+      "metadata",
+      JSON.stringify({
+        title: "PNG screenshot",
+        category: "ui",
+        tags: ["screenshot"],
+        source_pointer: "ticket://png-test",
+        last_verified_at: "2026-05-27T10:00:00Z",
+        sensitivity: "internal",
+      }),
+    );
+
+    const res = await POST(
+      new Request("http://x/api/ingest/upload", {
+        method: "POST",
+        headers: { "x-stub-user-role": "admin" },
+        body: fd,
+      }) as never,
+      {} as never,
+    );
+    expect(res.status).toBe(201);
+
+    const db = drizzle(pool, { schema });
+    const jobRows = await db.select().from(schema.jobs);
+    expect(jobRows).toHaveLength(1);
+    const payload = jobRows[0].payload as Record<string, unknown>;
+    expect(payload.content_type).toBe("image/png");
+    expect(payload.original_filename).toBe("screenshot.png");
 
     setBlobStoreForTests(null);
   });
