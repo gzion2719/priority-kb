@@ -1,0 +1,137 @@
+{
+  "apiVersion": "2024-11-30",
+  "modelId": "prebuilt-layout",
+  "stringIndexType": "textElements",
+  "paragraphs": [
+    {
+      "content": "priority."
+    },
+    {
+      "content": ".REDACTED-ORG"
+    },
+    {
+      "content": "כספים"
+    },
+    {
+      "content": "Q"
+    },
+    {
+      "content": "X :selected: עזרה ?"
+    },
+    {
+      "content": "הזמנות לקוח"
+    },
+    {
+      "content": "ניקוי מסך ."
+    },
+    {
+      "content": "Q"
+    }
+  ],
+  "pages": [
+    {
+      "words": [
+        {
+          "content": "priority.",
+          "confidence": 0.897
+        },
+        {
+          "content": ".REDACTED-ORG",
+          "confidence": 0.962
+        },
+        {
+          "content": "REDACTED-WORD-1",
+          "confidence": 0.992
+        },
+        {
+          "content": "REDACTED-WORD-2",
+          "confidence": 0.988
+        },
+        {
+          "content": "כספים",
+          "confidence": 0.978
+        },
+        {
+          "content": "Q",
+          "confidence": 0.963
+        },
+        {
+          "content": "X",
+          "confidence": 0.982
+        },
+        {
+          "content": "עזרה",
+          "confidence": 0.982
+        },
+        {
+          "content": "?",
+          "confidence": 0.978
+        },
+        {
+          "content": "הזמנות",
+          "confidence": 0.982
+        },
+        {
+          "content": "לקוח",
+          "confidence": 0.982
+        },
+        {
+          "content": "ניקוי",
+          "confidence": 0.982
+        },
+        {
+          "content": "מסך",
+          "confidence": 0.982
+        },
+        {
+          "content": ".",
+          "confidence": 0
+        },
+        {
+          "content": "Q",
+          "confidence": 0.978
+        },
+        {
+          "content": "+",
+          "confidence": 0.93
+        },
+        {
+          "content": "חדש",
+          "confidence": 0.982
+        },
+        {
+          "content": "REDACTED-VENDOR",
+          "confidence": 0.995
+        },
+        {
+          "content": "REDACTED-ORG",
+          "confidence": 0.982
+        },
+        {
+          "content": "מחירים",
+          "confidence": 0.982
+        },
+        {
+          "content": "אסמכתאות",
+          "confidence": 0.978
+        },
+        {
+          "content": "פרויקט",
+          "confidence": 0.982
+        },
+        {
+          "content": "מעקב",
+          "confidence": 0.982
+        },
+        {
+          "content": "ביצוע",
+          "confidence": 0.976
+        },
+        {
+          "content": "שיבוץ",
+          "confidence": 0.951
+        }
+      ]
+    }
+  ]
+}
