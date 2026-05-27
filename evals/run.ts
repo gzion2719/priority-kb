@@ -1,43 +1,54 @@
 // evals/run.ts — CLI entry for `npm run eval` / `npm run eval:lint`.
 //
-// Phase A behavior (this file):
-//   - `--lint-only` mode: load + Zod-validate evals/golden_set.yaml. Exit 0 on
-//      valid; exit 1 on schema error. This is the cheap mode that
-//      `npm run check` chains.
-//   - Default mode (`npm run eval`): everything `--lint-only` does, PLUS
-//      runs each case through a `RetrievalAdapter`. Phase A's adapter is
-//      a NULL adapter: it never executes because every case has phase=queued
-//      or phase=negative, so every case reports `skipped`. The runner
-//      writes evals/last-run.json with the summary and prints a human
-//      table to stdout. Exit 0 unless a shape_error fired (Phase A keeps
-//      "measured below target" non-fatal — there's nothing to measure yet).
+// Modes:
+//   - `--lint-only`: load + Zod-validate evals/golden_set.yaml. Exit 0 on
+//      valid; exit 1 on schema error. No DB access, no env mutation. This
+//      is the cheap mode that `npm run check` chains.
+//   - Default (`npm run eval`): everything `--lint-only` does, PLUS runs
+//      each case through `pipelineAdapter` — a real adapter wired to
+//      `lib/retrieval-eval.ts::evalRetrieve()` per ADR-0012 §7. Requires
+//      a running Postgres (DATABASE_URL) with seeded entries. Each case
+//      with `phase: ready` is measured; `queued` and `negative` skip.
+//      Writes evals/last-run.json with the summary and prints a human
+//      table to stdout. Exit 0 unless a shape_error fired.
 //
-// Phase B (future): the null adapter is replaced with an adapter that calls
-// the real evalRetrieve()/evalRetrieveWithSynth() helpers per ADR-0012 §7.
+// Iron-rule #8 floor: the run-time path defensively pins EMBEDDING_PROVIDER
+// and RERANK_PROVIDER to "stub" if unset, and resets the embedder + reranker
+// singletons so a stale cache from a prior `npm run check` worker cannot
+// leak live-API instances into eval. Synth is NOT invoked — `evalRetrieve`
+// per ADR-0012 §7 omits the synth stage, so `cited_ids` returns undefined
+// and citation_precision honestly reports `skipped` for every measured
+// case. Citation-precision measurement is BACKLOG (driver: design choice
+// between live-Anthropic-opt-in and an eval-specific stub that cites
+// reranked_ids[0]).
+//
+// Operator preconditions (run mode only):
+//   - DATABASE_URL set (e.g., .env.local loaded).
+//   - Postgres running and reachable.
+//   - Seed has been applied: `npx tsx scripts/seed-synthetic-entries.ts --apply`
+//     (or equivalent). The runner prints a "did you seed?" hint when every
+//     `ready` case returns recall=0 — the canonical symptom of an
+//     unseeded DB.
 
 import { writeFile } from "node:fs/promises";
+import dotenv from "dotenv";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { buildSummary, loadGoldenSet, runCase, type CaseResult } from "./lib";
 import {
-  buildSummary,
-  loadGoldenSet,
-  runCase,
-  type CaseResult,
-  type RetrievalAdapter,
-} from "./lib";
+  pipelineAdapter,
+  pinStubProviders,
+  EMBEDDING_STUB_MODEL,
+  EMBEDDING_STUB_VERSION,
+} from "./run-adapter";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const repoRoot = resolve(__dirname, "..");
 
 const GOLDEN_SET_PATH = "evals/golden_set.yaml";
 const ARTIFACT_PATH = "evals/last-run.json";
-
-/** Phase A: never invoked. Throws loudly if the adapter is reached. */
-const nullAdapter: RetrievalAdapter = {
-  retrieve: async (_query: string) => {
-    throw new Error(
-      "Phase A: the null RetrievalAdapter was invoked, but every Phase A case " +
-        "is phase=queued or phase=negative and should report `skipped` before " +
-        "reaching the adapter. This is a bug — investigate runCase().",
-    );
-  },
-};
 
 async function main(argv: string[]): Promise<number> {
   const lintOnly = argv.includes("--lint-only");
@@ -64,9 +75,17 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  // Load .env.local FIRST (Next.js convention), then .env as fallback —
+  // mirrors scripts/seed-synthetic-entries.ts so eval and seed read the
+  // same connection string by default.
+  dotenv.config({ path: resolve(repoRoot, ".env.local") });
+  dotenv.config({ path: resolve(repoRoot, ".env") });
+
+  pinStubProviders();
+
   const per_case: CaseResult[] = [];
   for (const c of goldenSet.cases) {
-    per_case.push(await runCase(c, goldenSet.metrics.recall_at_k.k, nullAdapter));
+    per_case.push(await runCase(c, goldenSet.metrics.recall_at_k.k, pipelineAdapter));
   }
 
   const summary = buildSummary(per_case, goldenSet.metrics.recall_at_k.k, {
@@ -80,6 +99,7 @@ async function main(argv: string[]): Promise<number> {
   console.log(`Eval run @ ${summary.ran_at}`);
   console.log(`  schema_version: ${summary.schema_version}`);
   console.log(`  k: ${summary.k}`);
+  console.log(`  embedder pin:  ${EMBEDDING_STUB_MODEL} / ${EMBEDDING_STUB_VERSION}`);
   console.log(
     `  totals: ${summary.totals.cases} cases — ` +
       `${summary.totals.measured} measured, ` +
@@ -91,13 +111,33 @@ async function main(argv: string[]): Promise<number> {
       `(target ${summary.targets.recall_at_k})`,
   );
   console.log(
-    `  citation_precision_mean: ${summary.aggregate.citation_precision_mean ?? "n/a (no measured cases)"} ` +
+    `  citation_precision_mean: ${summary.aggregate.citation_precision_mean ?? "n/a (skipped — synth not wired per ADR-0012 §7)"} ` +
       `(target ${summary.targets.citation_precision})`,
   );
+
+  // "Did you seed?" hint — when every measured case scored recall=0, the
+  // canonical cause is an empty `entries` table (or a model/version
+  // mismatch in the ANN WHERE filter — see pinStubProviders for the
+  // floor on the latter). Surface the diagnostic instead of letting
+  // a zero-recall result silently look like a genuine retrieval failure.
+  const measuredCases = per_case.filter((r) => r.status === "measured");
+  const allMeasuredAreZero =
+    measuredCases.length > 0 &&
+    measuredCases.every((r) => typeof r.recall_at_k === "number" && r.recall_at_k === 0);
+  if (allMeasuredAreZero) {
+    console.error(
+      `\nWARNING: every measured case (${measuredCases.length}) returned recall@${summary.k}=0. ` +
+        `Common cause: the database has not been seeded. Run: ` +
+        `npx tsx scripts/seed-synthetic-entries.ts --apply`,
+    );
+  }
+
   console.log(`  artifact: ${ARTIFACT_PATH}`);
 
-  // Phase A: shape_error is the only non-zero exit. Measured-below-target
-  // doesn't fail until Phase B has real cases to measure.
+  // shape_error is the only non-zero exit. Measured-below-target doesn't
+  // fail until n ≥ 20 (per ROADMAP M3 acceptance note); below that threshold
+  // the numbers are pipeline-correctness signal, not retrieval-quality
+  // signal.
   return summary.totals.shape_error > 0 ? 1 : 0;
 }
 
