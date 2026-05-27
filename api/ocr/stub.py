@@ -16,10 +16,16 @@ import hashlib
 
 from api.ocr.types import OcrError, OcrResult
 
-# Image-only allowlist for this increment. PDF routes through parse_pdf
-# (ADR-0021); DOCX has no image dispatch yet. Extension requires ADR-0022
-# amendment.
-_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset({"image/png", "image/jpeg", "image/webp"})
+
+# Canonical allowlist sourced from api.ocr (ADR-0022 Amendment A3 — single
+# source of truth across stub.py + azure.py + the worker handler). Local
+# import to avoid circular: __init__.py imports stub.py, so we re-import
+# at use-site against the parent module to grab the constant.
+def _allowed_content_types() -> frozenset[str]:
+    from api.ocr import OCR_ALLOWED_CONTENT_TYPES
+
+    return OCR_ALLOWED_CONTENT_TYPES
+
 
 # Paragraph segmentation knob. The stub splits its synthetic text into
 # fixed-width chunks; ≥ 2 paragraphs lets paragraph-aware tests assert on
@@ -42,7 +48,7 @@ class StubOcrAdapter:
             OcrError("unsupported_content_type") — MIME not in allowlist.
             OcrError("empty_result")             — zero-byte input.
         """
-        if content_type not in _ALLOWED_CONTENT_TYPES:
+        if content_type not in _allowed_content_types():
             raise OcrError(
                 "unsupported_content_type",
                 f"stub does not accept content_type={content_type!r}",

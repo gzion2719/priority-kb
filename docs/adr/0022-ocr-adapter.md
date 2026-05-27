@@ -230,3 +230,144 @@ asserted-on by `test_ocr_azure.py` as the regression anchor for D4.
 - The "real redacted fixture" decision (D9) costs a one-time user-supplied
   artifact placement but eliminates the Azure-DI-wire-shape-drift class
   of bugs that a hand-crafted fixture would have shipped.
+
+---
+
+## Amendment 2026-05-27 — Worker handler integration
+
+Wires the adapter shipped in D1–D9 into the M2b #5 worker handler at
+[api/handlers/media_ingest.py](../../api/handlers/media_ingest.py),
+closing the "Worker handler dispatch for image content-types" item from
+the original §Out of scope list.
+
+### A1 — `WorkerErrorClass` closed-enum extension
+
+Per [ADR-0021 §D8](0021-worker-http-callback-architecture.md), the
+`WorkerErrorClass` enum at [api/handlers/types.py](../../api/handlers/types.py)
+is intentionally closed; extensions require this amendment. Two new
+values land:
+
+```python
+OcrFailed = "ocr_failed"
+"""OCR adapter raised OcrError("ocr_failed") — Azure outage, quota,
+   credentials, transient 5xx. Retry-eligible (max_attempts then dead)."""
+
+OcrEmpty = "ocr_empty_result"
+"""OCR adapter raised OcrError("empty_result") — image OCR'd but no
+   paragraphs surfaced. Operator recovery: retry with a clearer image
+   (resolution, contrast, occlusion); OcrEmpty does NOT imply the source
+   has no text — only that the vendor couldn't extract any."""
+```
+
+The defensive case where the adapter raises
+`OcrError("unsupported_content_type")` despite the pre-dispatch
+allowlist filter is mapped to `HandlerCrashed` with the structured
+`last_error` prefix `ocr_dispatch_allowlist_mismatch:` — it signals a
+real bug (the handler's allowlist and the adapter's allowlist drifted),
+not an OCR failure. Mirrors the `malformed_entry_id_uuid:` precedent at
+[media_ingest.py:199](../../api/handlers/media_ingest.py#L199).
+
+`UnsupportedContentType` docstring is updated to drop the
+"until M2b #6 lands" qualifier — image MIMEs are now supported.
+
+### A2 — Async-execution discipline (`asyncio.to_thread`)
+
+`OcrAdapter.ocr_bytes` (D1) is intentionally **sync**. Calling it
+directly from the async `_run` would block the worker's poll loop —
+every other queued job stalls for the duration of the Azure DI HTTP
+round-trip (≈ 1-3 s typical, but vendor-side worst case is unbounded).
+The handler MUST invoke the adapter via:
+
+```python
+ocr_result = await asyncio.to_thread(
+    ocr_adapter.ocr_bytes, blob_bytes, content_type.lower()
+)
+```
+
+Sync-vs-async at the adapter boundary is a deliberate choice: the
+Protocol stays simple and the Azure SDK's sync client surfaces cleanly;
+`to_thread` is the bridge. Test environments using `StubOcrAdapter`
+also go through `to_thread` — exercising the same control flow as
+production.
+
+### A3 — Canonical `OCR_ALLOWED_CONTENT_TYPES`
+
+Pre-amendment, three places encoded the OCR MIME allowlist:
+`api/ocr/stub.py:_ALLOWED_CONTENT_TYPES`,
+`api/ocr/azure.py:_ALLOWED_CONTENT_TYPES`, and the new
+`_OCR_TYPES` proposed for the handler. To prevent drift,
+`api/ocr/__init__.py` exports a single canonical
+`OCR_ALLOWED_CONTENT_TYPES: frozenset[str]` and the three consumers
+import it. Extension still requires an ADR amendment (D3 contract); the
+amendment touches one constant, not three.
+
+### A4 — Dispatch table (handler-internal)
+
+[api/handlers/media_ingest.py](../../api/handlers/media_ingest.py)
+swaps the existing `_PARSERS: dict[str, ParserFn]` for two MIME sets:
+
+```python
+_PARSER_TYPES: frozenset[str] = frozenset({
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+})
+# OCR_ALLOWED_CONTENT_TYPES imported from api.ocr
+```
+
+`_run`'s content-type branch:
+
+1. `content_type.lower() in _PARSER_TYPES` → parse via `parse_pdf` / `parse_docx`.
+2. `content_type.lower() in OCR_ALLOWED_CONTENT_TYPES` → OCR via `asyncio.to_thread(ocr_adapter.ocr_bytes, ...)`.
+3. else → `UnsupportedContentType`.
+
+The OCR branch's `OcrError` catch maps `e.code` to:
+- `"ocr_failed"` → `OcrFailed`
+- `"empty_result"` → `OcrEmpty`
+- `"unsupported_content_type"` → `HandlerCrashed` with
+  `ocr_dispatch_allowlist_mismatch:` prefix (defensive — see A1).
+
+### A5 — `make_handler` ocr_adapter kwarg (required)
+
+`make_handler` adds a **required** `ocr_adapter: OcrAdapter` kwarg.
+Required (not defaulted to `get_ocr_adapter()`) so tests inject a
+hermetic stub and production startup resolves env once at boot. The
+production call site at [api/worker.py main()](../../api/worker.py)
+constructs `ocr_adapter = get_ocr_adapter()` and logs
+`type(ocr_adapter).__name__` so operators see whether Azure or stub
+resolved.
+
+### A6 — OCR provenance deferred; documented cost
+
+The slice ships OCR-extracted text into entries' bodies via the
+existing worker→Node PUT (ADR-0021 D1) with **no change** to the PUT
+body shape. `OcrResult.model`, `api_version`, and `confidence` are
+discarded by the handler in this slice.
+
+**Cost named explicitly:** entries written by the OCR path between
+this slice and the future provenance slice carry no model/api_version
+discriminator in `audit_log`. Forensic re-identification is still
+possible via `jobs.payload.content_type` (image MIME → OCR path) +
+`audit_log.payload.worker_id` (worker attribution from ADR-0021 D3),
+but the OCR vendor + version are not recorded. The provenance slice
+will thread `OcrResult.model` + `api_version` into the PUT body and
+extend `IngestBodyForPut` (Node side) to route them into
+`audit_log.payload`.
+
+### A7 — Iron-rule footprint (delta from §Iron-rule footprint above)
+
+| Rule | Status | Note |
+|------|--------|------|
+| #2 | ✓ | Worker still delegates body update via Node PUT; iron rule unchanged. |
+| #6 | ✓ | Existing sensitivity-preserve pattern at [media_ingest.py:274-284](../../api/handlers/media_ingest.py#L274) covers OCR path identically. |
+| #8 | ✓ | OCR adapter import (`api.ocr`) does not add to FORBIDDEN list — Azure DI is not embedding/agent. |
+| #9 | N/A | Chunks written by Node downstream. |
+| #10 | N/A | No agent invocation. |
+| #12 | partial | `OcrFailed` is retry-eligible per WorkerErrorClass attempts policy; production-time Tesseract fallback still deferred. |
+
+### A8 — Out of scope (slice boundary preserved)
+
+- OCR provenance in `audit_log` (A6 documents the cost).
+- Tesseract production-time fallback (D6 still partial).
+- `BoundingRegion` extension to `OcrResult` (M2b #7).
+- DOCX MIME allowlist addition to upload route.
+- Per-call OCR cost in `audit_log` (BACKLOG entry).
