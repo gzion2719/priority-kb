@@ -7,6 +7,7 @@ DATABASE_URL must be set in CI; locally the tests skip without it.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import sys
@@ -20,6 +21,7 @@ import pytest
 import pytest_asyncio
 from psycopg.types.json import Jsonb
 
+from api import log_event as le
 from api.jobs import Job, claim_one, mark_done, mark_failed
 from api.worker import WorkerState, install_signal_handler
 
@@ -499,3 +501,235 @@ async def test_sigterm_during_in_flight_marks_job_failed(
         assert row[1] == 1
         assert row[2] is not None
         assert "SIGTERM" in row[2]
+
+
+# -----------------------------------------------------------------------
+# LogEvent emission (ADR-0020 §D4 wire-point matrix)
+# -----------------------------------------------------------------------
+#
+# Sink-capture fixture swaps api.log_event._sink with a list-appender so
+# each test can assert exact NDJSON shape (per WORKFLOW.md negative-
+# assertion-tests rule — existence-only checks are too weak; the strongest
+# form proves the SHAPE of the emitted record).
+#
+# Rule under test: audit_log row written ⇔ LogEventJob line emitted.
+# The lost-ownership, row-vanished, and empty-queue branches MUST NOT
+# emit; the four happy-path branches (claimed/done/failed/dead) MUST.
+# -----------------------------------------------------------------------
+
+
+class _LiveView:
+    """Adapter exposing parsed view of the captured NDJSON line list.
+
+    Reading ``.events`` re-parses each line on every access so a test
+    that inspects events after multiple emissions sees the full set
+    (lazy snapshot, no pre-parse to allow mid-test additions).
+    """
+
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    @property
+    def events(self) -> list[dict[str, Any]]:
+        return [json.loads(line) for line in self._lines]
+
+    def __len__(self) -> int:
+        return len(self._lines)
+
+
+@pytest.fixture
+def captured_events() -> Iterator[_LiveView]:
+    """Capture every LogEvent NDJSON line emitted during the test.
+
+    Yields a ``_LiveView`` whose ``.events`` property re-parses the captured
+    NDJSON lines on each access. The module sink is restored on teardown.
+    """
+    lines: list[str] = []
+    le.set_sink(lines.append)
+    try:
+        yield _LiveView(lines)
+    finally:
+        le.reset_sink()
+
+
+@pytest.mark.asyncio
+async def test_claim_one_emits_logevent_with_exact_shape(
+    conn: psycopg.AsyncConnection[Any],
+    captured_events: _LiveView,
+) -> None:
+    """ADR-0020 §D4 wire-point matrix row 1: claim_one success branch
+    emits ``transition="claimed"`` with exact field set.
+
+    Negative-assertion: if the emit were dropped, ``captured_events.events``
+    would be empty; if the emit had the wrong transition, the assertion
+    on ``transition == "claimed"`` would fail. The exact-shape check
+    proves both presence and correctness.
+    """
+    job_id = await _seed_job(conn)
+    claimed = await claim_one(conn, queue="ingest", worker_id="w-1", vis_timeout_s=60)
+    assert claimed is not None
+    events = captured_events.events
+    assert len(events) == 1
+    evt = events[0]
+    assert evt["kind"] == "job"
+    assert evt["queue_name"] == "ingest"
+    assert evt["job_id"] == str(job_id)
+    assert evt["transition"] == "claimed"
+    assert isinstance(evt["latency_ms"], (int, float))
+    assert evt["latency_ms"] >= 0
+    # cost_usd is None per ADR-0019 §D7 + ADR-0005 carve-out — the
+    # omit-None pass drops it from the payload entirely.
+    assert "cost_usd" not in evt
+    # error_class None at M2b #3 sites per ADR-0020 §D8 → omitted.
+    assert "error_class" not in evt
+    assert evt["attempts"] == 0
+    assert evt["status"] == "ok"
+    assert "ts" in evt
+
+
+@pytest.mark.asyncio
+async def test_claim_one_emits_no_logevent_on_empty_queue(
+    conn: psycopg.AsyncConnection[Any],
+    captured_events: _LiveView,
+) -> None:
+    """ADR-0020 §D4 wire-point matrix row 2: empty-queue branch emits no
+    LogEvent (and writes no audit row — the two-row rule).
+
+    Negative-assertion: if the emit fired unconditionally (before the
+    None-row check), this test would see a phantom event with no
+    corresponding audit row, violating the matrix invariant.
+    """
+    result = await claim_one(conn, queue="ingest", worker_id="w-1", vis_timeout_s=60)
+    assert result is None
+    assert captured_events.events == []
+
+
+@pytest.mark.asyncio
+async def test_mark_done_emits_done_logevent_with_exact_shape(
+    conn: psycopg.AsyncConnection[Any],
+    captured_events: _LiveView,
+) -> None:
+    """ADR-0020 §D4 wire-point matrix row 3: mark_done success branch
+    emits ``transition="done"`` with queue_name read from RETURNING.
+    """
+    job_id = await _seed_job(conn)
+    await claim_one(conn, queue="ingest", worker_id="w-1", vis_timeout_s=60)
+    await mark_done(conn, job_id=job_id, worker_id="w-1")
+    # Two events: claimed + done. Inspect the second.
+    events = captured_events.events
+    assert len(events) == 2
+    done = events[1]
+    assert done["kind"] == "job"
+    assert done["queue_name"] == "ingest"
+    assert done["job_id"] == str(job_id)
+    assert done["transition"] == "done"
+    assert done["status"] == "ok"
+    # attempts intentionally None on mark_done (the success path does not
+    # bump attempts) — omitted from the NDJSON line.
+    assert "attempts" not in done
+    # error_class=None per ADR-0020 §D8 → omitted. Negative-assertion
+    # pin (code-CR M2, 2026-05-27): if a future implementer changes
+    # error_class=None to error_class=error (the free-text), this
+    # assertion fails — guards the JSDoc contract on
+    # LogEventJob.error_class beyond author discipline.
+    assert "error_class" not in done
+
+
+@pytest.mark.asyncio
+async def test_mark_done_lost_ownership_emits_no_logevent(
+    conn: psycopg.AsyncConnection[Any],
+    captured_events: _LiveView,
+) -> None:
+    """ADR-0020 §D4 wire-point matrix row 4: mark_done lost-ownership
+    branch writes no audit row and emits no LogEvent.
+
+    Negative-assertion: if the emit fired before the ownership check,
+    this test would see a phantom ``done`` event for a row this worker
+    no longer owns — credit misattribution to a non-owner.
+    """
+    job_id = await _seed_job(conn)
+    await claim_one(conn, queue="ingest", worker_id="w-original", vis_timeout_s=60)
+    pre_count = len(captured_events)
+    assert pre_count == 1, "claim_one should have emitted exactly one LogEvent baseline"
+    # Simulate another worker reclaiming.
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE jobs SET locked_by='w-other', updated_at=now() WHERE id=%s",
+            (job_id,),
+        )
+    await conn.commit()
+    await mark_done(conn, job_id=job_id, worker_id="w-original")
+    # No new event emitted by the lost-ownership branch.
+    assert len(captured_events) == pre_count
+
+
+@pytest.mark.asyncio
+async def test_mark_failed_below_max_emits_failed_logevent(
+    conn: psycopg.AsyncConnection[Any],
+    captured_events: _LiveView,
+) -> None:
+    """ADR-0020 §D4 wire-point matrix row 5: mark_failed queued-retry
+    branch emits ``transition="failed"`` with attempts=new value,
+    status=error, error_class=None per §D8.
+    """
+    job_id = await _seed_job(conn, max_attempts=3)
+    await claim_one(conn, queue="ingest", worker_id="w-1", vis_timeout_s=60)
+    await mark_failed(conn, job_id=job_id, worker_id="w-1", error="transient")
+    events = captured_events.events
+    assert len(events) == 2
+    failed = events[1]
+    assert failed["kind"] == "job"
+    assert failed["queue_name"] == "ingest"
+    assert failed["job_id"] == str(job_id)
+    assert failed["transition"] == "failed"
+    assert failed["attempts"] == 1
+    assert failed["status"] == "error"
+    # error_class is None per ADR-0020 §D8 → omitted from NDJSON.
+    assert "error_class" not in failed
+
+
+@pytest.mark.asyncio
+async def test_mark_failed_at_max_emits_dead_logevent(
+    conn: psycopg.AsyncConnection[Any],
+    captured_events: _LiveView,
+) -> None:
+    """ADR-0020 §D4 wire-point matrix row 6: mark_failed dead branch
+    emits ``transition="dead"`` (NOT ``"failed"``) — terminal
+    discriminator matches the audit_log kind=``job_dead`` per ADR-0019
+    Amendment §A.
+    """
+    job_id = await _seed_job(conn, max_attempts=2)
+    await claim_one(conn, queue="ingest", worker_id="w-1", vis_timeout_s=60)
+    await mark_failed(conn, job_id=job_id, worker_id="w-1", error="first")
+    await claim_one(conn, queue="ingest", worker_id="w-2", vis_timeout_s=60)
+    await mark_failed(conn, job_id=job_id, worker_id="w-2", error="final")
+    events = captured_events.events
+    # 4 events: claimed, failed, claimed, dead.
+    assert len(events) == 4
+    assert events[3]["transition"] == "dead"
+    assert events[3]["attempts"] == 2
+    assert events[3]["status"] == "error"
+    # error_class=None per ADR-0020 §D8 → omitted on the dead branch
+    # too. Negative-assertion pin (code-CR M2, 2026-05-27): catches a
+    # future implementer who flips error_class=None to error_class=error
+    # for the dead-only branch (sibling of the failed-branch pin).
+    assert "error_class" not in events[3]
+
+
+@pytest.mark.asyncio
+async def test_mark_failed_row_vanished_emits_no_logevent(
+    conn: psycopg.AsyncConnection[Any],
+    captured_events: _LiveView,
+) -> None:
+    """ADR-0020 §D4 wire-point matrix row 7: row-vanished branch rolls
+    back, returns no-op, emits no LogEvent.
+    """
+    job_id = await _seed_job(conn)
+    await claim_one(conn, queue="ingest", worker_id="w-1", vis_timeout_s=60)
+    pre_count = len(captured_events)
+    async with conn.cursor() as cur:
+        await cur.execute("DELETE FROM jobs WHERE id=%s", (job_id,))
+    await conn.commit()
+    await mark_failed(conn, job_id=job_id, worker_id="w-1", error="orphaned")
+    # No new event from the vanished branch.
+    assert len(captured_events) == pre_count

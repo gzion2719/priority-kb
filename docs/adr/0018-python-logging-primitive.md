@@ -90,3 +90,13 @@ This is acceptable for M2b #2: the application logger is configured for `api/`-a
 - [api/log.py](../../api/log.py) — implementation.
 - [api/tests/test_log.py](../../api/tests/test_log.py) — test surface.
 - [SESSION_PROTOCOL.md](../../SESSION_PROTOCOL.md) §Python pre-push `py-script-logging-init` — the rule this ADR pins.
+
+---
+
+## Amendment 2026-05-27 — LogEvent emitter timing closed by ADR-0020
+
+§"LogEvent emitter" (line 43) previously deferred the Python LogEvent emitter to M2b #4 ("the first PR that introduces a real Claude or Voyage call site"). [ADR-0020](0020-python-log-event-emitter.md) closes this deferral with a split-ship decision: the `LogEventJob` variant ships in M2b #3 closeout (ahead of M2b #4), vendor variants (`LogEventVoyage`, `LogEventClaude`, …) land alongside their first Python call site at M2b #5/#6/#7 when the OCR + parse + chunk + embed handlers wire to vendor SDKs.
+
+Rationale (ADR-0020 §D3): the M2b #3 job-queue observability gap is live today and the `LogEventJob` wire shape is already pinned in `lib/log.ts:289-335`; deferring the Python mirror to M2b #4 left every job-queue state transition unobservable via the LogEvent stream for the entire M2b #3 → M2b #4 window. Vendor variants stay deferred because their wire shapes need real call-site evidence to settle.
+
+Cross-ref: ADR-0020 §"Amendment 2026-05-27" carries the canonical amendment text; this pointer is the back-reference.

@@ -17,16 +17,23 @@ Iron-rule footprint (ADR-0019 §D8):
         even when those vendors are out (handler-side retries via
         mark_failed).
 
-LogEvent emission: this module does NOT emit ``LogEventJob`` — the
-Python LogEvent emitter lands in M2b #4 per ADR-0018. Until then,
-state transitions are observable via ``audit_log`` rows
-(``job_dispatched`` / ``job_done`` / ``job_failed`` / ``job_dead``)
-plus the application logger from ``api.log``.
+LogEvent emission: emits ``LogEventJob`` (kind=``"job"``) on every
+state transition that writes an ``audit_log`` row — ``claimed`` after
+``claim_one``'s commit, ``done`` after ``mark_done``'s success-branch
+commit, ``failed`` after ``mark_failed``'s queued-retry-branch commit,
+``dead`` after ``mark_failed``'s dead-branch commit. Lost-ownership and
+empty-queue branches write no audit row and emit no LogEvent —
+``audit_log row written ⇔ LogEventJob line emitted`` per
+[ADR-0020](../docs/adr/0020-python-log-event-emitter.md) §D4 wire-point
+matrix. ``error_class`` is ``None`` at M2b #3 transition sites per
+ADR-0020 §D8; the stable taxonomy lands at M2b #5+ when the first OCR
+handler ships.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -34,6 +41,8 @@ from uuid import UUID
 
 import psycopg
 from psycopg.types.json import Jsonb
+
+from api.log_event import LogEventJob, log_event
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +139,7 @@ async def claim_one(
     N workers calling ``claim_one`` simultaneously each get a distinct
     job (or ``None``) — no claim is ever issued twice.
     """
+    started_ms = time.perf_counter() * 1000.0
     async with conn.cursor() as cur:
         await cur.execute(
             _CLAIM_SQL,
@@ -137,6 +147,8 @@ async def claim_one(
         )
         row = await cur.fetchone()
         if row is None:
+            # Empty-queue branch — no audit row, no LogEvent emit per
+            # ADR-0020 §D4 wire-point matrix.
             return None
         job = _row_to_job(row)
         # Audit row written in the same tx as the UPDATE. If this INSERT
@@ -160,6 +172,23 @@ async def claim_one(
             ),
         )
         await conn.commit()
+        # LogEvent emit AFTER commit per ADR-0020 §D4: the audit_log row
+        # is the durable record; the NDJSON line is an observability tee.
+        # Sink errors are swallowed by log_event itself — observability
+        # MUST NEVER break the API path.
+        log_event(
+            LogEventJob(
+                kind="job",
+                queue_name=job.queue_name,
+                job_id=str(job.id),
+                transition="claimed",
+                latency_ms=time.perf_counter() * 1000.0 - started_ms,
+                cost_usd=None,
+                attempts=job.attempts,
+                error_class=None,
+                status="ok",
+            )
+        )
         return job
 
 
@@ -183,6 +212,7 @@ async def mark_done(
     handler completion and this call, the UPDATE matches zero rows and
     this function returns without raising (logged as a no-op).
     """
+    started_ms = time.perf_counter() * 1000.0
     async with conn.cursor() as cur:
         await cur.execute(
             """
@@ -192,7 +222,7 @@ async def mark_done(
                    locked_by=NULL,
                    updated_at=now()
             WHERE  id=%s AND locked_by=%s
-            RETURNING id
+            RETURNING queue_name
             """,
             (job_id, worker_id),
         )
@@ -200,7 +230,8 @@ async def mark_done(
         if owned is None:
             # Lost the lock to a reclaim. Don't write a job_done audit
             # row — that would claim credit for work the new owner
-            # might also be running. Log + return.
+            # might also be running. Log + return. No LogEvent emit per
+            # ADR-0020 §D4 (audit_log row written ⇔ LogEvent emitted).
             logger.warning(
                 "mark_done: job %s no longer owned by worker %s (lock reclaimed?); no audit row",
                 job_id,
@@ -208,11 +239,29 @@ async def mark_done(
             )
             await conn.commit()
             return
+        queue_name: str = owned[0]
         await cur.execute(
             "INSERT INTO audit_log (kind, payload) VALUES (%s, %s)",
             ("job_done", Jsonb({"job_id": str(job_id)})),
         )
         await conn.commit()
+        # LogEvent emit AFTER commit per ADR-0020 §D4 — only the
+        # success-branch path. queue_name read from the RETURNING clause
+        # so the wire-format carries the same field set as claim_one's
+        # emit without an extra round-trip.
+        log_event(
+            LogEventJob(
+                kind="job",
+                queue_name=queue_name,
+                job_id=str(job_id),
+                transition="done",
+                latency_ms=time.perf_counter() * 1000.0 - started_ms,
+                cost_usd=None,
+                attempts=None,
+                error_class=None,
+                status="ok",
+            )
+        )
 
 
 async def mark_failed(
@@ -247,6 +296,7 @@ async def mark_failed(
     External readers see the transition atomically at commit. Code-CR B4
     (2026-05-26).
     """
+    started_ms = time.perf_counter() * 1000.0
     async with conn.cursor() as cur:
         await cur.execute(
             """
@@ -257,7 +307,7 @@ async def mark_failed(
                    locked_by = NULL,
                    updated_at = now()
             WHERE  id = %(id)s AND locked_by = %(worker_id)s
-            RETURNING attempts, max_attempts
+            RETURNING attempts, max_attempts, queue_name
             """,
             {"id": job_id, "worker_id": worker_id, "err": error},
         )
@@ -267,7 +317,9 @@ async def mark_failed(
             # the lock was reclaimed by another worker between claim and
             # this call. Either way, this worker is no longer authoritative
             # over the row. Roll back and log — don't raise, don't write an
-            # audit row that would attribute work to a non-owner.
+            # audit row that would attribute work to a non-owner. No
+            # LogEvent emit per ADR-0020 §D4 (audit_log row written ⇔
+            # LogEvent emitted).
             await conn.rollback()
             logger.warning(
                 "mark_failed: job %s no longer owned by worker %s (vanished or reclaimed); no-op",
@@ -277,7 +329,9 @@ async def mark_failed(
             return
         attempts: int = row[0]
         max_attempts: int = row[1]
-        if attempts >= max_attempts:
+        queue_name: str = row[2]
+        is_dead = attempts >= max_attempts
+        if is_dead:
             await cur.execute(
                 "UPDATE jobs SET state='dead', updated_at=now() WHERE id=%s",
                 (job_id,),
@@ -303,6 +357,24 @@ async def mark_failed(
                 ),
             )
         await conn.commit()
+        # LogEvent emit AFTER commit per ADR-0020 §D4 — branch on
+        # is_dead to pick the right transition. error_class=None at all
+        # M2b #3 transition sites per ADR-0020 §D8 (the stable taxonomy
+        # lands at M2b #5+; the audit_log row's last_error field carries
+        # the free text for human inspection).
+        log_event(
+            LogEventJob(
+                kind="job",
+                queue_name=queue_name,
+                job_id=str(job_id),
+                transition="dead" if is_dead else "failed",
+                latency_ms=time.perf_counter() * 1000.0 - started_ms,
+                cost_usd=None,
+                attempts=attempts,
+                error_class=None,
+                status="error",
+            )
+        )
 
 
 def _row_to_job(row: tuple[Any, ...]) -> Job:
