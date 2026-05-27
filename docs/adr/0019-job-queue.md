@@ -234,3 +234,15 @@ RETURNING *;
 **§I — `updated_at = now()` enforced caller-side at every UPDATE site (M1).** The `0001_updated_at_triggers.sql` auto-update trigger is intentionally NOT applied to `jobs` (§D10 unchanged). Callers — `claim_one`, `mark_done`, `mark_failed`, and any future state-transition helper — MUST include `updated_at = now()` in the UPDATE SET clause. The PR's integration tests assert `updated_at` advances after each transition; recurrence of the "forgot `updated_at`" class is caught at gate time rather than at audit-archaeology time.
 
 **Net effect on the implementation surface.** §A adds a fifth audit discriminator. §B-§I are clarifications + mechanical floors that change the implementation shape but not the architectural decision. ADR-0008 + ADR-0009 + ADR-0016 unchanged.
+
+---
+
+## Amendment 2026-05-27 — Python LogEventJob ships ahead of vendor variants per ADR-0020
+
+§D7 ("Observability: `LogEvent` + `audit_log.kind` discriminators") originally said: *"Emitter fires from both Node (enqueue path, via lib/log.ts) and Python (worker path, via the Python LogEvent emitter that lands in M2b #4 per ADR-0018 §'LogEvent emitter')."* And the "Mitigations" bullet at line 172 named M2b #4 as the first PR to land the Python LogEvent emitter.
+
+Both of those references are amended by [ADR-0020](0020-python-log-event-emitter.md): the Python `LogEventJob` variant ships in M2b #3 closeout — same session as this amendment — rather than waiting for M2b #4. Vendor variants (`LogEventVoyage`, `LogEventClaude`, …) still land per first Python call site (M2b #5/#6/#7 OCR + parse + chunk + embed handlers).
+
+Wire-point matrix lives at ADR-0020 §"Wire-point matrix". Implementation at [api/log_event.py](../../api/log_event.py) + the emit calls in [api/jobs.py](../../api/jobs.py) (`claim_one`, `mark_done` success branch, `mark_failed` queued-retry + dead branches). `audit_log` row written ⇔ LogEvent line emitted; lost-ownership / empty-queue branches do neither.
+
+Cross-ref: ADR-0020 §"Amendment 2026-05-27" carries the canonical amendment text; this pointer is the back-reference.
