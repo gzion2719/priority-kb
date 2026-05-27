@@ -116,18 +116,24 @@ def test_parse_result_returns_paragraphs_in_order(fixture_result: Any) -> None:
     assert ocr_result.text == "\n\n".join(ocr_result.paragraphs)
 
 
-def test_parse_result_pins_model_and_api_version_constants(fixture_result: Any) -> None:
-    """Provenance fields come from the sealed module constants, not the wire echo.
+def test_parse_result_uses_constants_not_response_echo() -> None:
+    """OcrResult.model + api_version come from sealed constants, ignoring wire echo.
 
-    ADR-0022 D4 + the `_parse_result` docstring: provenance is what we
-    sent, not what the response echoes. If a future regression
-    accidentally reads `result.model_id` / `result.api_version`, this
-    test catches it because the values would still match the constants
-    in the happy path — so this test asserts on the source-of-truth
-    being module-level, not response-level (by reading the constants
-    indirectly via the adapter).
+    Negative-assertion test: constructs a fake AnalyzeResult whose
+    `model_id` / `api_version` deliberately diverge from the sealed
+    constants. If `_parse_result` ever started reading those off the
+    response (instead of pinning to the module constants), the OcrResult
+    fields would match the divergent fake values and this test would
+    fail. The happy-path fixture cannot catch this regression (its
+    wire-echo values equal the constants by construction).
     """
-    ocr_result = _parse_result(_as_result(fixture_result))
+    fake = SimpleNamespace(
+        model_id="wrong-model-id-from-server",
+        api_version="2099-01-01",
+        paragraphs=[SimpleNamespace(content="x"), SimpleNamespace(content="y")],
+        pages=[],
+    )
+    ocr_result = _parse_result(_as_result(fake))
     assert ocr_result.model == "prebuilt-layout"
     assert ocr_result.api_version == "2024-11-30"
 

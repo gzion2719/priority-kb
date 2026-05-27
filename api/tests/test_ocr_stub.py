@@ -90,22 +90,14 @@ def test_stub_rejects_zero_byte_input() -> None:
     assert exc_info.value.code == "empty_result"
 
 
-def test_stub_satisfies_ocr_adapter_protocol() -> None:
-    """StubOcrAdapter is a structural OcrAdapter — no nominal inheritance.
+def test_stub_exposes_ocr_bytes_signature() -> None:
+    """StubOcrAdapter exposes the `ocr_bytes` method the factory relies on.
 
-    Verifies that `isinstance(stub, OcrAdapter)` works under
-    `runtime_checkable` Protocol semantics; if a regression accidentally
-    drops the `ocr_bytes` signature, this fails before the factory does.
+    Smoke check — the structural conformance to `OcrAdapter` (Protocol,
+    not @runtime_checkable) is enforced by mypy at typecheck time. This
+    test only catches the cruder regression of removing the method
+    entirely or renaming it.
     """
-    from api.ocr.types import OcrAdapter
-
     adapter = StubOcrAdapter()
-    # The Protocol isn't @runtime_checkable; instead, structurally assert
-    # the method shape via hasattr + callable. Mirror of how Node-side
-    # duck-type assertions read in lib/embedding tests.
     assert hasattr(adapter, "ocr_bytes")
     assert callable(adapter.ocr_bytes)
-    # Static-type-checker proxy: the line below would be a type error
-    # if the structural shape diverged from OcrAdapter.
-    _typed: OcrAdapter = adapter
-    assert _typed is adapter

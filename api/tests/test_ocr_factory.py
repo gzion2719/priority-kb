@@ -29,6 +29,7 @@ def test_factory_returns_azure_when_both_env_present(monkeypatch: pytest.MonkeyP
     """Both env vars → Azure adapter. Verifies the configured path."""
     from api.ocr.azure import AzureDocumentIntelligenceAdapter
 
+    _clear_azure_env(monkeypatch)
     monkeypatch.setenv("AZURE_DOCINTEL_ENDPOINT", "https://example.cognitiveservices.azure.com")
     monkeypatch.setenv("AZURE_DOCINTEL_KEY", "fake-key-for-test")
     adapter = get_ocr_adapter()

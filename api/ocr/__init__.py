@@ -5,7 +5,7 @@ Vendor-agnostic OCR contract + Azure Document Intelligence implementation
 
 Iron-rule footprint (package surface):
     #2  No public route; called only from the worker handler (next slice).
-    #6  No sensitivity touched here.
+    #6  No KB entry written here; sensitivity tag dispatch N/A.
     #8  Azure DI is OCR, NOT embedding/agent — not added to FORBIDDEN
         list (ADR-0022 D7).
     #9  Does not write chunks; provenance lives on OcrResult, recorded

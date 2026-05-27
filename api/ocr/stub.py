@@ -55,9 +55,10 @@ class StubOcrAdapter:
         # configured 4 × 32 char paragraph layout deterministically.
         digest = hashlib.sha256(data).hexdigest()
         total_width = _STUB_PARAGRAPH_WIDTH * _STUB_PARAGRAPH_COUNT
-        # Tile the digest to fill the layout; sha256 hex is 64 chars, which
-        # is exactly half of 128, so the layout pulls two copies. The tile
-        # is content-stable for any input.
+        # Tile the digest to fill the layout; sha256 hex is 64 chars and the
+        # layout is 128. The `+ 1` guards against integer-division truncation
+        # if width or count change; the slice trims the over-tile back to
+        # exact width. Content-stable for any input.
         tiled = (digest * ((total_width // len(digest)) + 1))[:total_width]
         paragraphs = [
             tiled[i : i + _STUB_PARAGRAPH_WIDTH]

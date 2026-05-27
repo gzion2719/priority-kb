@@ -94,7 +94,7 @@ class AzureDocumentIntelligenceAdapter:
                 model_id=_MODEL_ID,
                 body=AnalyzeDocumentRequest(bytes_source=data),
             )
-            result: AnalyzeResult = poller.result()
+            result = poller.result()
         except AzureError as e:
             raise OcrError("ocr_failed", str(e)) from e
 
@@ -149,7 +149,17 @@ def _parse_result(result: AnalyzeResult) -> OcrResult:
 
 
 def _mean_word_confidence(result: AnalyzeResult) -> float | None:
-    """Mean word-level confidence across all pages, or None if absent."""
+    """Mean word-level confidence across all pages, or None if absent.
+
+    Note: aggregates **every** word's confidence, including words that
+    belong to paragraphs `_parse_result` later drops as empty-content.
+    The result is the page-level confidence signal, not a confidence
+    over the surfaced `OcrResult.text`. Downstream consumers thresholding
+    on `OcrResult.confidence` should treat it as page-quality rather than
+    text-quality. If a divergence between the two ever matters, recompute
+    confidence against the surviving paragraphs' span ranges — that's an
+    ADR-0022 amendment, not a hidden behavior change.
+    """
     pages = result.pages
     if not pages:
         return None
