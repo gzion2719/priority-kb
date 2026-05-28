@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-28 — M2b worker-orchestration tests (1 PR pair through main)
+
+- **1 PR pair.** [#342](https://github.com/gzion2719/priority-kb/pull/342)→[#343](https://github.com/gzion2719/priority-kb/pull/343) `test(worker)` — new [api/tests/test_worker.py](api/tests/test_worker.py): 11 stub-only tests covering `api/worker.py` orchestration (`poll_loop`, `_handle_shutdown`, `install_signal_handler`, `_default_handler`, `make_worker_id`, the new module-level `dispatch`). Python tests 201 → 212; Node unchanged 1008. The media-ingest handler was already fully covered, so the real gap was the poll-loop layer above it.
+- **Extracted `dispatch`** from `main()`'s inline closure to a module-level `async def dispatch(job, *, registry, conn_factory, worker_id)` (behavior-preserving) so the ADR-0019 §D6 unknown-queue fallback is unit-testable; `main()` keeps a thin `bound_dispatch`.
+- **Both Step 7b passes load-bearing.** Plan-CR caught the `asyncio.sleep` patch target, the SIGTERM process-disposition leak (intercept `signal.signal`), the mid-flight-set tautology risk, and prompted the `dispatch` extraction. Code-CR caught the `make_worker_id` backtracking-regex tautology (`token_hex(8)` would still match) + the handler-raises wrong-reason pass + docstring/seam drift.
+- **BACKLOG filed (real §D6 gap).** `poll_loop`'s `finally` clears in-flight state before the loop-exit `_handle_shutdown` runs → `_handle_shutdown`'s SIGTERM-marks-in-flight-failed branch is unreachable via the loop / effectively dead. Needs a §D6 design decision (graceful-drain vs pre-clear hook); out of scope here. `_handle_shutdown`'s contract is still unit-tested directly.
+- **Session Score 8/10.** Code 3/4 (−1: 2nd local `py-check` round — `func-returns-value` from asserting a `-> None` return). Protocol 3/3. Efficiency 2/3 (−1: that round was avoidable).
+- **Process improvement:** none codifiable this session — the mypy `-> None` `func-returns-value` gotcha is 1st occurrence per `feedback_prefer_mechanical_over_prose`; Ceiling carries it (check return annotation before asserting on a return; use a side-effect flag).
+- **Next session:** the memory-mandated stacked-PR baseRef mechanical floor — now a **GitHub Action**, not a `gh pr merge` hook (overdue ~6 sessions) — OR the M2b ROADMAP tickbox reconcile (#5/#6 shipped but still `[ ]`) OR the M3 27-entry seed. **Fresh chat fine** — all bounded.
+
+---
+
 ## 2026-05-28 — M2b #7: ADR-0023 image-processing design + caption slice (2 PR pairs through main)
 
 - **Two PR pairs.** ADR-0023 [#336](https://github.com/gzion2719/priority-kb/pull/336)→[#337](https://github.com/gzion2719/priority-kb/pull/337) (design-only); caption slice [#338](https://github.com/gzion2719/priority-kb/pull/338)→[#339](https://github.com/gzion2719/priority-kb/pull/339) (impl; #339 release awaiting merge at close). Tests 994 → 1008 Node.
