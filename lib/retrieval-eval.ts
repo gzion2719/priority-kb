@@ -19,7 +19,7 @@
 // session per ADR-0011 repo-visibility constraints.
 
 import { getEmbedder } from "@/lib/embedding";
-import { getReranker } from "@/lib/retrieval";
+import { getReranker, getSynthesizer } from "@/lib/retrieval";
 import { type Role } from "@/lib/auth";
 import {
   drainPipeline,
@@ -27,7 +27,7 @@ import {
   type AuditOutcome,
   type PipelineDeps,
 } from "@/lib/retrieval-pipeline";
-import type { EvalRetrieveResult } from "@/lib/retrieval";
+import type { EvalRetrieveResult, EvalRetrieveWithSynthResult } from "@/lib/retrieval";
 
 /**
  * Run retrieval against `query` for `role` and return the four lane-id arrays
@@ -91,5 +91,58 @@ export function projectToEvalResult(outcome: AuditOutcome): EvalRetrieveResult {
     keyword_candidate_ids: outcome.keyword_candidate_ids,
     fused_candidate_ids: outcome.fused_ids,
     reranked_ids: outcome.reranked_ids,
+  };
+}
+
+/**
+ * Synth-running twin of {@link evalRetrieve} for the citation_precision leg
+ * (ADR-0012 §7 Amendment 2026-05-28). Resolves `getSynthesizer()` into
+ * `PipelineDeps.synth` so the orchestrator runs stage D (synth) + citation
+ * validation, populating `outcome.citation_ids`. Unlike `evalRetrieve`, this
+ * DOES reach the synth factory.
+ *
+ * The eval runner gates this behind `EVAL_USE_LIVE_SYNTH=1` +
+ * `SYNTH_PROVIDER=anthropic` (see `evals/run-adapter.ts`). Running it with the
+ * default stub synth yields EMPTY `citation_ids`: the stub cites a sentinel
+ * UUID never present in `reranked_ids`, so the §5 validator hard-fails and the
+ * orchestrator degrades — there is no partial-subset path. The adapter gate
+ * rejects the stub-under-live-flag combination precisely to avoid that silent
+ * no-op masquerading as a measured "live" run.
+ *
+ * @param deps Optional override for the resolved singletons + DB helpers +
+ *             `synth` — tests inject a fully-valid stub synth here to exercise
+ *             the citation_ids projection without a live API call (iron #8).
+ */
+export async function evalRetrieveWithSynth(
+  query: string,
+  role: Role,
+  deps?: Partial<PipelineDeps>,
+): Promise<EvalRetrieveWithSynthResult> {
+  const resolvedDeps: PipelineDeps = {
+    embedder: deps?.embedder ?? getEmbedder(),
+    reranker: deps?.reranker ?? getReranker(),
+    synth: deps?.synth ?? getSynthesizer(),
+    ...(deps?.annFn ? { annFn: deps.annFn } : {}),
+    ...(deps?.keywordFn ? { keywordFn: deps.keywordFn } : {}),
+    ...(deps?.getPool ? { getPool: deps.getPool } : {}),
+    ...(deps?.fetchEntriesFn ? { fetchEntriesFn: deps.fetchEntriesFn } : {}),
+    ...(deps?.fetchChunkSlicesFn ? { fetchChunkSlicesFn: deps.fetchChunkSlicesFn } : {}),
+  };
+
+  const gen = retrievePipeline(resolvedDeps, { query, role });
+  const { outcome } = await drainPipeline(gen);
+  return projectToEvalWithSynthResult(outcome);
+}
+
+/**
+ * Project an {@link AuditOutcome} to {@link EvalRetrieveWithSynthResult}.
+ * Reuses {@link projectToEvalResult} for the four lane arrays and adds
+ * `citation_ids` from the synth-validated outcome (empty on any non-ok
+ * terminal). Exported for unit tests that drive the orchestrator directly.
+ */
+export function projectToEvalWithSynthResult(outcome: AuditOutcome): EvalRetrieveWithSynthResult {
+  return {
+    ...projectToEvalResult(outcome),
+    citation_ids: outcome.citation_ids,
   };
 }

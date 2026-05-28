@@ -10,8 +10,13 @@ import {
   type EmbeddingBatchResult,
   EmbeddingUnavailableError,
 } from "@/lib/embedding";
-import { type Reranker, type Synthesizer } from "@/lib/retrieval";
-import { evalRetrieve, projectToEvalResult } from "@/lib/retrieval-eval";
+import { type Reranker, type Synthesizer, type SynthResult } from "@/lib/retrieval";
+import {
+  evalRetrieve,
+  evalRetrieveWithSynth,
+  projectToEvalResult,
+  projectToEvalWithSynthResult,
+} from "@/lib/retrieval-eval";
 import type {
   AuditOutcome,
   FetchChunkSlicesFn,
@@ -76,6 +81,27 @@ function failingSynth(): Synthesizer {
     version: "should-never-be-used",
     async synthesize() {
       throw new Error("evalRetrieve must NOT invoke synth — see ADR-0012 §7");
+    },
+  };
+}
+
+/**
+ * Synth that emits a fully §5-valid answer citing `citeId`: a single trailing
+ * `Sources:` block, one inline citation matching it (set-equality), no
+ * trailing prose. When `citeId` ∈ reranked_ids the validator passes and
+ * `citation_ids` = [citeId]; when not, it hard-fails (no partial subset) and
+ * the orchestrator degrades to citation_ids = [].
+ */
+function validatingSynth(citeId: string): Synthesizer {
+  return {
+    model: "stub-valid-synth",
+    version: "v1",
+    async synthesize(): Promise<SynthResult> {
+      return {
+        answer: `The procedure is documented [${citeId}].\n\nSources: [${citeId}]`,
+        tokens_in: 0,
+        tokens_out: 0,
+      };
     },
   };
 }
@@ -191,6 +217,75 @@ describe("projectToEvalResult", () => {
       keyword_candidate_ids: [E2],
       fused_candidate_ids: [E1, E2],
       reranked_ids: [E1],
+    });
+  });
+});
+
+describe("evalRetrieveWithSynth", () => {
+  it("populates citation_ids when synth emits a fully-valid answer citing a reranked id", async () => {
+    const deps: Partial<PipelineDeps> = {
+      ...depsFor({
+        ann: [{ entry_id: E1, best_chunk_id: C1, ann_distance: 0.1, rank: 1 }],
+        entries: [entryRow(E1)],
+      }),
+      synth: validatingSynth(E1),
+    };
+    const r = await evalRetrieveWithSynth("q", "user", deps);
+    expect(r.reranked_ids).toEqual([E1]);
+    expect(r.citation_ids).toEqual([E1]);
+  });
+
+  it("returns empty citation_ids when synth cites an id NOT in reranked (validator hard-fails, no partial subset)", async () => {
+    // Distinguishing property: a pipeline that passed synth citations through
+    // un-validated would surface citation_ids = [E2]. The §5 validator instead
+    // hard-fails the whole response (hallucinated_id), retry also cites E2,
+    // and the orchestrator degrades to citation_ids = []. Asserting [] (not
+    // [E2], not a partial subset) is the negative assertion.
+    const deps: Partial<PipelineDeps> = {
+      ...depsFor({
+        ann: [{ entry_id: E1, best_chunk_id: C1, ann_distance: 0.1, rank: 1 }],
+        entries: [entryRow(E1)],
+      }),
+      synth: validatingSynth(E2), // E2 ∉ reranked [E1]
+    };
+    const r = await evalRetrieveWithSynth("q", "user", deps);
+    expect(r.reranked_ids).toEqual([E1]);
+    expect(r.citation_ids).toEqual([]);
+  });
+});
+
+describe("projectToEvalWithSynthResult", () => {
+  it("adds citation_ids on top of the four lane arrays", () => {
+    const out: AuditOutcome = {
+      query: "q",
+      role: "user",
+      sensitivity_allowed: ["public", "internal"],
+      embedding_model: "m",
+      embedding_version: "v",
+      ann_candidate_ids: [E1, E2],
+      keyword_candidate_ids: [E2],
+      fused_ids: [E1, E2],
+      rrf_k: 60,
+      reranked_ids: [E1],
+      citation_ids: [E1],
+      keyword_only: false,
+      tokens: { embed: 1, keyword: 0, rerank_input: 0, synth_input: 0, synth_output: 0 },
+      latencies_ms: {},
+      degraded: false,
+      status: "ok",
+      synthesizer_model: "stub-sha256-synth",
+      synthesizer_version: "v1",
+      citation_validation_outcome: "ok",
+      citation_validation_detail: null,
+      retry_attempted: false,
+      retry_prefix_hash: null,
+    };
+    expect(projectToEvalWithSynthResult(out)).toEqual({
+      ann_candidate_ids: [E1, E2],
+      keyword_candidate_ids: [E2],
+      fused_candidate_ids: [E1, E2],
+      reranked_ids: [E1],
+      citation_ids: [E1],
     });
   });
 });

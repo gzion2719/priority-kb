@@ -36,6 +36,9 @@ describe("evals/run.ts — wiring guards", () => {
     ORIGINAL_ENV.DATABASE_URL = process.env.DATABASE_URL;
     ORIGINAL_ENV.EMBEDDING_PROVIDER = process.env.EMBEDDING_PROVIDER;
     ORIGINAL_ENV.RERANK_PROVIDER = process.env.RERANK_PROVIDER;
+    ORIGINAL_ENV.EVAL_USE_LIVE_SYNTH = process.env.EVAL_USE_LIVE_SYNTH;
+    ORIGINAL_ENV.SYNTH_PROVIDER = process.env.SYNTH_PROVIDER;
+    ORIGINAL_ENV.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
   });
 
   afterEach(() => {
@@ -113,6 +116,65 @@ describe("evals/run.ts — wiring guards", () => {
       const { pinStubProviders } = await import("./run-adapter");
       expect(() => pinStubProviders()).not.toThrow();
       expect(process.env.EMBEDDING_PROVIDER).toBe("stub");
+    });
+  });
+
+  describe("pinStubProviders — live-synth opt-in gate (ADR-0012 §7 Amendment)", () => {
+    // The gate exists to keep the default eval stub-only AND to forbid the
+    // silent-fake-numbers trap: EVAL_USE_LIVE_SYNTH=1 with a stub synth would
+    // cite a sentinel UUID, fail §5 validation, and yield empty citation_ids
+    // that look like a measured live run. Each test below would PASS (no
+    // throw) if the gate were absent — that's the distinguishing property.
+    //
+    // Embed + rerank must always be pinnable to stub even on the live path,
+    // so we set those to stub here to isolate the synth gate as the variable.
+
+    it("EVAL_USE_LIVE_SYNTH=1 + missing ANTHROPIC_API_KEY MUST fail loud", async () => {
+      process.env.EVAL_USE_LIVE_SYNTH = "1";
+      delete process.env.SYNTH_PROVIDER;
+      delete process.env.ANTHROPIC_API_KEY;
+      process.env.EMBEDDING_PROVIDER = "stub";
+      process.env.RERANK_PROVIDER = "stub";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).toThrow(/ANTHROPIC_API_KEY/);
+    });
+
+    it("EVAL_USE_LIVE_SYNTH=1 + explicit SYNTH_PROVIDER=stub MUST be rejected (the trap)", async () => {
+      // Without this rejection the stub synth runs, cites the sentinel, and
+      // citation_ids comes back empty — a 'measured' run that measured nothing.
+      process.env.EVAL_USE_LIVE_SYNTH = "1";
+      process.env.SYNTH_PROVIDER = "stub";
+      process.env.ANTHROPIC_API_KEY = "dummy-key-for-test";
+      process.env.EMBEDDING_PROVIDER = "stub";
+      process.env.RERANK_PROVIDER = "stub";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).toThrow(/SYNTH_PROVIDER/);
+    });
+
+    it("EVAL_USE_LIVE_SYNTH=1 + unset SYNTH_PROVIDER + key present pins SYNTH_PROVIDER=anthropic", async () => {
+      process.env.EVAL_USE_LIVE_SYNTH = "1";
+      delete process.env.SYNTH_PROVIDER;
+      process.env.ANTHROPIC_API_KEY = "dummy-key-for-test";
+      process.env.EMBEDDING_PROVIDER = "stub";
+      process.env.RERANK_PROVIDER = "stub";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).not.toThrow();
+      expect(process.env.SYNTH_PROVIDER).toBe("anthropic");
+    });
+
+    it("default (EVAL_USE_LIVE_SYNTH unset) does NOT force SYNTH_PROVIDER and never requires a key", async () => {
+      // The distinguishing assertion: a stale ANTHROPIC_API_KEY-less env is
+      // fine on the default path, and SYNTH_PROVIDER is not silently set to
+      // anthropic (which would otherwise reach a live factory on a future
+      // refactor). evalRetrieve never resolves synth on this path.
+      delete process.env.EVAL_USE_LIVE_SYNTH;
+      delete process.env.SYNTH_PROVIDER;
+      delete process.env.ANTHROPIC_API_KEY;
+      process.env.EMBEDDING_PROVIDER = "stub";
+      process.env.RERANK_PROVIDER = "stub";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).not.toThrow();
+      expect(process.env.SYNTH_PROVIDER).toBeUndefined();
     });
   });
 
