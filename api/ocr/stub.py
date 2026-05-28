@@ -4,10 +4,12 @@ Mirrors the `createStubEmbedder` precedent in `lib/embedding.ts`: produces
 a deterministic OcrResult derived from input bytes so test assertions can
 pin exact paragraph content without monkeypatching.
 
-The stub is the **test-time** fallback. Production-time fallback to
-Tesseract when Azure DI is unreachable is a follow-up slice per ADR-0022
-D6 — the factory does NOT fall back to the stub when Azure credentials
-are present but the call fails (that bubbles `OcrError("ocr_failed")`).
+The stub is the no-Azure / **test-time** adapter. The production-time
+fallback when Azure DI is unreachable is `TesseractOcrAdapter` (shipped
+in ADR-0022 A9), wired by the factory as `FallbackOcrAdapter(Azure,
+Tesseract)`. The factory does NOT fall back to the stub when Azure
+credentials are present but the call fails — that path degrades to
+Tesseract, and only `OcrError("ocr_failed")` bubbles if Tesseract also fails.
 """
 
 from __future__ import annotations
