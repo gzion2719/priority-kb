@@ -410,6 +410,18 @@ export type EvalRetrieveResult = {
   reranked_ids: string[];
 };
 
+/**
+ * Superset of {@link EvalRetrieveResult} for the citation_precision leg
+ * (ADR-0012 §7 Amendment 2026-05-28). Adds `citation_ids` — the entry_ids
+ * synth cited, validated by the orchestrator as a subset of `reranked_ids`.
+ * Empty on any degraded / validation-failed / synth-down terminal (the
+ * validator hard-fails the whole response; there is no partial-subset path),
+ * which the eval runner reports as `skipped` for citation_precision.
+ */
+export type EvalRetrieveWithSynthResult = EvalRetrieveResult & {
+  citation_ids: string[];
+};
+
 /** Input to `rrfFuse` — one entry per fusion lane, in caller-defined order. */
 export type RrfLane = {
   /** Human-readable lane name for tie-break determinism + audit traceability. */
