@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-28 — M2b #7: ADR-0023 image-processing design + caption slice (2 PR pairs through main)
+
+- **Two PR pairs.** ADR-0023 [#336](https://github.com/gzion2719/priority-kb/pull/336)→[#337](https://github.com/gzion2719/priority-kb/pull/337) (design-only); caption slice [#338](https://github.com/gzion2719/priority-kb/pull/338)→[#339](https://github.com/gzion2719/priority-kb/pull/339) (impl; #339 release awaiting merge at close). Tests 994 → 1008 Node.
+- **[ADR-0023](docs/adr/0023-image-processing-caption-region-contract.md) decided M2b #7's net-new surface** (the OCR→chunks path already shipped in #6): caption = **display-only**, derived from the post-scrub body (never raw OCR → iron #6), **NOT** embedded (no corpus re-embed); `BoundingRegion`/`OcrResult.regions` contract named in intent only, field deferred; region-chunks + vision-caption gated on real images + a measured retrieval gap.
+- **Caption slice implemented** (ADR-0023 D5): migration 0005 nullable `entries.caption`, [lib/caption.ts](lib/caption.ts) `deriveCaption` (first non-empty post-scrub line, CRLF-safe, grapheme-safe 160-clip, total/no-throw), write-path wiring in `createEntry`/`updateEntry`, entry-detail surface. Scope = detail-page only; citation-card wire (Shape B) + backfill + role-aware/vision upgrades filed in BACKLOG.
+- **Both Step 7b reviews load-bearing.** ADR review flipped caption off the embed prefix (KB-wide re-embed blast radius) → display-only; caption-slice review caught PII-from-raw-OCR (derive from scrubbed body), CRLF handling, clip-the-line-not-body, the no-throw contract, and the sandbox read-path coverage gap on `lib/entries.test.ts`.
+- **Session Score 9/10.** Code 4/4 (both gates green first try); Protocol 3/3; Efficiency 2/3 (−1: ADR commit subject led with `ADR-0023` → commitlint `subject-case` re-commit, 2nd occurrence of that class).
+- **Process improvement:** WORKFLOW.md commit-handoff section gained the **Commit-subject-case sub-rule** (see [WORKFLOW.md](WORKFLOW.md), after the Active-runner sub-rule).
+- **Next session:** citation-card caption wire (ADR-0023 Shape B, BACKLOG) OR M3 27-entry seed (real recall-gate) OR the overdue stacked-PR baseRef mechanical floor — note it must be redesigned as a **GitHub Action**, not a `gh pr merge` PreToolUse hook (that path is already fully blocked; the real failure is the browser merge). **Fresh chat recommended** — today went deep (2 PR pairs + 1 ADR + caption impl + 2 Step 7b cycles).
+
+---
+
 ## 2026-05-28 — M3 #7 citation_precision wire + live smoke + CI evals job (6 PRs through main)
 
 - **Three feature-sets, 6 PRs through main.** (1) citation_precision wire [#328](https://github.com/gzion2719/priority-kb/pull/328)→[#329](https://github.com/gzion2719/priority-kb/pull/329); (2) live-smoke doc correction + 2 findings [#330](https://github.com/gzion2719/priority-kb/pull/330)→[#331](https://github.com/gzion2719/priority-kb/pull/331); (3) CI evals job + deterministic seed [#332](https://github.com/gzion2719/priority-kb/pull/332)→[#333](https://github.com/gzion2719/priority-kb/pull/333). Tests 983 → 994 Node.
