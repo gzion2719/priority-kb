@@ -2,7 +2,8 @@
 
 Exercises both branches of `get_ocr_adapter()`:
     - No env vars present → StubOcrAdapter.
-    - Both env vars present → AzureDocumentIntelligenceAdapter.
+    - Both env vars present → FallbackOcrAdapter(Azure primary, Tesseract
+      fallback) per ADR-0022 A9.
     - Only one env var present → StubOcrAdapter (defensive; both required).
 """
 
@@ -25,15 +26,26 @@ def test_factory_returns_stub_when_env_absent(monkeypatch: pytest.MonkeyPatch) -
     assert isinstance(adapter, StubOcrAdapter)
 
 
-def test_factory_returns_azure_when_both_env_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Both env vars → Azure adapter. Verifies the configured path."""
+def test_factory_returns_fallback_chain_when_both_env_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both env vars → FallbackOcrAdapter(Azure primary, Tesseract fallback).
+
+    Per ADR-0022 A9 the configured path is no longer a bare Azure adapter — it
+    is wrapped so an Azure outage degrades to local Tesseract (iron-rule #12).
+    Asserts the wrapper type AND that the two legs are the expected engines.
+    """
     from api.ocr.azure import AzureDocumentIntelligenceAdapter
+    from api.ocr.fallback import FallbackOcrAdapter
+    from api.ocr.tesseract import TesseractOcrAdapter
 
     _clear_azure_env(monkeypatch)
     monkeypatch.setenv("AZURE_DOCINTEL_ENDPOINT", "https://example.cognitiveservices.azure.com")
     monkeypatch.setenv("AZURE_DOCINTEL_KEY", "fake-key-for-test")
     adapter = get_ocr_adapter()
-    assert isinstance(adapter, AzureDocumentIntelligenceAdapter)
+    assert isinstance(adapter, FallbackOcrAdapter)
+    assert isinstance(adapter.primary, AzureDocumentIntelligenceAdapter)
+    assert isinstance(adapter.fallback, TesseractOcrAdapter)
 
 
 def test_factory_returns_stub_when_endpoint_missing(monkeypatch: pytest.MonkeyPatch) -> None:
