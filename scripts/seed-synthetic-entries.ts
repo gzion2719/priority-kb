@@ -57,6 +57,7 @@ import { getDb } from "@/lib/db";
 import { createStubEmbedder } from "@/lib/embedding";
 import { createEntry } from "@/lib/ingest";
 import * as schema from "@/drizzle/schema";
+import { SEED_FIXTURE_IDS } from "@/evals/fixture-ids";
 
 const APPLY = process.argv.includes("--apply");
 
@@ -66,9 +67,14 @@ const SEED_DATE = "2026-05-27";
 // shape of real Priority KB entries: a clear Q&A title, a procedural or
 // diagnostic body grounded in generic Priority ERP terminology, no customer
 // or vendor identifiers, no real ticket numbers.
+// Each entry pins an explicit `id` from SEED_FIXTURE_IDS so a fresh DB (CI)
+// reproduces the exact UUIDs evals/golden_set.yaml anchors to — see
+// evals/fixture-ids.ts for why. The reconciliation test guards seed↔golden
+// drift.
 const SEED_ENTRIES = [
   {
     // Maps to golden-set en-001
+    id: SEED_FIXTURE_IDS["en-001"],
     title: "Fixing duplicate customer codes during Excel import",
     category: "procedural",
     tags: ["customers", "import", "excel", "duplicates"],
@@ -92,6 +98,7 @@ Common pitfalls:
   },
   {
     // Maps to golden-set en-009
+    id: SEED_FIXTURE_IDS["en-009"],
     title: "Resolving 'cannot delete record - foreign key constraint' errors on customer deletion",
     category: "diagnostic",
     tags: ["customers", "errors", "foreign-key", "deletion"],
@@ -122,6 +129,7 @@ If the constraint blocks a delete you genuinely need (e.g., a duplicate test cus
   },
   {
     // Maps to golden-set he-003
+    id: SEED_FIXTURE_IDS["he-003"],
     title: "הגדרת שנת כספים חדשה במודול הנהלת חשבונות",
     category: "procedural",
     tags: ["finance", "fiscal-year", "ledger", "hebrew"],
@@ -201,10 +209,14 @@ async function main(): Promise<number> {
     console.log();
 
     if (APPLY) {
+      // Split the pinned `id` out of the IngestInput fields — createEntry takes
+      // `id` as a top-level arg (it is NOT part of IngestInput).
+      const { id: entryId, ...input } = entry;
       const result = await createEntry({
         db,
         embedder,
-        input: entry,
+        input,
+        id: entryId,
         source: { kind: "direct" },
       });
       console.log(
