@@ -369,7 +369,102 @@ extend `IngestBodyForPut` (Node side) to route them into
 ### A8 — Out of scope (slice boundary preserved)
 
 - OCR provenance in `audit_log` (A6 documents the cost).
-- Tesseract production-time fallback (D6 still partial).
+- Tesseract production-time fallback (D6 still partial). **← un-deferred by A9 below.**
 - `BoundingRegion` extension to `OcrResult` (M2b #7).
 - DOCX MIME allowlist addition to upload route.
 - Per-call OCR cost in `audit_log` (BACKLOG entry).
+
+## Amendment 2026-05-28 — A9: Tesseract production-time fallback (D6 un-deferred; iron-rule #12 closed)
+
+This amendment un-defers D6 / A8's "Tesseract production-time fallback." An
+Azure DI outage now **degrades** to local Tesseract OCR instead of hard-failing,
+closing the iron-rule #12 degraded-mode leg for the OCR path.
+
+### A9.1 — Fallback lives at the factory, not the worker handler
+
+`get_ocr_adapter()` returns `FallbackOcrAdapter(primary=Azure,
+fallback=Tesseract)` when Azure is configured. The worker handler
+([api/handlers/media_ingest.py](../../api/handlers/media_ingest.py)) is
+**unchanged** — it calls `ocr_bytes` and the fallback is transparent; its
+existing `ocr_failed → mark_failed(OcrFailed)` mapping now fires only when
+*both* engines fail. This keeps the degraded-mode chain inside the OCR layer.
+
+```python
+# api/ocr/fallback.py
+class FallbackOcrAdapter:                 # structural OcrAdapter
+    def __init__(self, *, primary: OcrAdapter, fallback: OcrAdapter) -> None: ...
+    @property
+    def primary(self) -> OcrAdapter: ...
+    @property
+    def fallback(self) -> OcrAdapter: ...
+    def ocr_bytes(self, data, content_type) -> OcrResult:
+        # try primary; on OcrError(code == "ocr_failed") retry fallback;
+        # any other code re-raised; if fallback also fails, raise its error.
+```
+
+### A9.2 — Trigger is `ocr_failed`-only (recorded decision, Q1)
+
+The fallback fires **only** on `OcrError.code == "ocr_failed"` — an outage.
+`unsupported_content_type` and `empty_result` are deterministic outcomes and
+are re-raised without retry. Trade-off considered: falling back on
+`empty_result` *could* rescue text Azure missed on a Hebrew screenshot, but it
+would also turn a fast clean blank-image result into a slow double-OCR that
+still returns empty; the common case is empty-on-empty, so `ocr_failed`-only is
+the chosen default. (Surfaced per the deferred-decision-audit rule — D6 named
+"fallback" without specifying the trigger.)
+
+### A9.3 — Unconditional wrap is safe when the binary is absent
+
+The Tesseract wrap is unconditional when Azure is primary (no env knob —
+degrade-always is the deliberate iron-rule-#12 policy). If the native
+`tesseract` binary is absent, `TesseractOcrAdapter.ocr_bytes` raises
+`OcrError("ocr_failed")`, so the net behavior matches the pre-fallback
+hard-fail. `pytesseract` is imported at module scope (the import does not
+require the binary); `api_version` is probed **lazily** inside `ocr_bytes`
+(via `get_tesseract_version()`), never at module/init scope — sealing it at
+import would crash `import api.ocr.tesseract` wherever the binary is missing,
+and the factory imports it unconditionally.
+
+Exception mapping is explicit: `TesseractNotFoundError` (binary absent) is
+**not** a subclass of `TesseractError`, so the adapter catches the full set
+`(TesseractNotFoundError, TesseractError, PIL.UnidentifiedImageError, OSError,
+ValueError) → ocr_failed`. This also routes an undecodable-but-allowlisted
+image (a corrupt WEBP raising `UnidentifiedImageError`) to `ocr_failed` rather
+than letting it escape to `HandlerCrashed`.
+
+### A9.4 — Provenance, signal, and accepted costs
+
+- **Provenance:** Tesseract results carry `model="tesseract"`,
+  `api_version="tesseract-<version>"`. As in A6, the handler still discards
+  `OcrResult.model`, so a degraded entry is not yet distinguishable in
+  `audit_log` by vendor. The durable-audit-flag for "this entry was OCR'd by
+  the fallback" is BACKLOG'd.
+- **Operator signal:** `FallbackOcrAdapter` emits `logger.warning` with the
+  stable greppable prefix `ocr_fallback_engaged:` on engagement (and
+  `ocr_fallback_failed:` when both fail). Until the audit-flag lands, this WARN
+  log is how an operator detects a silent Azure outage.
+- **Confidence:** `confidence=None` (mirrors the stub). Per-word confidence via
+  `pytesseract.image_to_data` is deferred — scope creep for a degraded path.
+- **Latency:** on engagement the fallback runs primary-then-fallback
+  synchronously inside the worker's one `asyncio.to_thread` thread (doubled
+  worst-case wall time), which is acceptable since it fires only on outage and
+  does not stall the event loop. No `timeout=` on `image_to_string` — parity
+  with Azure's accepted-unbounded stance (A2); BACKLOG'd.
+
+### A9.5 — Dependencies, CI, verification
+
+- Pins `pytesseract==0.3.13` + `Pillow==12.2.0` in `[project.dependencies]`.
+  pytesseract ships no `py.typed` → a targeted `[[tool.mypy.overrides]]` for
+  `pytesseract.*` only (NOT a blanket ignore); Pillow ships types.
+- CI python job installs `tesseract-ocr tesseract-ocr-heb tesseract-ocr-eng
+  fonts-dejavu-core` via apt. The sandbox has no Tesseract, so the CI run is the
+  platform-runtime gate; the two real-binary smokes (English plumbing + Hebrew
+  `heb`-pack round-trip) are `@skipif`-gated and run only there.
+
+### A9.6 — Iron-rule footprint delta
+
+| Rule | Status | Note |
+|------|--------|------|
+| #8 | ✓ | pytesseract / Pillow are OCR libs, not embedding/agent SDKs — not added to FORBIDDEN (same rationale as Azure DI, D7). |
+| #9 | N/A | Chunks written by Node downstream; provenance on OcrResult. |
+| #12 | ✓ | **Closed** — Azure outage degrades to Tesseract instead of hard-failing. |

@@ -53,8 +53,9 @@ class OcrError(Exception):
             adapter's allowlist. The image-only allowlist for this
             increment is PNG/JPEG/WEBP (ADR-0022 D3).
         "ocr_failed"               — vendor SDK raised (Azure outage,
-            transient 5xx, quota error, credential error). Production
-            fallback to Tesseract is deferred per ADR-0022 D6.
+            transient 5xx, quota error, credential error), OR the Tesseract
+            fallback's own failure. This is the code that triggers the
+            Azure→Tesseract fallback in FallbackOcrAdapter (ADR-0022 A9).
         "empty_result"             — vendor returned 0 paragraphs / empty
             content. Likely a blank image or all-non-text glyphs; the
             worker handler maps this to mark_failed in the next slice.
@@ -71,6 +72,8 @@ class OcrAdapter(Protocol):
     Implementations:
         - StubOcrAdapter (api.ocr.stub)
         - AzureDocumentIntelligenceAdapter (api.ocr.azure)
+        - TesseractOcrAdapter (api.ocr.tesseract) — degraded-mode fallback
+        - FallbackOcrAdapter (api.ocr.fallback) — primary→fallback chain
     """
 
     def ocr_bytes(self, data: bytes, content_type: str) -> OcrResult: ...

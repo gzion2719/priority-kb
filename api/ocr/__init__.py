@@ -11,22 +11,28 @@ Iron-rule footprint (package surface):
     #9  Does not write chunks; provenance lives on OcrResult, recorded
         by the next-slice worker handler.
     #10 No agent invocation.
-    #12 Stub is the test-time fallback; production-time Tesseract
-        fallback deferred (ADR-0022 D6).
+    #12 Production-time fallback CLOSED (ADR-0022 A9): an Azure DI outage
+        degrades to local Tesseract via FallbackOcrAdapter; the stub
+        remains the no-Azure / test-time adapter.
 
 Exported surface:
     OcrAdapter            — structural Protocol; any object exposing
                             ocr_bytes(data, content_type) -> OcrResult.
     OcrResult             — frozen dataclass; vendor-agnostic output.
     OcrError              — exception with stable .code taxonomy.
-    StubOcrAdapter        — deterministic; for tests + degraded fallback.
-    get_ocr_adapter()     — factory: stub-by-default, Azure when env present.
+    StubOcrAdapter        — deterministic; no-Azure / test-time adapter.
+    TesseractOcrAdapter   — local OCR; the production-time degraded fallback.
+    FallbackOcrAdapter    — primary-then-fallback chain (Azure -> Tesseract).
+    get_ocr_adapter()     — factory: stub-by-default; Azure wrapped in a
+                            Tesseract fallback when env present.
 """
 
 from __future__ import annotations
 
 from api.ocr.factory import get_ocr_adapter
+from api.ocr.fallback import FallbackOcrAdapter
 from api.ocr.stub import StubOcrAdapter
+from api.ocr.tesseract import TesseractOcrAdapter
 from api.ocr.types import OcrAdapter, OcrError, OcrResult
 
 # Canonical MIME allowlist for OCR-eligible content types. Single source
@@ -38,9 +44,11 @@ OCR_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset({"image/png", "image/jpeg"
 
 __all__ = [
     "OCR_ALLOWED_CONTENT_TYPES",
+    "FallbackOcrAdapter",
     "OcrAdapter",
     "OcrError",
     "OcrResult",
     "StubOcrAdapter",
+    "TesseractOcrAdapter",
     "get_ocr_adapter",
 ]

@@ -27,13 +27,18 @@ dependencies = [
   # prebuilt-layout + api-version 2024-11-30 per the M1 Hebrew-OCR spike
   # PASS verdict (docs/BACKLOG.md:52-65). Upgrade requires ADR-0022 amendment.
   "azure-ai-documentintelligence==1.0.2",
+  # M2b #6 — Tesseract production-time OCR fallback (ADR-0022 A9). pytesseract
+  # shells out to the native `tesseract` binary (installed in CI via apt);
+  # Pillow decodes the image bytes before OCR. Upgrade requires an ADR
+  # amendment (same exact-pin precedent as above).
+  "pytesseract==0.3.13",
+  "Pillow==12.2.0",
   # Pinned per M2b item. Anticipated additions:
   # "sqlalchemy",
   # "alembic",
   # "pgvector",
   # "anthropic",
   # "voyageai",
-  # "pillow",
 ]
 
 [project.optional-dependencies]
@@ -73,6 +78,14 @@ python_version = "3.12"
 strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
+
+# pytesseract ships no py.typed (verified — no inline types, no stub package),
+# so mypy --strict cannot resolve it. Targeted override for that module only —
+# NOT a blanket ignore_missing_imports. Pillow ships py.typed (12.x), so PIL is
+# type-checked normally and needs no override. See ADR-0022 A9.
+[[tool.mypy.overrides]]
+module = ["pytesseract.*"]
+ignore_missing_imports = true
 
 # psycopg + pytest_asyncio ship typed; no mypy override needed.
 # Sandbox must `pip install -e ".[dev]"` (or the explicit deps

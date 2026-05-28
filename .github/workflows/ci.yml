@@ -192,6 +192,15 @@ jobs:
       - name: Run migrations
         run: npm run db:migrate
 
+      - name: Install Tesseract OCR (native binary + Hebrew/English data)
+        # M2b #6 (ADR-0022 A9) — the Tesseract production fallback shells out
+        # to this binary. tesseract-ocr-heb + -eng are the language packs the
+        # adapter requests via lang="heb+eng"; fonts-dejavu-core gives PIL a
+        # Hebrew-glyph font so the real-binary smoke can render + round-trip a
+        # Hebrew word. The sandbox has no Tesseract, so this CI job is the only
+        # gate that exercises the real binary (Platform-runtime-matching).
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-heb tesseract-ocr-eng fonts-dejavu-core
+
       - name: py-check
         # Single Make target chains ruff + black --check + mypy --strict + pytest;
         # mirrors what `make py-check` does locally so CI and dev share one entry
