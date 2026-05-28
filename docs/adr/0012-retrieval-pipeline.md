@@ -329,6 +329,52 @@ Wire-discriminant extension touches strict-equality test assertions across multi
 
 ---
 
+## Amendment 2026-05-28 — citation_precision eval leg (live-Anthropic opt-in)
+
+**Scope:** ROADMAP M3 #7 citation_precision leg. The recall@5 leg shipped 2026-05-27 via `evalRetrieve` (§7), which deliberately omits stage D — so `citation_precision` reports `skipped`. This amendment wires the metric via a **live-Anthropic opt-in** path while keeping the default `npm run eval` stub-only and honest.
+
+### §K — Decision: (a) live-opt-in, not (b) eval-stub citing reranked_ids[0]
+
+The deferred design choice (docs/BACKLOG.md, ADR-0012 §7) was:
+
+- **(a) live-Anthropic opt-in (CHOSEN).** New `evalRetrieveWithSynth(query, role, deps?)` resolves `getSynthesizer()` into `PipelineDeps.synth`, so the orchestrator runs stage D + §5 citation validation and populates `outcome.citation_ids`. The eval runner routes through it only under `EVAL_USE_LIVE_SYNTH=1`; default stays `evalRetrieve` (synth omitted → `citation_precision` skipped). Real numbers require `SYNTH_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` and a manual run (~$0.01–0.10/run for n≈3–5 cases).
+- **(b) eval-stub citing `reranked_ids[0]` (REJECTED).** A deterministic stub that always cites the top reranked id would make `citation_precision` free + CI-runnable, but the number would measure "did rerank put the expected entry first" (i.e. recall@1) under a `citation_precision` label. Mislabeling a metric is the same smell the project's negative-assertion-test discipline (WORKFLOW.md) forbids. Rejected.
+
+### §L — Type skeleton (per ADR-with-new-types sub-rule)
+
+```ts
+// lib/retrieval.ts
+export type EvalRetrieveWithSynthResult = EvalRetrieveResult & {
+  citation_ids: string[]; // synth-cited entry_ids; subset of reranked_ids; [] on any non-ok terminal
+};
+
+// lib/retrieval-eval.ts
+export async function evalRetrieveWithSynth(
+  query: string, role: Role, deps?: Partial<PipelineDeps>,
+): Promise<EvalRetrieveWithSynthResult>;          // resolves getSynthesizer() into PipelineDeps.synth
+export function projectToEvalWithSynthResult(
+  outcome: AuditOutcome,
+): EvalRetrieveWithSynthResult;                    // = { ...projectToEvalResult(outcome), citation_ids }
+```
+
+### §M — The gate (single chokepoint in `pinStubProviders`)
+
+`EVAL_USE_LIVE_SYNTH=1` ⇒ require `SYNTH_PROVIDER` unset or `"anthropic"` (set to `anthropic` if unset; **reject explicit `stub`**) AND require `ANTHROPIC_API_KEY` — both fail-loud `Error`. Embed + rerank stay pinned to stub so synth is the only live variable. The synth singleton is reset (`resetSynthesizerForTests()`) in `pinStubProviders` BEFORE the first `getSynthesizer()`; without the reset a stub cached by a prior vitest worker would leak into the live path, silently running the stub and producing fake "live" numbers. (The reset helper is named `…ForTests` but is the only reset available; the production-CLI use is intentional — a rename to drop the `ForTests` suffix is a cheap BACKLOG follow-up, not load-bearing.)
+
+**Why reject explicit `stub` under the live flag:** the stub synth (`createStubSynthesizer`) cites `STUB_SYNTH_SENTINEL_UUID`, never in `reranked_ids`, so §5 validation hard-fails → `citation_ids = []` → `skipped`. A `live flag + stub provider` combination would look like a measured run that measured nothing.
+
+### §N — Iron-rule stances
+
+- **#8 (tests never call live APIs).** Unchanged. The default gate + CI run `evalRetrieve` (stub-only); the new unit tests inject a stub synth via `deps` (no live call). The live path is reachable only via the `EVAL_USE_LIVE_SYNTH=1` CLI opt-in — a manual smoke, not a test. This matches the eval module's standing rule (`lib/retrieval-eval.ts` header: "Live-API eval is a separate, manually-run smoke session per ADR-0011 repo-visibility constraints") and §9 Positive ("Eval mode is internal-only — no public enumeration oracle"). No vitest test sets the flag with a real key.
+- **#10 (prompt hash stored with every agent response) — carve-out.** A live synth call during eval IS an Anthropic agent response, but eval writes **no `audit_log` row** (the route writes audits; `evalRetrieve`/`evalRetrieveWithSynth` bypass the route). This is **not** a #10 violation: #10 binds the **served** retrieval path and its `audit_log` row, not the offline eval CLI. Eval is measurement, not a user-facing served response — it produces no answer to a user, persists nothing, and exists only to score retrieval against the golden set. The orchestrator still pins `RETRIEVAL_AGENT_PROMPT_HASH` internally; the eval simply discards the answer after extracting `citation_ids`. Recorded here so the contradiction is reconciled, not silent.
+
+### §O — Verification + manual-smoke expectation
+
+- **Plumbing** is unit-tested (injected-stub `evalRetrieveWithSynth` positive/negative + the gate fail-loud paths). CI proves the wiring, never the live numbers.
+- **Manual smoke** (operator, Phase-2): `EVAL_USE_LIVE_SYNTH=1 SYNTH_PROVIDER=anthropic npm run eval` with `ANTHROPIC_API_KEY` set, against local Postgres seeded with the 3 anchored fixtures (en-001 / en-009 / he-003). Expected: `citation_precision_mean` non-null and high (likely 1.0 — each query directly anchors its fixture entry). An all-`null`/all-zero result across the 3 anchored cases signals a broken wire (synth not actually running, or the corpus unseeded), not a genuine precision failure.
+- **No `SCHEMA_VERSION` bump.** `EvalRunSummary` already carries `citation_precision` / `citation_precision_mean`; this amendment changes the metric's *values*, not the runner output *shape* or the golden-set YAML contract (schema.ts `SCHEMA_VERSION` unchanged).
+- **n < 20 stays pipeline-correctness signal,** not acceptance evidence — the M3 0.9 bar remains double-gated on n ≥ 20 measurable cases AND a real Voyage embedder (ROADMAP M3 Acceptance).
+
 ## References
 
 - ROADMAP M3 items 1-8 ([docs/ROADMAP.md §M3](../ROADMAP.md)).

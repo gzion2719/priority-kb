@@ -14,13 +14,18 @@
 //
 // Iron-rule #8 floor: the run-time path defensively pins EMBEDDING_PROVIDER
 // and RERANK_PROVIDER to "stub" if unset, and resets the embedder + reranker
-// singletons so a stale cache from a prior `npm run check` worker cannot
-// leak live-API instances into eval. Synth is NOT invoked — `evalRetrieve`
-// per ADR-0012 §7 omits the synth stage, so `cited_ids` returns undefined
-// and citation_precision honestly reports `skipped` for every measured
-// case. Citation-precision measurement is BACKLOG (driver: design choice
-// between live-Anthropic-opt-in and an eval-specific stub that cites
-// reranked_ids[0]).
+// + synth singletons so a stale cache from a prior `npm run check` worker
+// cannot leak live-API instances into eval.
+//
+// Citation-precision (ADR-0012 §7 Amendment 2026-05-28): by default synth is
+// NOT invoked — `evalRetrieve` omits the synth stage, so `cited_ids` returns
+// undefined and citation_precision honestly reports `skipped` for every
+// measured case. The opt-in `EVAL_USE_LIVE_SYNTH=1` (requires
+// SYNTH_PROVIDER=anthropic + ANTHROPIC_API_KEY) routes the adapter through
+// `evalRetrieveWithSynth`, running the real Anthropic synth + citation
+// validation for real citation_precision numbers. This is a manual smoke,
+// never the default gate or CI — see pinStubProviders for the fail-loud
+// preconditions.
 //
 // Operator preconditions (run mode only):
 //   - DATABASE_URL set (e.g., .env.local loaded).
@@ -110,8 +115,14 @@ async function main(argv: string[]): Promise<number> {
     `  recall@${summary.k}_mean: ${summary.aggregate.recall_at_k_mean ?? "n/a (no measured cases)"} ` +
       `(target ${summary.targets.recall_at_k})`,
   );
+  const citationSkipReason =
+    process.env.EVAL_USE_LIVE_SYNTH === "1"
+      ? summary.totals.measured > 0
+        ? "n/a (live synth ran but every measured case degraded / failed citation validation)"
+        : "n/a (live synth enabled but no measured cases — none are phase: ready)"
+      : "n/a (skipped — default stub-only; set EVAL_USE_LIVE_SYNTH=1 for live citations per ADR-0012 §7)";
   console.log(
-    `  citation_precision_mean: ${summary.aggregate.citation_precision_mean ?? "n/a (skipped — synth not wired per ADR-0012 §7)"} ` +
+    `  citation_precision_mean: ${summary.aggregate.citation_precision_mean ?? citationSkipReason} ` +
       `(target ${summary.targets.citation_precision})`,
   );
 
