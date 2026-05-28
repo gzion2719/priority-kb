@@ -205,8 +205,18 @@ export async function createEntry(args: {
    * Pick at the call site, type-checker won't let you forget.
    */
   source: IngestSource;
+  /**
+   * OPTIONAL explicit entry id. Omitted by the API route + chat UI → the DB
+   * generates a v4 UUID (`entries.id` `defaultRandom()`). Supplied only by the
+   * synthetic-fixture seed so a FRESH database (e.g. CI) reproduces the exact
+   * UUIDs `evals/golden_set.yaml` anchors to — without it, a re-seed gets new
+   * random ids and CI recall@5 is silently 0 (random ids never match the
+   * hardcoded `expected_source_ids`). Spread into the insert only when present,
+   * so every other caller's `defaultRandom` behavior is untouched.
+   */
+  id?: string;
 }): Promise<IngestResult> {
-  const { db, embedder, input, source } = args;
+  const { db, embedder, input, source, id } = args;
   const audit = auditShapeFor(source, "ingest");
 
   // Steps 1–4 (scrub → NFC → chunk → embedBatch) run BEFORE the transaction
@@ -219,6 +229,7 @@ export async function createEntry(args: {
     const [entry] = await tx
       .insert(schema.entries)
       .values({
+        ...(id ? { id } : {}),
         title: input.title,
         category: input.category,
         tags: input.tags,
