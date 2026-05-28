@@ -29,6 +29,8 @@ export interface EntryDetail {
   category: string;
   tags: string[];
   body: string;
+  /** Display-only label (ADR-0023). Null for rows written before the column existed. */
+  caption: string | null;
   source_pointer: string;
   last_verified_at: Date;
   sensitivity: Sensitivity;
@@ -89,13 +91,14 @@ export async function findEntryForRole(
     category: string;
     tags: string[];
     body: string;
+    caption: string | null;
     source_pointer: string;
     last_verified_at: Date;
     sensitivity: Sensitivity;
     created_at: Date;
     updated_at: Date;
   }>(
-    `SELECT id, title, category, tags, body, source_pointer,
+    `SELECT id, title, category, tags, body, caption, source_pointer,
             last_verified_at, sensitivity, created_at, updated_at
        FROM entries
       WHERE id = $1

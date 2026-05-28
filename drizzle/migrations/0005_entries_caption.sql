@@ -1,0 +1,17 @@
+-- ADR-0023 M2b #7 — display-only entry caption column.
+--
+-- Schema is Drizzle-owned per ADR-0008; this migration is hand-authored
+-- (matching the 0001/0002/0003/0004 convention) rather than
+-- `drizzle-kit generate`-d.
+--
+-- Additive + nullable: existing rows keep `caption = NULL` and populate on
+-- their next write (caption is derived from the post-scrub body in
+-- lib/ingest.ts createEntry/updateEntry). A one-shot backfill is deferred —
+-- caption is deterministically re-derivable from `body` (see docs/BACKLOG.md).
+--
+-- NOT in the keyword-search tsvector and NOT embedded (ADR-0023 D2): caption
+-- is a substring of `body`, which already feeds both the `entries.tsv`
+-- trigger and the chunk embeddings. The tsv trigger (0002) is intentionally
+-- left untouched — adding caption to it would be redundant work for zero
+-- recall gain.
+ALTER TABLE "entries" ADD COLUMN "caption" text;

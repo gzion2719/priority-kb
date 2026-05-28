@@ -37,6 +37,10 @@ export const entries = pgTable(
       .notNull()
       .default(sql`'{}'::text[]`),
     body: text("body").notNull(),
+    // Display-only label derived from the post-scrub body (ADR-0023 D1/D2).
+    // Nullable; NOT embedded, NOT chunked, NOT in `tsv`. Populated by
+    // lib/ingest.ts on create/update; existing rows stay NULL until re-saved.
+    caption: text("caption"),
     source_pointer: text("source_pointer").notNull(),
     last_verified_at: timestamp("last_verified_at", { withTimezone: true }).notNull(),
     sensitivity: text("sensitivity", { enum: sensitivityEnum }).notNull(),

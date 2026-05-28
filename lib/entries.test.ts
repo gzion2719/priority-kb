@@ -77,13 +77,39 @@ describe("findEntryForRole — collapses all denial modes to null", () => {
     expect(result).toBeNull();
   });
 
-  it("returns the row when SQL returns one", async () => {
+  it("returns the row when SQL returns one (caption flows through EntryDetail)", async () => {
     const row = {
       id: VALID_UUID,
       title: "t",
       category: "c",
       tags: ["a"],
       body: "b",
+      caption: "PO Receipt — Validation",
+      source_pointer: "s",
+      last_verified_at: new Date(),
+      sensitivity: "public",
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    const { pool, calls } = mockPool([row]);
+    const result = await findEntryForRole(pool, VALID_UUID, "user");
+    expect(result).toEqual(row);
+    // Explicit: the new caption column is projected by the SELECT and
+    // surfaced on EntryDetail (the entry-detail page renders it). This is
+    // the only sandbox-runnable coverage of caption on the read path; the
+    // DB-gated integration test exercises real persistence.
+    expect(result?.caption).toBe("PO Receipt — Validation");
+    expect(calls[0].sql).toMatch(/\bcaption\b/);
+  });
+
+  it("surfaces a null caption (rows written before the column existed)", async () => {
+    const row = {
+      id: VALID_UUID,
+      title: "t",
+      category: "c",
+      tags: [],
+      body: "b",
+      caption: null,
       source_pointer: "s",
       last_verified_at: new Date(),
       sensitivity: "public",
@@ -92,7 +118,7 @@ describe("findEntryForRole — collapses all denial modes to null", () => {
     };
     const { pool } = mockPool([row]);
     const result = await findEntryForRole(pool, VALID_UUID, "user");
-    expect(result).toEqual(row);
+    expect(result?.caption).toBeNull();
   });
 });
 
