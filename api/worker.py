@@ -32,7 +32,7 @@ from uuid import UUID
 
 import psycopg
 
-from api.handlers import build_registry
+from api.handlers import HandlerFn, build_registry
 from api.handlers.ingest_api_client import build_client
 from api.handlers.media_ingest import make_handler as make_media_ingest_handler
 from api.handlers.media_ingest import resolve_blob_root, resolve_ingest_api_base_url
@@ -197,6 +197,30 @@ async def _default_handler(job: Job, *, conn_factory: Any, worker_id: str) -> No
         )
 
 
+async def dispatch(
+    job: Job,
+    *,
+    registry: dict[str, HandlerFn],
+    conn_factory: Any,
+    worker_id: str,
+) -> None:
+    """Route a claimed job to its queue handler, or _default_handler if unknown.
+
+    Module-level (not a ``main()``-internal closure) so the unknown-queue
+    fallback — the ADR-0019 §D6 "no silently rotting jobs" invariant — is
+    unit-testable without standing up ``main()``. ``main()`` wraps this in a
+    one-line closure binding ``registry`` / ``conn_factory`` / ``worker_id``.
+    """
+    handler_fn = registry.get(job.queue_name)
+    if handler_fn is None:
+        # Unknown queue — fall back to the explicit-fail default per
+        # ADR-0019 §D6. Preserves the "no silently rotting jobs" invariant
+        # even when a new queue lands without a handler.
+        await _default_handler(job, conn_factory=conn_factory, worker_id=worker_id)
+        return
+    await handler_fn(job)
+
+
 def main() -> int:
     """Entry point. Per py-script-logging-init, init_logging is line 1."""
     init_logging()
@@ -271,15 +295,8 @@ def main() -> int:
         },
     )
 
-    async def dispatch(job: Job) -> None:
-        handler_fn = registry.get(job.queue_name)
-        if handler_fn is None:
-            # Unknown queue — fall back to the explicit-fail default per
-            # ADR-0019 §D6. Preserves the "no silently rotting jobs"
-            # invariant even when a new queue lands without a handler.
-            await _default_handler(job, conn_factory=conn_factory, worker_id=worker_id)
-            return
-        await handler_fn(job)
+    async def bound_dispatch(job: Job) -> None:
+        await dispatch(job, registry=registry, conn_factory=conn_factory, worker_id=worker_id)
 
     async def run() -> None:
         try:
@@ -290,7 +307,7 @@ def main() -> int:
                 vis_timeout_s=vis_timeout_s,
                 poll_interval_s=poll_interval_s,
                 conn_factory=conn_factory,
-                handler=dispatch,
+                handler=bound_dispatch,
             )
         finally:
             # Drain the connection pool on shutdown so test runs + ops
