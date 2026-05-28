@@ -98,6 +98,43 @@ describeIfDb("createEntry — integration against Postgres", () => {
     expect(audit[0].prompt_hash).toBeNull();
   });
 
+  it("explicit id: createEntry honors a supplied id (deterministic seed for CI eval)", async () => {
+    // Negative-assertion: WITHOUT the explicit-id passthrough, the row would
+    // get a random gen_random_uuid() id that does NOT equal the one we asked
+    // for — which is exactly the failure that would zero CI recall@5. We pin a
+    // specific UUID and assert the persisted entry + its cascaded version row
+    // both carry THAT id, not a random one.
+    const embedder = createStubEmbedder();
+    const pinned = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"; // valid v4
+    const result = await createEntry({
+      db,
+      embedder,
+      input: {
+        title: "explicit-id entry",
+        category: "test",
+        tags: ["t"],
+        body: "Priority workflow step. ".repeat(50).trim(),
+        source_pointer: "ticket://explicit-id",
+        last_verified_at: new Date("2026-05-28T00:00:00Z"),
+        sensitivity: "internal",
+      },
+      id: pinned,
+      source: { kind: "direct" },
+    });
+
+    expect(result.id).toBe(pinned);
+
+    const entries = await db.select().from(schema.entries);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].id).toBe(pinned);
+
+    const versions = await db
+      .select()
+      .from(schema.entries_versions)
+      .where(eq(schema.entries_versions.entry_id, pinned));
+    expect(versions).toHaveLength(1);
+  });
+
   it("agent source: writes kind:'agent_ingest' + canonical prompt_hash (CHECK satisfied)", async () => {
     const embedder = createStubEmbedder();
     const result = await createEntry({

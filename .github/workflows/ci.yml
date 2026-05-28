@@ -198,7 +198,72 @@ jobs:
         # point. See SESSION_PROTOCOL.md §Python pre-push.
         run: make py-check
 
-  # Eval lane removed 2026-05-21 per ADR-0011 BACKLOG cost-trim entry.
-  # Reintroduce when ROADMAP M3 line "Eval runner (npm run eval or pytest
-  # evals/) reports recall@5, citation precision; CI runs it on PR" lands and
-  # evals/golden_set.yaml is populated past the placeholder skeleton.
+  evals:
+    name: Evals — recall@5 shape/smoke gate (npm run eval)
+    runs-on: ubuntu-latest
+    # Reintroduced 2026-05-28 at M3 #7 (eval runner + populated golden set).
+    # The eval lane was removed 2026-05-21 (ADR-0011 cost-trim); the ROADMAP
+    # M3 line "Eval runner reports recall@5 …; CI runs it on PR" now holds.
+    #
+    # SCOPE (honest): at n=3 ready cases against a 3-entry seeded corpus,
+    # top-5 trivially returns all entries, so recall@5 is ~1.0 regardless of
+    # ranking. This job is therefore a SHAPE / SMOKE gate — it catches a
+    # pipeline crash, a schema break, or a DB-wiring break (any of which makes
+    # `npm run eval` exit non-zero via shape_error) — NOT yet a recall-quality
+    # regression guard. It BECOMES a real recall gate once the 27-entry seed
+    # lands (n ≥ 20) + the real Voyage embedder is wired (ROADMAP M3
+    # Acceptance double-gate). `npm run eval` exits non-zero ONLY on
+    # shape_error > 0; recall-below-target does not fail the job.
+    #
+    # NO live synth: EVAL_USE_LIVE_SYNTH + ANTHROPIC_API_KEY are intentionally
+    # unset, so the eval runs stub-only (no live Anthropic call — iron rule
+    # #8). citation_precision reports `skipped`. Live citation_precision is a
+    # manual opt-in smoke per ADR-0012 §K–§O, never CI.
+    #
+    # Depends on a CLEAN ephemeral Postgres (fresh per run): the seed pins
+    # fixed UUIDs (evals/fixture-ids.ts) so a fresh DB reproduces the exact
+    # ids the golden set anchors to. Stray entries from a persisted DB would
+    # dilute the top-5 and could drop recall below 1.0.
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/priority_kb
+    services:
+      postgres:
+        # Same pinned digest as the node / e2e / python jobs — bump in
+        # lockstep with docker-compose.yml.
+        image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: priority_kb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d priority_kb"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Apply db/init.sql (bootstrap)
+        run: psql "$DATABASE_URL" -f db/init.sql
+
+      - name: Run migrations
+        run: npm run db:migrate
+
+      - name: Seed synthetic-fixture entries
+        # Pinned-UUID seed (evals/fixture-ids.ts) so the golden set's
+        # expected_source_ids resolve against this fresh DB.
+        run: npx tsx scripts/seed-synthetic-entries.ts --apply
+
+      - name: Run eval (shape/smoke; fails only on shape_error)
+        run: npm run eval
