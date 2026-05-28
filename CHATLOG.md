@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-28 — M2b ROADMAP checkbox reconcile (1 docs PR)
+
+- **1 docs PR.** [#346](https://github.com/gzion2719/priority-kb/pull/346) `docs(roadmap)` reconciles the M2b checklist against merged state; release [#345](https://github.com/gzion2719/priority-kb/pull/345) (pre-existing, `dev → main`) carries it. Node tests unchanged 1008; Python 212. Commit `a70d122`.
+- **Two flips, three annotated holds, all verified against merged code (describe-from-source).** #5 PDF/Word parsing → `[x]` (`api/parsers/*` wired + `test_parsers.py`); #9 worker tests → `[x]` (stub-OCR covered; stub-embedding satisfied *architecturally* — Option Y worker has no embed surface, Node-side coverage in `lib/embedding.test.ts`).
+- **#6 OCR kept `[ ]`** — Azure DI primary shipped but the Tesseract production-time fallback (iron #12 leg named in the box) is deferred per ADR-0022 D6+A8. **#8 PII scrub kept `[ ]`** — verified genuinely unstarted (only `lib/scrub.ts`), now flagged as the next unblocked M2b build item. #10 smoke kept `[ ]` (real-data gated; synthetic available-but-unstarted). Acceptance annotated unchanged.
+- **Step 7b plan review load-bearing (no BLOCKING).** Made #9's annotation airtight (worker-has-no-embed-surface + cite Node-side stub file), prompted verifying #8's status, the Acceptance-unchanged note, and the #10 synthetic-smoke follow-up.
+- **Session Score 8/10.** Code 3/4 (−1: local `verify-roadmap-tickboxes` gate round — a `[lib/scrub.ts](..)` markdown link in the `[ ]` #8 box tripped the shipped-but-unticked guard; fixed by de-linking to a backtick span). Protocol 3/3. Efficiency 2/3 (−1: that round avoidable).
+- **Process improvement:** WORKFLOW.md Pre-push gate gained the **ROADMAP unchecked-box claim-link sub-rule** (cite for-contrast/partial files as backtick spans, not markdown links, inside `[ ]` boxes — see [WORKFLOW.md](WORKFLOW.md) §Pre-push gate).
+- **Next session:** **#8 stronger PII scrub on extracted text** (next unblocked M2b item) OR the overdue stacked-PR baseRef **GitHub Action** (not a `gh pr merge` hook) OR a synthetic-fixture manual smoke (#10). **Fresh chat fine** — all bounded.
+
+---
+
 ## 2026-05-28 — M2b worker-orchestration tests (1 PR pair through main)
 
 - **1 PR pair.** [#342](https://github.com/gzion2719/priority-kb/pull/342)→[#343](https://github.com/gzion2719/priority-kb/pull/343) `test(worker)` — new [api/tests/test_worker.py](api/tests/test_worker.py): 11 stub-only tests covering `api/worker.py` orchestration (`poll_loop`, `_handle_shutdown`, `install_signal_handler`, `_default_handler`, `make_worker_id`, the new module-level `dispatch`). Python tests 201 → 212; Node unchanged 1008. The media-ingest handler was already fully covered, so the real gap was the poll-loop layer above it.
