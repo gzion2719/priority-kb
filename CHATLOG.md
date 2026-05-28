@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-28 — M3 #7 citation_precision wire + live smoke + CI evals job (6 PRs through main)
+
+- **Three feature-sets, 6 PRs through main.** (1) citation_precision wire [#328](https://github.com/gzion2719/priority-kb/pull/328)→[#329](https://github.com/gzion2719/priority-kb/pull/329); (2) live-smoke doc correction + 2 findings [#330](https://github.com/gzion2719/priority-kb/pull/330)→[#331](https://github.com/gzion2719/priority-kb/pull/331); (3) CI evals job + deterministic seed [#332](https://github.com/gzion2719/priority-kb/pull/332)→[#333](https://github.com/gzion2719/priority-kb/pull/333). Tests 983 → 994 Node.
+- **citation_precision leg** (M3 #7): `evalRetrieveWithSynth` + `EVAL_USE_LIVE_SYNTH=1` live-Anthropic opt-in; default `npm run eval` stays stub-only → `skipped` (honest). Chose path (a) live-opt-in over (b) recall@1-conflating stub; [ADR-0012 §K–§O Amendment](docs/adr/0012-retrieval-pipeline.md).
+- **Live smoke verified the wire end-to-end and falsified my "~1.0" prediction:** stub embed/rerank feed the synth a semantically-random top-5 → measured `citation_precision=0` (model answered the wrong question / refused). Corrected ADR §O; filed 2 BACKLOG findings (refusal emits full Sources block → audit+metric pollution; eval-DB carries stray entries).
+- **CI evals job** (M3 #7 CI integration): runs `npm run eval` per PR, stub-only (iron #8), fails only on `shape_error`. Honest scope — a **shape/smoke gate** at n=3 (recall trivially 1.0), becomes a recall gate at n≥20 + real Voyage. Deterministic seed via new `createEntry` optional `id` + [evals/fixture-ids.ts](evals/fixture-ids.ts) + reconciliation test; verified green on fresh CI DB.
+- **Session Score 7/10.** Code 3/4 (precheck didn't catch an untracked sub-threshold test file before handoff → 1 CI-red round). Protocol 2/3 (committed on a stale merged branch before cutting the feature branch). Efficiency 2/3 (that CI round-trip was avoidable).
+- **Process improvement:** WORKFLOW.md pre-push gate gained the **Stage-new-files-before-the-gate sub-rule** (`git add` new files before `npm run check`; the test-count precheck walks `git ls-files`) — see [WORKFLOW.md](WORKFLOW.md) §Pre-push gate.
+- **Next session:** the memory-pinned **`scripts/hook-gh-pr-merge-base-ref-check.mjs`** stacked-PR hook (3rd-recurrence, deferred again — should lead) OR M2b #7 image processing OR the M3 27-entry seed (lifts the CI evals job from shape-gate to real recall-gate). Also out-of-repo: add the `evals` job to required status checks so it blocks merges.
+
+---
+
 ## 2026-05-27 — M2b #6 OCR pipeline shipped: adapter + worker wiring (4 PRs through main)
 
 - **4 PRs through main.** [#322](https://github.com/gzion2719/priority-kb/pull/322) ADR-0022 OCR adapter (Azure DI `prebuilt-layout` + stub + factory; 34 new tests; `azure-ai-documentintelligence==1.0.2` pinned; redacted real spike fixture from `01-form.layout.raw.json`) → [#323](https://github.com/gzion2719/priority-kb/pull/323) release. [#324](https://github.com/gzion2719/priority-kb/pull/324) ADR-0022 Amendment §"Worker handler integration" (`WorkerErrorClass.OcrFailed` + `OcrEmpty`; `asyncio.to_thread` bridge; canonical `OCR_ALLOWED_CONTENT_TYPES`; required `ocr_adapter` kwarg; provenance deferral with named cost in A6) → [#325](https://github.com/gzion2719/priority-kb/pull/325) release. Tests 191 → 201 (+10 net Python including 2 registry-pin tests; 8 OCR branch tests).
