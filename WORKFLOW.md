@@ -206,6 +206,8 @@ Which runs:
 
 If either gate is red, **do not push**. Fix locally; the gate is the contract.
 
+**Stage-new-files-before-the-gate sub-rule (codified 2026-05-28).** `npm run check` chains `scripts/precheck-test-count-vs-precedent.mjs`, which enumerates test files via `git ls-files` — so a **brand-new, not-yet-`git add`ed** test (or source) file is INVISIBLE to the precheck locally but counted in CI. A sub-threshold new test file (< 4 declarations, not in `KNOWN_SMALL_FILES`) therefore passes the local gate and fails the CI Node job. **Trigger:** a session adds a new `*.test.ts` (or any file a `git ls-files`-walking precheck scans) → `git add` it BEFORE running the pre-push `npm run check`. **Origin:** 2026-05-28 M3 #7 CI-evals session — `evals/fixture-ids.test.ts` (1 declaration) passed local `npm run check` while untracked, then failed `tests/scripts/precheck-test-count-vs-precedent.test.ts` in CI; one avoidable CI-red round. Fix was to expand the test to 4 declarations (the gate prefers more tests over allowlisting).
+
 ---
 
 ## Secret-redaction rule
