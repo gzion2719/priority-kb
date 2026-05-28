@@ -35,6 +35,7 @@
 import { eq, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
+import { deriveCaption } from "@/lib/caption";
 import { CHUNKING_POLICY_VERSION, buildEmbedInput, chunk, type ChunkSlice } from "@/lib/chunk";
 import type { Embedder } from "@/lib/embedding";
 import { logEvent } from "@/lib/log";
@@ -234,6 +235,8 @@ export async function createEntry(args: {
         category: input.category,
         tags: input.tags,
         body: derived.canonicalBody,
+        // ADR-0023 D1: display-only caption from the post-scrub body.
+        caption: deriveCaption(derived.canonicalBody),
         source_pointer: input.source_pointer,
         last_verified_at: input.last_verified_at,
         sensitivity: input.sensitivity,
@@ -409,6 +412,8 @@ export async function updateEntry(args: {
         category: input.category,
         tags: input.tags,
         body: derived.canonicalBody,
+        // ADR-0023 D1: re-derive the display-only caption from the new body.
+        caption: deriveCaption(derived.canonicalBody),
         source_pointer: input.source_pointer,
         last_verified_at: input.last_verified_at,
         sensitivity: input.sensitivity,

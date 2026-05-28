@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { DrizzleQueryError, eq } from "drizzle-orm";
 
+import { deriveCaption } from "@/lib/caption";
 import { createEntry, updateEntry } from "@/lib/ingest";
 import { createStubEmbedder } from "@/lib/embedding";
 import { INGESTION_AGENT_PROMPT_HASH } from "@/lib/prompts";
@@ -66,6 +67,12 @@ describeIfDb("createEntry — integration against Postgres", () => {
     const entries = await db.select().from(schema.entries);
     expect(entries).toHaveLength(1);
     expect(entries[0].id).toBe(result.id);
+    // ADR-0023: caption persisted, derived from the (single-giant-line)
+    // body. Negative-assertion against "column added but never written":
+    // it must be non-null and equal the deterministic derivation, not NULL.
+    expect(entries[0].caption).not.toBeNull();
+    expect(entries[0].caption).toBe(deriveCaption(longBody));
+    expect(entries[0].caption!.endsWith("…")).toBe(true);
 
     const versions = await db
       .select()
@@ -437,6 +444,12 @@ describeIfDb("updateEntry — integration against Postgres", () => {
     for (const c of chunks) {
       expect(c.content_end).toBeLessThanOrEqual(entryRow.body.length);
     }
+    // ADR-0023: caption is RE-derived from the new body on update.
+    // Negative-assertion: if updateEntry didn't set caption, this would
+    // still be the seed's first line ("Initial body content..."), not the
+    // second update's body. The final body is a single short line, so the
+    // caption equals it verbatim (no clip/ellipsis).
+    expect(entryRow.caption).toBe("Yet another different body content for second update.");
   });
 
   it("agent source: update writes kind:'agent_ingest_update' + canonical prompt_hash", async () => {

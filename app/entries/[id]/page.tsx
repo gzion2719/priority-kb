@@ -146,6 +146,26 @@ function EntryView({ entry }: { entry: EntryDetail }): React.ReactNode {
         <h1 dir="auto" style={{ margin: 0 }}>
           {entry.title}
         </h1>
+        {/*
+          Display-only caption (ADR-0023): a short label derived from the
+          post-scrub body. Rendered as a subtitle only when present — rows
+          written before the column existed (or whitespace-only bodies) are
+          null and render nothing.
+        */}
+        {entry.caption !== null && (
+          <p
+            data-testid="entry-caption"
+            dir="auto"
+            style={{
+              margin: 0,
+              fontSize: "0.9375rem",
+              color: "var(--kramer-neutral)",
+              opacity: 0.9,
+            }}
+          >
+            {entry.caption}
+          </p>
+        )}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
           <span
             className="sensitivity-pill"

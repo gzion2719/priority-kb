@@ -115,6 +115,21 @@ describeIfDb("findEntryForRole — integration against Postgres", () => {
     expect(restrictedForUser).toBeNull();
   });
 
+  it("projects the caption column from real Postgres (ADR-0023 read path)", async () => {
+    // The unit test proves the SELECT string contains `caption`; this proves
+    // the column actually round-trips from a real row. seedTier leaves
+    // caption NULL, so insert one explicitly here and assert it surfaces.
+    await pool.query(
+      `INSERT INTO entries (id, title, category, tags, body, caption,
+                            source_pointer, last_verified_at, sensitivity)
+       VALUES ($1, 'captioned', 'cat', ARRAY['t'], 'body text', $2,
+               'ticket://cap', NOW(), 'public')`,
+      [publicId, "PO Receipt — Validation"],
+    );
+    const result = await findEntryForRole(pool, publicId, "user");
+    expect(result?.caption).toBe("PO Receipt — Validation");
+  });
+
   it("malformed UUID short-circuits BEFORE Postgres sees it", async () => {
     // If the regex pre-check were removed, Postgres would throw
     // `invalid input syntax for type uuid` and node-postgres would
