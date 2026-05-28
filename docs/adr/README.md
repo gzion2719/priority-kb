@@ -42,3 +42,4 @@ The Context section describes the world the ADR addresses (what the spec require
 | 0020 | [Python LogEvent emitter: `api/log_event.py`; `LogEventJob` ships ahead of vendor variants](0020-python-log-event-emitter.md) | Accepted |
 | 0021 | [Worker→Node HTTP callback for M2b #5 ingest path (Option Y)](0021-worker-http-callback-architecture.md) | Accepted |
 | 0022 | [OCR adapter: Azure Document Intelligence + stub-by-default factory (M2b #6)](0022-ocr-adapter.md) | Accepted |
+| 0023 | [Image processing: display-only caption column + deferred region-attribution contract (M2b #7)](0023-image-processing-caption-region-contract.md) | Accepted |
