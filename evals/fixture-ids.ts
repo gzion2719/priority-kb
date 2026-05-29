@@ -27,4 +27,13 @@ export const SEED_FIXTURE_IDS = {
   "he-007": "6973850d-5749-4c84-91d8-2054d7a67ad5",
   "en-011": "ee5169eb-72e3-45f8-9d9c-bc318b555682",
   "he-011": "02372ca3-a15b-4fe8-ade0-55d12f0624e0",
+  // Batch 3 — seeded 2026-05-29 (M3 #6, second expansion). 3 topics x 2
+  // languages: Screen Generator menu add, BPM sales-order trigger, publish
+  // test->production. Same same-language-anchor pattern as batch 2.
+  "en-004": "85e550c1-7071-4032-94b7-84ea29d9fbc1",
+  "he-004": "69a0f6bb-4b60-4f48-aa22-7c4af19b409f",
+  "en-005": "259fd122-e7ca-4628-9f1b-6e7e0d366e33",
+  "he-005": "522d0da3-2333-4820-8395-eee0e4d134bf",
+  "en-006": "596cc28e-963e-4a5f-97e9-7c06a5de0b02",
+  "he-006": "ef7a47c5-cd79-47f1-9108-590ae4a27afc",
 } as const;
