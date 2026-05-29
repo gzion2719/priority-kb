@@ -9,10 +9,24 @@
 #   pre-commit run --all-files
 
 repos:
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.21.2
+  # gitleaks as a LOCAL system hook (not the upstream golang-language repo
+  # hook). Rationale: on Windows machines with Smart App Control *enforced*,
+  # SAC blocks pre-commit's golang-language launcher chain for the gitleaks
+  # env (`[WinError 4551]`), failing every commit — even though the gitleaks
+  # binary itself runs fine when launched directly. A `language: system`
+  # hook invoking a PATH-resolved gitleaks sidesteps the blocked launcher.
+  # Requires gitleaks on PATH: `winget install gitleaks` (Windows),
+  # `brew install gitleaks` (macOS), or the release binary. CI secret-scanning
+  # is INDEPENDENT of this hook — `.github/workflows/security.yml` installs
+  # gitleaks directly and runs `gitleaks detect`, so server-side coverage is
+  # unaffected by the local hook mechanism. See docs/BACKLOG.md (SAC entry).
+  - repo: local
     hooks:
       - id: gitleaks
+        name: gitleaks (system; staged scan)
+        entry: gitleaks git --staged --redact --no-banner
+        language: system
+        pass_filenames: false
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
