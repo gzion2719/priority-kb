@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-29 — M2b #10 synthetic media-ingestion smoke + gitleaks hook durable fix (2 PRs through main)
+
+- **M2b #10 shipped & ticked.** [scripts/media_smoke.py](scripts/media_smoke.py) + [docs/runbooks/media-smoke.md](docs/runbooks/media-smoke.md) prove the full media pipeline live E2E (upload → queued job → worker `parse_pdf`/stub-OCR → `PUT /api/ingest/[id]` → `entries_versions` v1→v2 + re-chunk/re-embed → entry in retrieve `candidates`); both legs PASS against local docker+dev+worker. PRs [#353](https://github.com/gzion2719/priority-kb/pull/353)→[#354](https://github.com/gzion2719/priority-kb/pull/354). Wiring smoke only — semantic top-3 + real-data stay gated on Voyage / production-stage (ADR-0011).
+- **gitleaks hook durable fix.** Converted the pre-commit hook to `repo: local` + `language: system` to bypass the Smart-App-Control `WinError 4551` golang-launcher block (empirically: passes in-commit where the golang hook failed). gitleaks put on user PATH (winget→WinGet Links). CI secret-scan untouched (`security.yml` runs `gitleaks detect` independently). BACKLOG SAC entry → RESOLVED.
+- **Step 7b plan-CR was load-bearing.** Caught B1 — stub synth cites a sentinel UUID so retrieve terminates `chunks_only`/`citation_validation_failed`, NOT `done`; flipped the assertion to candidate-set membership before any code. `verify-before-implementing-CR-claim` refuted the init.sql-collision MAJOR (`db/init.sql` is extensions-only).
+- **Re-running the refactored harness caught 2 real bugs pre-commit:** PNG had no per-run nonce → dedup orphaned a v1 placeholder on re-run (fixed via a PNG `tEXt`-chunk nonce); the `✗` marker crashed on the Windows cp1252 console (ASCII markers + UTF-8 stdout reconfigure).
+- **Session Score 8/10** (Code 4/4; Protocol 2/3 — gitleaks fix (new infra scope) shipped without a fresh Step 7b; Efficiency 2/3 — mypy run after the first live run forced a stack re-bring-up + re-run).
+- **Process improvement:** BACKLOG entry filed — `scripts/*.py` are outside `make py-check` scope (api/ only) so committed Python scripts get no CI lint/type coverage; decide extend-gate vs. scripts-lint hook (see [docs/BACKLOG.md](docs/BACKLOG.md)).
+- **Next session:** reconcile the orphaned 2026-05-28 "M2b checkbox reconcile" CHATLOG entry (on branch `docs/m2b-tickbox-reconcile`, absent from live CHATLOG), OR the memory-mandated stacked-PR baseRef GitHub Action (overdue), OR M3 #6 27-entry synthetic seed.
+
+---
+
 ## 2026-05-29 — Two M2b build slices: #8 stronger PII scrub + #6 Tesseract OCR fallback (2 PR pairs through main)
 
 - **Two PR pairs, all merged to main.** M2b #8 scrub [#347](https://github.com/gzion2719/priority-kb/pull/347)→[#348](https://github.com/gzion2719/priority-kb/pull/348); M2b #6 OCR fallback [#349](https://github.com/gzion2719/priority-kb/pull/349)→[#350](https://github.com/gzion2719/priority-kb/pull/350). Node tests 1008→1022; Python 232 local / 256 CI. Commits `2c5b4a5`, `51fa78b`.
