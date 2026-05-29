@@ -50,10 +50,12 @@ cases:
     query: "What does the F11 shortcut do in a Priority form?"
     language: en
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "fb72d02a-e5c6-4c5d-922f-dba59533a3ec"
     expected_answer_contains:
       - "lock"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: en-003
     query: "Steps to set up a new fiscal year ledger for FY2027"
@@ -87,8 +89,10 @@ cases:
     query: "How do I set up a recurring journal entry in the GL module?"
     language: en
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "abea2065-ede2-4071-8a23-b7a61b898a6f"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: en-008
     query: "How do I configure the Priority Web SDK formStart event handler?"
@@ -120,8 +124,10 @@ cases:
     query: "Order status stuck on 'Open' even after all lines have been shipped"
     language: en
     category: diagnostic
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "ee5169eb-72e3-45f8-9d9c-bc318b555682"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: en-012
     query: "Priority REST API returns 401 Unauthorized even though my OIDC token is valid"
@@ -183,8 +189,10 @@ cases:
     query: "מה עושה הקיצור F11 בטופס פריוריטי?"
     language: he
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "c5ffa98b-6312-48bc-a4a1-f8c2ac63e6c0"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: he-003
     query: "צעדים להגדרת שנת כספים חדשה 2027 במודול הנהלת חשבונות"
@@ -220,8 +228,10 @@ cases:
     query: "איך מגדירים פקודת יומן חוזרת במודול הנהלת חשבונות?"
     language: he
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "6973850d-5749-4c84-91d8-2054d7a67ad5"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: he-008
     query: "איך מגדירים מטפל אירועים formStart ב-Web SDK של פריוריטי?"
@@ -251,8 +261,10 @@ cases:
     query: "סטטוס הזמנה תקוע על 'פתוח' למרות שכל השורות כבר נשלחו"
     language: he
     category: diagnostic
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "02372ca3-a15b-4fe8-ade0-55d12f0624e0"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: he-012
     query: "REST API של פריוריטי מחזיר 401 Unauthorized אבל טוקן OIDC שלי תקף"
