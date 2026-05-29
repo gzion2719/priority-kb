@@ -61,8 +61,10 @@ cases:
     query: "Steps to set up a new fiscal year ledger for FY2027"
     language: en
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "fdeede95-59fc-4ee6-8d51-3f3a3cb43015"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   - id: en-004
     query: "How do I add a new screen to the main menu via Screen Generator?"
@@ -155,15 +157,19 @@ cases:
     query: "What is the difference between a sublevel form and a child form in Priority?"
     language: en
     category: conceptual
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "d499005d-9e25-4440-8a82-41b19e8fab90"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   - id: en-014
     query: "When should I use a BPM workflow versus a procedural trigger?"
     language: en
     category: conceptual
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "52925fc4-f6b2-4116-a7f2-e174c38149dd"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   # ─────────────────────────────────────────────────────────────────────
   # English — cross-lingual (en-015): English query expecting Hebrew entry
@@ -194,8 +200,10 @@ cases:
     query: "איך מתקנים קודי לקוח כפולים בייבוא מאקסל?"
     language: he
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "f184ddc7-9714-4c6c-95bc-ed81b202b70d"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   - id: he-002
     query: "מה עושה הקיצור F11 בטופס פריוריטי?"
@@ -267,8 +275,10 @@ cases:
     query: "שגיאה: 'לא ניתן למחוק רשומה - אילוץ מפתח זר' בעת מחיקת לקוח"
     language: he
     category: diagnostic
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "ec5f9bd1-0974-49e3-a704-8319f379b3bf"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   - id: he-010
     query: "למה הדוח המותאם שלי חסר שורות אחרי השדרוג האחרון של פריוריטי?"
@@ -304,15 +314,19 @@ cases:
     query: "מה ההבדל בין טופס משנה לבין טופס בן בפריוריטי?"
     language: he
     category: conceptual
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "361c8ff4-cf59-4330-a706-d845bed7ac00"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   - id: he-014
     query: "מתי כדאי להשתמש ב-BPM לעומת טריגר פרוצדורלי?"
     language: he
     category: conceptual
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "343864cb-2238-4bba-830e-fa3ddb3418f0"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   # ─────────────────────────────────────────────────────────────────────
   # Hebrew — cross-lingual (he-015): Hebrew query expecting English entry
