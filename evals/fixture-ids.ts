@@ -45,4 +45,17 @@ export const SEED_FIXTURE_IDS = {
   "he-010": "69e9d7aa-ecdd-45db-864f-d70eac93884f",
   "en-012": "571a6646-855a-4272-8a30-af7fb7c06b58",
   "he-012": "9db12e1d-238a-4954-ba40-458ce0992bb2",
+  // Batch 5 — seeded 2026-05-29 (M3 #6, fourth expansion → measurable-n 28).
+  // Completes all seedable cases: 3 single-language gap-fills (en-003 / he-001
+  // / he-009 — each completes a topic that existed in only the other language)
+  // + 2 conceptual pairs (sublevel-vs-child form, BPM-vs-procedural trigger).
+  // Only en-015/he-015 (cross-lingual) + en-016/he-016 (negative) stay
+  // unflipped — cross-lingual is unmeasurable under stub vectors + keyword-only.
+  "en-003": "fdeede95-59fc-4ee6-8d51-3f3a3cb43015",
+  "he-001": "f184ddc7-9714-4c6c-95bc-ed81b202b70d",
+  "he-009": "ec5f9bd1-0974-49e3-a704-8319f379b3bf",
+  "en-013": "d499005d-9e25-4440-8a82-41b19e8fab90",
+  "he-013": "361c8ff4-cf59-4330-a706-d845bed7ac00",
+  "en-014": "52925fc4-f6b2-4116-a7f2-e174c38149dd",
+  "he-014": "343864cb-2238-4bba-830e-fa3ddb3418f0",
 } as const;

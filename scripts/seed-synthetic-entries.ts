@@ -26,6 +26,12 @@
 //   - en-008 / he-008: Priority Web SDK formStart event handler
 //   - en-010 / he-010: custom report missing rows after a Priority upgrade
 //   - en-012 / he-012: REST API 401 Unauthorized with a valid OIDC token
+// Batch 5 (2026-05-29, M3 #6 fourth expansion → n=28) — completes seedable set:
+//   - en-003: new fiscal-year ledger (EN gap-fill; he-003 already covers HE)
+//   - he-001: duplicate customer codes on Excel import (HE gap-fill; en-001 EN)
+//   - he-009: FK-constraint on customer delete (HE gap-fill; en-009 EN)
+//   - en-013 / he-013: sublevel form vs child form (conceptual)
+//   - en-014 / he-014: BPM workflow vs procedural trigger (conceptual)
 //
 // Embedder: stub (per ADR-0011 Amendment 2026-05-27 + lib/embedding.ts
 // `getEmbedder()` — Voyage adapter not wired). Stub vectors are NOT
@@ -666,6 +672,202 @@ Common pitfalls:
 
 טעות נפוצה: הנחה ש-401 פירושו שהטוקן פג. 401 עם טוקן OIDC תקף הוא הרבה יותר פעמים בעיית קהל או צורת כותרת מאשר בעיית תפוגה.`,
     source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-rest-api-401-oidc-he`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+
+  // ── Batch 5 (M3 #6 fourth expansion, 2026-05-29 → n=28) ──────────────────
+  // Gap-fills + conceptual pairs. Conceptual entries carry BOTH contrastive
+  // terms in one body (sublevel + child; BPM + procedural) so the entry
+  // out-ranks the single-term competitors (en-005/he-005 are BPM-heavy; the
+  // en-014/he-014 bodies add "procedural"/"פרוצדורלי" to discriminate).
+
+  {
+    // Maps to golden-set en-003 — anchor tokens are "fiscal"/"year"/"ledger"
+    // (NOT "FY2027", which is one lexeme that no natural body repeats).
+    id: SEED_FIXTURE_IDS["en-003"],
+    title: "Setting up a new fiscal year ledger (FY2027) in the General Ledger",
+    category: "procedural",
+    tags: ["finance", "fiscal-year", "ledger", "general-ledger"],
+    body: `To open a new fiscal year in the General Ledger and set up the ledger for the next fiscal year (for example FY2027), follow these steps in order.
+
+Step 1 — Define the new accounting periods:
+Open the Accounting Periods form (PERIODS) and choose "Open New Year". Priority creates 12 monthly periods for the next fiscal year plus period 13 (year-end adjustments).
+
+Step 2 — Close the prior year's balances:
+Run "Close Year" (CLOSEYR) only after every journal of the prior fiscal year has been approved and registered. The close produces automatic journal entries that roll result-account balances into retained earnings and carry balance-sheet balances into the new fiscal year's opening.
+
+Step 3 — Update the system parameters:
+- In CONSTANTS, set CURYEAR to the new fiscal year.
+- In CONSTANTS, set CURPERIOD to period 1 of the new fiscal year.
+- Confirm NEXTYEAR points one year ahead so future-dated documents do not fail on "period does not exist".
+
+Step 4 — Validate the new fiscal year ledger:
+- Post a test journal dated in the new fiscal year. If it saves with no error, the new periods are active.
+- Run the Trial Balance for period 1 of the new fiscal year — opening balances should equal the prior year's closing balances.
+
+Common pitfalls:
+- Running CLOSEYR before all journals are registered leaves the opening balance short.
+- Forgetting to update NEXTYEAR makes documents dated in the following year fail.
+- Doing Step 3 before Step 2 lets Priority post into the new period before opening balances are computed, producing an inconsistent ledger.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-fiscal-year-ledger-fy2027`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set he-001 — title mirrors the query's prefixed forms
+    // (בייבוא מאקסל); body repeats bare "קודי לקוח כפולים".
+    id: SEED_FIXTURE_IDS["he-001"],
+    title: "תיקון קודי לקוח כפולים בייבוא מאקסל דרך אשף הייבוא",
+    category: "procedural",
+    tags: ["customers", "import", "excel", "hebrew"],
+    body: `כאשר מייבאים רשומות לקוח מקובץ אקסל דרך אשף הייבוא, פריוריטי דוחה שורות שקוד הלקוח (CUSTNAME) שלהן כבר קיים במסד הנתונים. האשף מחזיר שגיאת "מפתח כפול" ועוצר את כל האצווה כברירת מחדל.
+
+כדי לתקן קודי לקוח כפולים בייבוא מאקסל:
+
+1. פתח את אשף הייבוא מתוך כספים > לקוחות > ייבוא לקוחות.
+2. לחץ "אימות" לפני "הרצה" — מעבר האימות מפיק קובץ של השורות המתנגשות בלי לכתוב דבר למסד הנתונים.
+3. עבור כל התנגשות, החלט: (א) לעדכן את הלקוח הקיים (הפעל את המתג "עדכן רשומות קיימות" באשף), או (ב) למספר מחדש את השורה הנכנסת עם CUSTNAME ייחודי.
+4. אם בחרת (א), האשף ממזג שדה-שדה — תאים ריקים בקובץ הייבוא משאירים שדות קיימים ללא שינוי. רק תאים לא-ריקים דורסים.
+5. הרץ שוב עם "הרצה" כשקובץ ההתנגשויות ריק.
+
+טעויות נפוצות:
+- אשף הייבוא מתייחס ל-CUSTNAME כרגיש לאותיות גדולות/קטנות. "ACME-001" ו-"acme-001" הם שני לקוחות שונים; ייבוא של שניהם ייצור כפילויות שפריוריטי לא יוכל למזג אוטומטית.
+- רווח עוקב בתא האקסל אינו נחתך. "ACME-001" ו-"ACME-001 " הם מפתחות שונים.
+- אם קובץ האקסל משתמש בנוסחאות, האשף קורא את הערך המוצג ולא את טקסט הנוסחה. שמור את הקובץ עם נוסחאות מחושבות לפני הייבוא.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-duplicate-customer-codes-he`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set he-009 — body carries "אילוץ מפתח זר", "למחוק",
+    // "מחיקת", "רשומה" verbatim.
+    id: SEED_FIXTURE_IDS["he-009"],
+    title: "שגיאה: לא ניתן למחוק רשומה - אילוץ מפתח זר בעת מחיקת לקוח",
+    category: "diagnostic",
+    tags: ["customers", "errors", "foreign-key", "hebrew"],
+    body: `כאשר מנסים למחוק רשומת לקוח (טופס CUSTOMERS), פריוריטי מחזיר:
+
+    שגיאה: לא ניתן למחוק רשומה - אילוץ מפתח זר
+
+השגיאה מופעלת כאשר רשומה אחת או יותר מפנה אל הלקוח. שלמות ההפניה (referential integrity) של פריוריטי מונעת את המחיקה כדי להגן על נתונים תלויים — הזמנות מכר, חשבוניות, קבלות ואנשי קשר כולם מצביעים חזרה אל שורת הלקוח.
+
+צעדי אבחון:
+
+1. פתח את הלקוח בטופס CUSTOMERS והרץ "פעילות לקוח" כדי לראות הזמנות פתוחות, חשבוניות פתוחות ויתרות פתוחות.
+2. בדוק את טבלאות הבן הנפוצות:
+   - ORDERS (הזמנות מכר פתוחות): סנן לפי CUSTNAME וחפש סטטוס שאינו סגור.
+   - AINVOICES (חשבוניות לקוח): אותו סינון, חפש יתרה לא משולמת.
+   - CUSTCONTACTS (אנשי קשר): ללקוח חייבים להיות אפס אנשי קשר לפני מחיקה.
+3. אם הלקוח אינו פעיל אך יש לו רשומות היסטוריות, הדרך הנכונה אינה למחוק. השתמש בדגל "לא פעיל" בטופס הלקוח. פריוריטי יסתיר את הלקוח מרשימות בחירה פעילות אך ישמר את שלמות ההפניה לדוחות היסטוריים.
+4. אם הלקוח הוא רשומת בדיקה ללא ערך היסטורי, יש למחוק בסדר הפוך: אנשי קשר תחילה, אחר כך מסמכים פתוחים (בטל הזמנות, בטל חשבוניות), ולבסוף מחיקת הלקוח.
+
+מתי לא לכפות מחיקה:
+- ביקורת סוף שנה דורשת שנתוני הלקוח ההיסטוריים יהיו ניתנים לשחזור. מחיקת לקוח שיש לו חשבוניות בשנת כספים קודמת שוברת את שובל הביקורת. דגל "לא פעיל" הוא הדרך הנכונה היחידה לאחר סוף שנה.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-fk-constraint-customer-delete-he`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set en-013 — conceptual; body carries BOTH "sublevel" and
+    // "child" and "form" verbatim.
+    id: SEED_FIXTURE_IDS["en-013"],
+    title: "The difference between a sublevel form and a child form in Priority",
+    category: "conceptual",
+    tags: ["forms", "customization", "concepts", "screens"],
+    body: `Priority developers often confuse a sublevel form with a child form. They are related but distinct concepts, and choosing the wrong one changes how data is keyed and how the screens navigate.
+
+A child form (linked form):
+A child form is a separate form reached FROM a parent form, usually via a "linked screen" relationship. The child has its OWN primary key and its OWN table. Navigating from the parent passes a filter value (the link), but the child is a full standalone form that can also be opened on its own from the menu. Example: opening the Orders form and drilling into a linked Deliveries form.
+
+A sublevel form (sub-form):
+A sublevel form is part of the SAME logical document as its parent — it is the lower level of a header/detail pair. Order lines are a sublevel of the order header: they share the document's key, they cannot exist without the header, and they are not opened independently from the menu. A sublevel is displayed nested under its header, not as a separate navigable screen.
+
+The key differences:
+- Identity: a child form has an independent primary key; a sublevel shares (and depends on) the parent's key.
+- Independence: a child form can be opened standalone; a sublevel cannot exist without its header.
+- Navigation: a child is a separate screen you link to; a sublevel is nested in the same screen.
+- Deletion: deleting a header cascades to its sublevels; deleting a parent does NOT automatically delete linked child records (referential integrity blocks it).
+
+Rule of thumb: if the lower record is meaningless without the upper one (order line without an order), it is a sublevel. If the lower record stands on its own (a contact that happens to belong to a customer), it is a child form.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-sublevel-vs-child-form`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set he-013 — body carries BOTH "טופס משנה" and "טופס בן"
+    // as contiguous bigrams + "ההבדל".
+    id: SEED_FIXTURE_IDS["he-013"],
+    title: "ההבדל בין טופס משנה לבין טופס בן בפריוריטי",
+    category: "conceptual",
+    tags: ["forms", "customization", "concepts", "hebrew"],
+    body: `מפתחי פריוריטי מבלבלים לעיתים קרובות בין טופס משנה לבין טופס בן. אלה מושגים קשורים אך נבדלים, ובחירה לא נכונה משנה את אופן המיפתוח של הנתונים ואת אופן הניווט בין המסכים.
+
+טופס בן (טופס מקושר):
+טופס בן הוא טופס נפרד שמגיעים אליו מטופס אב, בדרך כלל דרך קשר "מסך מקושר". לטופס הבן יש מפתח ראשי משלו וטבלה משלו. ניווט מהאב מעביר ערך סינון (הקישור), אך הבן הוא טופס עצמאי מלא שניתן לפתוח אותו גם בנפרד מהתפריט. דוגמה: פתיחת טופס הזמנות וצלילה לטופס תעודות משלוח מקושר.
+
+טופס משנה (תת-טופס):
+טופס משנה הוא חלק מאותו מסמך לוגי כמו האב שלו — הוא הרמה התחתונה של זוג כותרת/פירוט. שורות הזמנה הן טופס משנה של כותרת ההזמנה: הן חולקות את מפתח המסמך, אינן יכולות להתקיים בלי הכותרת, ואינן נפתחות באופן עצמאי מהתפריט.
+
+ההבדלים המרכזיים:
+- זהות: לטופס בן יש מפתח ראשי עצמאי; טופס משנה חולק את מפתח האב ותלוי בו.
+- עצמאות: טופס בן ניתן לפתיחה עצמאית; טופס משנה אינו יכול להתקיים בלי הכותרת שלו.
+- ניווט: טופס בן הוא מסך נפרד שמקשרים אליו; טופס משנה מקונן באותו מסך.
+- מחיקה: מחיקת כותרת מדרדרת אל טפסי המשנה שלה; מחיקת אב אינה מוחקת אוטומטית רשומות בן מקושרות.
+
+כלל אצבע: אם הרשומה התחתונה חסרת משמעות בלי העליונה (שורת הזמנה בלי הזמנה) — זהו טופס משנה. אם הרשומה התחתונה עומדת בפני עצמה — זהו טופס בן.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-sublevel-vs-child-form-he`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set en-014 — body carries "BPM", "workflow", "procedural",
+    // "trigger"; "procedural" discriminates it from the en-005 BPM entry.
+    id: SEED_FIXTURE_IDS["en-014"],
+    title: "When to use a BPM workflow versus a procedural trigger in Priority",
+    category: "conceptual",
+    tags: ["bpm", "customization", "concepts", "triggers"],
+    body: `Priority offers two main ways to run custom logic when data changes: a BPM workflow and a procedural trigger. They overlap, but each fits a different kind of job.
+
+A procedural trigger:
+A procedural trigger is server-side logic bound to a table event (insert, update, delete). It runs synchronously, inside the same transaction as the data change, in Priority's procedural language. Use a procedural trigger for fast, deterministic, data-integrity work: validate a field, compute a derived value, block an illegal change. Because it runs in-transaction, if the trigger fails the data change rolls back.
+
+A BPM workflow:
+A BPM (Business Process Management) workflow models a multi-step business process: approvals, notifications, routing, waits, and human tasks. It can run asynchronously and can span time (wait for an approver). Use a BPM workflow when the process involves people, multiple steps, or anything that should not block the user's save.
+
+When to use which:
+- Need synchronous validation or a computed field, in-transaction? Use a procedural trigger.
+- Need an approval chain, notifications, or a long-running multi-step flow? Use a BPM workflow.
+- Need to block a save on a business rule? Procedural trigger — a BPM workflow generally cannot veto the originating transaction.
+- Worried about slowing down data entry? Keep heavy or human-dependent work out of a procedural trigger and put it in an asynchronous BPM workflow.
+
+Rule of thumb: a procedural trigger is for data correctness now; a BPM workflow is for a business process over time.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-bpm-vs-procedural-trigger`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set he-014 — body carries "BPM", "טריגר", "פרוצדורלי",
+    // "לעומת"; "פרוצדורלי" discriminates it from the he-005 BPM entry.
+    id: SEED_FIXTURE_IDS["he-014"],
+    title: "מתי כדאי להשתמש ב-BPM לעומת טריגר פרוצדורלי בפריוריטי",
+    category: "conceptual",
+    tags: ["bpm", "customization", "concepts", "hebrew"],
+    body: `פריוריטי מציע שתי דרכים עיקריות להריץ לוגיקה מותאמת כאשר נתונים משתנים: תהליך BPM וטריגר פרוצדורלי. הם חופפים, אך כל אחד מתאים לסוג עבודה אחר.
+
+טריגר פרוצדורלי:
+טריגר פרוצדורלי הוא לוגיקת צד-שרת הקשורה לאירוע טבלה (הוספה, עדכון, מחיקה). הוא רץ באופן סינכרוני, בתוך אותה טרנזקציה של שינוי הנתונים, בשפה הפרוצדורלית של פריוריטי. השתמש בטריגר פרוצדורלי לעבודת שלמות-נתונים מהירה ודטרמיניסטית: אימות שדה, חישוב ערך נגזר, חסימת שינוי לא חוקי. מכיוון שהוא רץ בתוך הטרנזקציה, אם הטריגר נכשל — שינוי הנתונים מתבטל.
+
+תהליך BPM:
+תהליך BPM (ניהול תהליכים עסקיים) ממדל תהליך עסקי רב-שלבי: אישורים, התראות, ניתוב, המתנות ומשימות אנושיות. הוא יכול לרוץ באופן אסינכרוני ולהימשך לאורך זמן. השתמש בתהליך BPM כאשר התהליך מערב אנשים, שלבים מרובים, או כל דבר שלא צריך לחסום את השמירה של המשתמש.
+
+מתי להשתמש במה:
+- צריך אימות סינכרוני או שדה מחושב, בתוך הטרנזקציה? השתמש בטריגר פרוצדורלי.
+- צריך שרשרת אישורים, התראות, או תהליך רב-שלבי ארוך? השתמש בתהליך BPM.
+- צריך לחסום שמירה על בסיס חוק עסקי? טריגר פרוצדורלי — תהליך BPM בדרך כלל אינו יכול לבטל את הטרנזקציה המקורית.
+
+כלל אצבע: טריגר פרוצדורלי הוא לנכונות נתונים עכשיו; תהליך BPM הוא לתהליך עסקי לאורך זמן.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-bpm-vs-procedural-trigger-he`,
     last_verified_at: new Date("2026-05-29T00:00:00Z"),
     sensitivity: "internal" as const,
   },
