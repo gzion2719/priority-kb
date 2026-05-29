@@ -15,6 +15,9 @@ evals/last-run.json
 # binaries that may carry sensitive Priority screenshots.
 blob-storage/
 
+# --- M2b #10 media smoke — generated synthetic fixtures (scripts/media_smoke.py) ---
+.smoke-fixtures/
+
 # --- Node ---
 node_modules/
 .next/
