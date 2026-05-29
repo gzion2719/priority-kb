@@ -18,6 +18,9 @@ import {
 afterEach(() => {
   resetEmbedderForTests();
   delete process.env.EMBEDDING_PROVIDER;
+  // The voyage-branch tests below set VOYAGE_API_KEY; clear it so it cannot
+  // leak into later tests (mirrors lib/retrieval.test.ts:30).
+  delete process.env.VOYAGE_API_KEY;
 });
 
 describe("createStubEmbedder — deterministic stub for #8-compliant tests", () => {
@@ -169,10 +172,23 @@ describe("getEmbedder — env-driven factory", () => {
     expect(getEmbedder().model).toBe(STUB_MODEL);
   });
 
-  it("throws RangeError when EMBEDDING_PROVIDER=voyage (adapter ships with M2a)", () => {
+  it("throws RangeError naming VOYAGE_API_KEY when EMBEDDING_PROVIDER=voyage and key absent", () => {
     process.env.EMBEDDING_PROVIDER = "voyage";
+    delete process.env.VOYAGE_API_KEY;
     expect(() => getEmbedder()).toThrow(RangeError);
-    expect(() => getEmbedder()).toThrow(/M2a/);
+    expect(() => getEmbedder()).toThrow(/VOYAGE_API_KEY/);
+  });
+
+  it("resolves the Voyage adapter when EMBEDDING_PROVIDER=voyage and VOYAGE_API_KEY is set", () => {
+    process.env.EMBEDDING_PROVIDER = "voyage";
+    process.env.VOYAGE_API_KEY = "pa-test-key-not-real";
+    try {
+      const embedder = getEmbedder();
+      expect(embedder.model).toBe("voyage-3-large");
+      expect(embedder.dimensions).toBe(STUB_DIMENSIONS);
+    } finally {
+      delete process.env.VOYAGE_API_KEY;
+    }
   });
 
   it("throws RangeError for an unknown provider — fail-loud, no silent fallback", () => {
@@ -192,7 +208,10 @@ describe("getEmbedder — env-driven factory", () => {
     const first = getEmbedder();
     resetEmbedderForTests();
     process.env.EMBEDDING_PROVIDER = "voyage";
-    expect(() => getEmbedder()).toThrow(/M2a/);
+    delete process.env.VOYAGE_API_KEY;
+    // After reset the provider is re-read: voyage with no key now throws the
+    // iron-rule-#1 RangeError (was the /M2a/ not-wired stub pre-adapter).
+    expect(() => getEmbedder()).toThrow(/VOYAGE_API_KEY/);
     resetEmbedderForTests();
     delete process.env.EMBEDDING_PROVIDER;
     const third = getEmbedder();

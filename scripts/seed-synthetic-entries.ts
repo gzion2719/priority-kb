@@ -33,11 +33,15 @@
 //   - en-013 / he-013: sublevel form vs child form (conceptual)
 //   - en-014 / he-014: BPM workflow vs procedural trigger (conceptual)
 //
-// Embedder: stub (per ADR-0011 Amendment 2026-05-27 + lib/embedding.ts
-// `getEmbedder()` — Voyage adapter not wired). Stub vectors are NOT
-// L2-normalized; the development-stage smoke proves the ingest pipeline
-// shape, NOT real-world retrieval recall. Real-world recall measurement is
-// a production-stage transition gate.
+// Embedder: resolved via `getEmbedder()` — honors EMBEDDING_PROVIDER.
+// - Default (unset / "stub"): deterministic stub. Vectors are NOT
+//   L2-normalized; proves ingest-pipeline shape, NOT retrieval recall.
+// - "voyage" (+ VOYAGE_API_KEY): real voyage-3-large vectors — required to
+//   re-seed for the M3 acceptance measurement (recall@5 / citation precision).
+//   See the M3 operator run in evals/run.ts header + ADR-0012 §7 Amendment.
+// The seed stores embedding_model + embedding_version from whichever embedder
+// resolves (iron rule #9), so a voyage re-seed and a voyage eval query match
+// on model+version in the ANN WHERE clause (a stub/voyage mismatch → 0 rows).
 //
 // Usage:
 //   npx tsx scripts/seed-synthetic-entries.ts            # dry-run (default)
@@ -54,7 +58,8 @@
 //   #6  every entry tagged with `sensitivity` from the validated enum.
 //   #7  every entry has `source_pointer` + `last_verified_at`.
 //   #8  no live API in tests — this is a dev seed, not a test.
-//   #9  `embedding_model` + `embedding_version` populated by the stub.
+//   #9  `embedding_model` + `embedding_version` populated by the resolved
+//       embedder (stub by default; voyage-3-large when EMBEDDING_PROVIDER=voyage).
 
 import dotenv from "dotenv";
 import { resolve, dirname } from "node:path";
@@ -72,7 +77,7 @@ dotenv.config({ path: resolve(repoRoot, ".env.local") });
 dotenv.config({ path: resolve(repoRoot, ".env") });
 
 import { getDb } from "@/lib/db";
-import { createStubEmbedder } from "@/lib/embedding";
+import { getEmbedder } from "@/lib/embedding";
 import { createEntry } from "@/lib/ingest";
 import * as schema from "@/drizzle/schema";
 import { SEED_FIXTURE_IDS } from "@/evals/fixture-ids";
@@ -883,7 +888,7 @@ async function main(): Promise<number> {
   }
 
   const db = getDb();
-  const embedder = createStubEmbedder();
+  const embedder = getEmbedder();
 
   // Pre-flight: check which source_pointers already exist. Idempotency.
   const existing = await db

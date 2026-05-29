@@ -15,7 +15,9 @@
 // Iron-rule #8 floor: the run-time path defensively pins EMBEDDING_PROVIDER
 // and RERANK_PROVIDER to "stub" if unset, and resets the embedder + reranker
 // + synth singletons so a stale cache from a prior `npm run check` worker
-// cannot leak live-API instances into eval.
+// cannot leak live-API instances into eval. The stub pins are lifted ONLY
+// under the matching live opt-ins (EVAL_USE_LIVE_EMBED / EVAL_USE_LIVE_RERANK,
+// ADR-0012 §7 Amendment 2026-05-29) — the M3 acceptance measurement path.
 //
 // Citation-precision (ADR-0012 §7 Amendment 2026-05-28): by default synth is
 // NOT invoked — `evalRetrieve` omits the synth stage, so `cited_ids` returns
@@ -34,6 +36,15 @@
 //     (or equivalent). The runner prints a "did you seed?" hint when every
 //     `ready` case returns recall=0 — the canonical symptom of an
 //     unseeded DB.
+//
+// M3 acceptance measurement (operator, Phase-2 — ADR-0012 §7 Amendment
+// 2026-05-29): re-seed with the real embedder, then run all legs live:
+//   EMBEDDING_PROVIDER=voyage npx tsx scripts/seed-synthetic-entries.ts --apply
+//   EVAL_USE_LIVE_EMBED=1 EVAL_USE_LIVE_RERANK=1 EVAL_USE_LIVE_SYNTH=1 \
+//     EMBEDDING_PROVIDER=voyage RERANK_PROVIDER=voyage SYNTH_PROVIDER=anthropic \
+//     npm run eval
+// with VOYAGE_API_KEY + ANTHROPIC_API_KEY set. M3 items 6/7 + Acceptance tick
+// when this clears recall@5 >= 0.8 AND citation_precision >= 0.9 at n >= 20.
 
 import { writeFile } from "node:fs/promises";
 import dotenv from "dotenv";

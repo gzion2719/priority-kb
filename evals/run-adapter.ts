@@ -26,10 +26,45 @@ export function liveSynthEnabled(): boolean {
 }
 
 /**
+ * True when the live-embed opt-in is enabled (M3 acceptance measurement,
+ * ADR-0012 §7 Amendment 2026-05-29). Default `npm run eval` leaves this unset
+ * and pins EMBEDDING_PROVIDER=stub. Setting it allows EMBEDDING_PROVIDER=voyage
+ * and requires VOYAGE_API_KEY — the real voyage-3-large embedder runs at both
+ * query time AND (for a matching corpus) the seed must have been re-run with
+ * EMBEDDING_PROVIDER=voyage so chunk model+version match the query embedder.
+ */
+export function liveEmbedEnabled(): boolean {
+  return process.env.EVAL_USE_LIVE_EMBED === "1";
+}
+
+/**
+ * True when the live-rerank opt-in is enabled (ADR-0012 §7 Amendment
+ * 2026-05-29). Default pins RERANK_PROVIDER=stub; setting it allows
+ * RERANK_PROVIDER=voyage and requires VOYAGE_API_KEY (real rerank-2). For a
+ * faithful M3 acceptance run, enable this together with EVAL_USE_LIVE_EMBED
+ * and EVAL_USE_LIVE_SYNTH so embed + rerank + synth are all real.
+ */
+export function liveRerankEnabled(): boolean {
+  return process.env.EVAL_USE_LIVE_RERANK === "1";
+}
+
+/**
  * Pin EMBEDDING_PROVIDER + RERANK_PROVIDER to "stub" when unset; reject
- * non-stub overrides loudly. Resets the cached embedder + reranker + synth
- * singletons so a stale instance from a prior worker (e.g. vitest) cannot
- * leak. Iron rule #8 floor for the run path.
+ * non-stub overrides loudly UNLESS the matching live opt-in is set. Resets the
+ * cached embedder + reranker + synth singletons so a stale instance from a
+ * prior worker (e.g. vitest) cannot leak. Iron rule #8 floor for the run path.
+ *
+ * Embed handling (ADR-0012 §7 Amendment 2026-05-29):
+ * - Default (`EVAL_USE_LIVE_EMBED` unset): pin EMBEDDING_PROVIDER=stub; a
+ *   non-stub override is REJECTED (stub corpus vs voyage query → zero ANN rows).
+ * - Live opt-in (`EVAL_USE_LIVE_EMBED=1`): allow EMBEDDING_PROVIDER=voyage
+ *   (default it to voyage when unset), require VOYAGE_API_KEY, reject an
+ *   explicit `stub` under the flag (the silent-fake-recall trap). The corpus
+ *   MUST have been re-seeded with EMBEDDING_PROVIDER=voyage so chunk
+ *   model+version match the query embedder.
+ *
+ * Rerank handling (same Amendment): symmetric — `EVAL_USE_LIVE_RERANK=1` allows
+ * RERANK_PROVIDER=voyage + requires VOYAGE_API_KEY; default pins stub.
  *
  * Synth handling (ADR-0012 §7 Amendment 2026-05-28):
  * - Default (`EVAL_USE_LIVE_SYNTH` unset): the adapter calls `evalRetrieve`,
@@ -48,24 +83,64 @@ export function liveSynthEnabled(): boolean {
  * a prior worker cannot leak into the live path.
  */
 export function pinStubProviders(): void {
-  if (!process.env.EMBEDDING_PROVIDER) {
+  // EMBEDDING_PROVIDER: pinned to stub by default; lifted to allow "voyage"
+  // under the EVAL_USE_LIVE_EMBED opt-in (M3 acceptance measurement).
+  if (liveEmbedEnabled()) {
+    if (process.env.EMBEDDING_PROVIDER && process.env.EMBEDDING_PROVIDER !== "voyage") {
+      throw new Error(
+        `EVAL_USE_LIVE_EMBED=1 requires EMBEDDING_PROVIDER unset or "voyage" ` +
+          `(got "${process.env.EMBEDDING_PROVIDER}"). The live embed leg measures real ` +
+          `voyage-3-large recall; a stub embedder queries with stub vectors whose ` +
+          `model+version never match voyage-seeded chunks → zero ANN rows (silent ` +
+          `fake recall). Re-seed with EMBEDDING_PROVIDER=voyage first.`,
+      );
+    }
+    if (!process.env.EMBEDDING_PROVIDER) {
+      process.env.EMBEDDING_PROVIDER = "voyage";
+    }
+    if (!process.env.VOYAGE_API_KEY) {
+      throw new Error(
+        `EVAL_USE_LIVE_EMBED=1 requires VOYAGE_API_KEY (the live embed leg calls real ` +
+          `Voyage embeddings). Unset EVAL_USE_LIVE_EMBED to keep the default stub-only eval.`,
+      );
+    }
+  } else if (!process.env.EMBEDDING_PROVIDER) {
     process.env.EMBEDDING_PROVIDER = "stub";
   } else if (process.env.EMBEDDING_PROVIDER !== "stub") {
     throw new Error(
       `evals/run.ts requires EMBEDDING_PROVIDER unset or "stub" ` +
         `(got "${process.env.EMBEDDING_PROVIDER}"). The eval pipeline asserts ` +
         `stub-vs-stub model+version match against seeded chunks; a mismatch ` +
-        `would silently return zero ANN rows. The live-synth opt-in pins embed ` +
-        `+ rerank to stub so synth is the only live variable.`,
+        `would silently return zero ANN rows. Set EVAL_USE_LIVE_EMBED=1 to run the ` +
+        `real voyage-3-large embedder (M3 acceptance measurement).`,
     );
   }
-  if (!process.env.RERANK_PROVIDER) {
+
+  // RERANK_PROVIDER: pinned to stub by default; lifted to allow "voyage" under
+  // the EVAL_USE_LIVE_RERANK opt-in.
+  if (liveRerankEnabled()) {
+    if (process.env.RERANK_PROVIDER && process.env.RERANK_PROVIDER !== "voyage") {
+      throw new Error(
+        `EVAL_USE_LIVE_RERANK=1 requires RERANK_PROVIDER unset or "voyage" ` +
+          `(got "${process.env.RERANK_PROVIDER}").`,
+      );
+    }
+    if (!process.env.RERANK_PROVIDER) {
+      process.env.RERANK_PROVIDER = "voyage";
+    }
+    if (!process.env.VOYAGE_API_KEY) {
+      throw new Error(
+        `EVAL_USE_LIVE_RERANK=1 requires VOYAGE_API_KEY (the live rerank leg calls real ` +
+          `Voyage rerank-2). Unset EVAL_USE_LIVE_RERANK to keep the default stub-only eval.`,
+      );
+    }
+  } else if (!process.env.RERANK_PROVIDER) {
     process.env.RERANK_PROVIDER = "stub";
   } else if (process.env.RERANK_PROVIDER !== "stub") {
     throw new Error(
       `evals/run.ts requires RERANK_PROVIDER unset or "stub" ` +
-        `(got "${process.env.RERANK_PROVIDER}"). Live Voyage rerank is BACKLOG; ` +
-        `same rationale as the embedder pin.`,
+        `(got "${process.env.RERANK_PROVIDER}"). Set EVAL_USE_LIVE_RERANK=1 to run the ` +
+        `real Voyage rerank-2 (M3 acceptance measurement).`,
     );
   }
 

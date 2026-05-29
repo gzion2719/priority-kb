@@ -377,6 +377,38 @@ export function projectToEvalWithSynthResult(
 - **No `SCHEMA_VERSION` bump.** `EvalRunSummary` already carries `citation_precision` / `citation_precision_mean`; this amendment changes the metric's *values*, not the runner output *shape* or the golden-set YAML contract (schema.ts `SCHEMA_VERSION` unchanged).
 - **n < 20 stays pipeline-correctness signal,** not acceptance evidence — the M3 0.9 bar remains double-gated on n ≥ 20 measurable cases AND a real Voyage embedder (ROADMAP M3 Acceptance).
 
+## Amendment 2026-05-29 — live-embed / live-rerank opt-ins (the real-Voyage acceptance gate)
+
+The §K–§O amendment lifted synth to a live opt-in but left **embed + rerank hard-pinned to stub** in `pinStubProviders` — so the M3 acceptance measurement (the *other* double-gate: "real Voyage embedder, not the stub") could not actually be run. This amendment lifts those pins behind matching opt-ins and ships the missing Voyage **embedder** adapter.
+
+### §P — Voyage embedder adapter
+
+`lib/embedding-voyage.ts` `createVoyageEmbedder({apiKey, fetchImpl?})` implements the `Embedder` interface against `POST https://api.voyageai.com/v1/embeddings` (`voyage-3-large`, `output_dimension: 1024`, `input_type` passthrough defaulting `"document"`, Bearer auth). It mirrors the `retrieval-voyage-rerank.ts` sibling exactly — same direct-fetch rationale, injected `fetchImpl` test seam, and error buckets (5xx/429/408/network/JSON-fail-on-5xx → `EmbeddingUnavailableError`; other 4xx → loud; malformed/dim-mismatch/short/duplicate-index 200 → loud). `getEmbedder()`'s `voyage` branch (previously a `/M2a/` not-wired throw) now requires `VOYAGE_API_KEY` and constructs it — symmetric with `getReranker()`. The `#8` source-scan on `lib/embedding.ts` stays green: the static `import … from "./embedding-voyage"` does not match the `"voyage"`/`voyageai` regexes; the adapter file owns the URL + naming and reads no `process.env`.
+
+### §Q — The gate (lifted pins in `pinStubProviders`)
+
+- `EVAL_USE_LIVE_EMBED=1` ⇒ allow `EMBEDDING_PROVIDER` unset or `"voyage"` (default to `voyage` if unset; **reject explicit `stub`** — the silent-fake-recall trap, symmetric with §M's stub-synth rejection) AND require `VOYAGE_API_KEY`. Default (unset): pin `stub`, reject non-stub as before.
+- `EVAL_USE_LIVE_RERANK=1` ⇒ symmetric for `RERANK_PROVIDER`/`voyage` + `VOYAGE_API_KEY`.
+- **Why reject explicit `stub` under the live-embed flag:** a stub query embedder against a voyage-seeded corpus (or vice-versa) mismatches on `embedding_model`+`embedding_version` in the ANN `WHERE` clause → **zero rows** → a "measured" run that measured nothing. The corpus MUST be re-seeded with `EMBEDDING_PROVIDER=voyage` first (the seed now resolves its embedder via `getEmbedder()`, honoring the env).
+
+### §R — Iron-rule stances
+
+- **#8** unchanged: default gate + CI run stub-only; the live embed/rerank paths are reachable only via the CLI opt-ins (manual smoke, never a vitest test). The adapter's unit tests inject `fetchImpl` — no live call.
+- **#9** (embedding_model+version per chunk): the seed stores whatever `getEmbedder()` resolves, so a voyage re-seed writes `voyage-3-large`/`v1`; re-embed-on-model-change is satisfied by re-running the seed.
+
+### §S — Verification + the M3 acceptance run (operator, Phase-2)
+
+- **Plumbing** is unit-tested: the adapter's full error matrix (injected stub fetch) + the `pinStubProviders` live-embed/rerank gate fail-loud paths. CI proves the wiring, never the live numbers (no keys in CI).
+- **M3 acceptance measurement** (operator, keys + docker): re-seed then run, all three legs live:
+  ```
+  EMBEDDING_PROVIDER=voyage npx tsx scripts/seed-synthetic-entries.ts --apply
+  EVAL_USE_LIVE_EMBED=1 EVAL_USE_LIVE_RERANK=1 EVAL_USE_LIVE_SYNTH=1 \
+    EMBEDDING_PROVIDER=voyage RERANK_PROVIDER=voyage SYNTH_PROVIDER=anthropic \
+    npm run eval
+  ```
+  with `VOYAGE_API_KEY` + `ANTHROPIC_API_KEY` set and local Postgres seeded (28 ready cases, n ≥ 20). M3 items 6/7 + Acceptance tick when this clears recall@5 ≥ 0.8 AND citation_precision ≥ 0.9.
+- **No `SCHEMA_VERSION` bump** — runner output shape + golden-set contract unchanged.
+
 ## References
 
 - ROADMAP M3 items 1-8 ([docs/ROADMAP.md §M3](../ROADMAP.md)).
