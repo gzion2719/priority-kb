@@ -22,6 +22,10 @@
 //   - en-004 / he-004: add a screen to the main menu via Screen Generator
 //   - en-005 / he-005: BPM workflow trigger on sales-order creation
 //   - en-006 / he-006: publish a customization from test to production
+// Batch 4 (2026-05-29, M3 #6 third expansion → n=21) — 3 topics x 2 languages:
+//   - en-008 / he-008: Priority Web SDK formStart event handler
+//   - en-010 / he-010: custom report missing rows after a Priority upgrade
+//   - en-012 / he-012: REST API 401 Unauthorized with a valid OIDC token
 //
 // Embedder: stub (per ADR-0011 Amendment 2026-05-27 + lib/embedding.ts
 // `getEmbedder()` — Voyage adapter not wired). Stub vectors are NOT
@@ -496,6 +500,172 @@ Common pitfalls:
 - פרסום המסך בלבד בלי הפרוצדורה שהוא קורא לה מייצר מסך שנכשל בזמן ריצה בייצור. ייצא את כל מערך התלויות.
 - הגדרות ספציפיות לסביבה (נתיבי קבצים, נקודות קצה לאינטגרציה) אינן עוברות עם החבילה ויש לכוון אותן מחדש בייצור לאחר הייבוא.`,
     source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-publish-customization-test-to-prod-he`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+
+  // ── Batch 4 (M3 #6 third expansion, 2026-05-29 → n=21) ───────────────────
+  // Latin-token-heavy queries (formStart, Web SDK, REST API, 401, OIDC) match
+  // identically across languages under `simple`. Hebrew bodies still repeat
+  // each query's bare content nouns verbatim, AND carry the Latin tokens
+  // literally (formStart is one lexeme "formstart" — no camelCase split; "401"
+  // survives as a numeric token).
+
+  {
+    // Maps to golden-set en-008
+    id: SEED_FIXTURE_IDS["en-008"],
+    title: "Configuring the Priority Web SDK formStart event handler",
+    category: "procedural",
+    tags: ["web-sdk", "customization", "events", "javascript"],
+    body: `In the Priority Web SDK, the formStart event fires when a form is opened, before the user interacts with it. Registering a formStart event handler lets you run custom JavaScript at form load — to set default field values, hide columns, or fetch related data.
+
+To configure the Priority Web SDK formStart event handler:
+
+1. Open the Web SDK customization for the target form. Each form exposes a set of events; formStart is the load-time event.
+2. Register a handler function against the formStart event. The handler receives the form context object, which gives you access to the form's fields and rows.
+3. Inside the handler, do your load-time work — for example set a default value with the field API, or call a server query and populate a field from the result.
+4. Return (or resolve a promise) so the form finishes starting. A formStart handler that never resolves leaves the form stuck on load.
+5. Publish the Web SDK customization so the handler is active for users.
+
+Common pitfalls:
+- formStart runs on every open of the form, including when the user navigates back to it. Keep the handler fast; heavy synchronous work in formStart makes the form feel slow to open.
+- The form context passed to a formStart handler is read-mostly at load — some field operations are only valid after the form has fully started. Defer those to a later event.
+- An exception thrown inside the formStart handler can abort the form load entirely. Wrap risky calls and handle errors gracefully.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-web-sdk-formstart`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set he-008 — discriminating tokens are Latin (formStart,
+    // Web, SDK) embedded in Hebrew; body carries them literally plus the bare
+    // Hebrew nouns "מטפל אירועים".
+    id: SEED_FIXTURE_IDS["he-008"],
+    title: "הגדרת מטפל אירועים formStart ב-Web SDK של פריוריטי",
+    category: "procedural",
+    tags: ["web-sdk", "customization", "events", "hebrew"],
+    body: `ב-Web SDK של פריוריטי, האירוע formStart מופעל כאשר טופס נפתח, לפני שהמשתמש מבצע בו פעולה כלשהי. רישום מטפל אירועים formStart מאפשר להריץ JavaScript מותאם בעת טעינת הטופס — כדי לקבוע ערכי ברירת מחדל לשדות, להסתיר עמודות, או לשלוף נתונים קשורים.
+
+כדי להגדיר מטפל אירועים formStart ב-Web SDK:
+
+1. פתח את התאמת ה-Web SDK עבור הטופס הרצוי. כל טופס חושף מערך אירועים; formStart הוא אירוע זמן הטעינה.
+2. רשום פונקציית מטפל מול האירוע formStart. המטפל מקבל את אובייקט הקשר של הטופס, שנותן גישה לשדות ולשורות.
+3. בתוך המטפל, בצע את עבודת הטעינה — למשל קבע ערך ברירת מחדל באמצעות ממשק השדות, או קרא לשאילתת שרת ומלא שדה מהתוצאה.
+4. החזר (או פתור promise) כדי שהטופס יסיים להיפתח. מטפל formStart שלעולם אינו נפתר משאיר את הטופס תקוע בטעינה.
+5. פרסם את התאמת ה-Web SDK כדי שהמטפל יהיה פעיל למשתמשים.
+
+טעויות נפוצות:
+- formStart רץ בכל פתיחה של הטופס. שמור על מטפל מהיר; עבודה סינכרונית כבדה ב-formStart גורמת לטופס להיפתח לאט.
+- חריגה שנזרקת בתוך מטפל ה-formStart עלולה לבטל לחלוטין את טעינת הטופס. עטוף קריאות מסוכנות וטפל בשגיאות.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-web-sdk-formstart-he`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set en-010
+    id: SEED_FIXTURE_IDS["en-010"],
+    title: "Custom report missing rows after the most recent Priority upgrade",
+    category: "diagnostic",
+    tags: ["reports", "errors", "upgrade", "customization"],
+    body: `When a custom report shows fewer rows after a Priority upgrade than it did before, the cause is almost always a change in an underlying view, a tightened permission, or a query that relied on behavior the upgrade changed.
+
+Why a custom report goes missing rows after an upgrade:
+
+1. A standard view the report reads from was redefined in the upgrade. If the report's query joins a Priority view (not a base table), and the upgrade changed that view's filter or columns, rows silently drop.
+2. The upgrade added or tightened a row-level permission. A report that ran as an admin in test may return fewer rows for a normal user in production after the upgrade's permission changes.
+3. A custom query used an undocumented column or join that the upgrade removed or renamed; the query still runs but matches fewer rows.
+
+Diagnostic steps:
+
+1. Run the report's underlying query directly (outside the report layout) for a known-good record set. If the raw query is already missing rows, the problem is the query, not the report layout.
+2. Compare the report's source view definition before and after the upgrade — the upgrade release notes list changed standard views.
+3. Re-run the report as an admin. If admin sees all rows and a normal user does not, the missing rows are a permission change, not a data change.
+4. Check for renamed columns/joins flagged in the upgrade notes and repoint the custom query.
+
+Common pitfalls:
+- Assuming the data was deleted. After an upgrade, "missing rows" is far more often a changed view or permission than lost data — confirm the rows still exist with a direct base-table query before escalating.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-report-missing-rows-after-upgrade`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set he-010 — bare nouns "הדוח המותאם", "שורות", "השדרוג"
+    // verbatim.
+    id: SEED_FIXTURE_IDS["he-010"],
+    title: "הדוח המותאם חסר שורות אחרי השדרוג האחרון של פריוריטי",
+    category: "diagnostic",
+    tags: ["reports", "errors", "upgrade", "hebrew"],
+    body: `כאשר הדוח המותאם מציג פחות שורות אחרי השדרוג של פריוריטי מאשר לפניו, הסיבה היא כמעט תמיד שינוי בתצוגה (view) בסיסית, הרשאה שהוקשחה, או שאילתה שהסתמכה על התנהגות שהשדרוג שינה.
+
+למה הדוח המותאם חסר שורות אחרי השדרוג:
+
+1. תצוגה סטנדרטית שהדוח קורא ממנה הוגדרה מחדש בשדרוג. אם שאילתת הדוח מצרפת תצוגת פריוריטי (לא טבלת בסיס), ושינוי השדרוג שינה את הסינון או העמודות של אותה תצוגה — שורות נושרות בשקט.
+2. השדרוג הוסיף או הקשיח הרשאה ברמת השורה. דוח שרץ כמנהל בסביבת בדיקות עשוי להחזיר פחות שורות למשתמש רגיל בייצור אחרי שינויי ההרשאות של השדרוג.
+3. שאילתה מותאמת השתמשה בעמודה או צירוף לא מתועדים שהשדרוג הסיר או שינה את שמם; השאילתה עדיין רצה אך מתאימה לפחות שורות.
+
+צעדי אבחון:
+
+1. הרץ את שאילתת הבסיס של הדוח ישירות (מחוץ לפריסת הדוח) עבור מערך רשומות ידוע. אם השאילתה הגולמית כבר חסרה שורות, הבעיה היא בשאילתה, לא בפריסה.
+2. השווה את הגדרת התצוגה של הדוח לפני ואחרי השדרוג — הערות הגרסה של השדרוג מפרטות תצוגות סטנדרטיות שהשתנו.
+3. הרץ את הדוח כמנהל. אם המנהל רואה את כל השורות ומשתמש רגיל לא — השורות החסרות הן שינוי הרשאה, לא שינוי נתונים.
+
+טעויות נפוצות:
+- הנחה שהנתונים נמחקו. אחרי שדרוג, "שורות חסרות" הן הרבה יותר פעמים תצוגה או הרשאה שהשתנו מאשר נתונים שאבדו.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-report-missing-rows-after-upgrade-he`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set en-012
+    id: SEED_FIXTURE_IDS["en-012"],
+    title: "Priority REST API returns 401 Unauthorized with a valid OIDC token",
+    category: "diagnostic",
+    tags: ["rest-api", "errors", "authentication", "oidc"],
+    body: `When the Priority REST API returns 401 Unauthorized even though your OIDC token is valid and unexpired, the token itself is usually fine — the rejection comes from how the token is presented, which tenant it targets, or a clock/audience mismatch.
+
+Why the REST API returns 401 with a valid OIDC token:
+
+1. Wrong Authorization header shape. The REST API expects "Authorization: Bearer <token>". A missing "Bearer " prefix, or a stray newline in the header, yields 401 even with a perfect token.
+2. Audience (aud) mismatch. An OIDC token minted for a different API audience is structurally valid but rejected by the REST API because the aud claim does not match the Priority resource.
+3. Tenant / environment mismatch. A token issued against the test tenant presented to the production REST API endpoint is unauthorized — the token is valid, just not for that environment.
+4. Clock skew. If the server clock and the token's nbf/exp are more than the allowed skew apart, a still-valid token reads as not-yet-valid or expired.
+
+Diagnostic steps:
+
+1. Decode the token (without trusting it) and check the aud, iss, and exp claims against what the Priority REST API expects.
+2. Reproduce the call with a minimal client (curl) and confirm the exact Authorization header — "Bearer " prefix, single line, no trailing whitespace.
+3. Confirm the token's issuer/tenant matches the REST API endpoint's environment.
+4. Check server and client clocks; resync if skew exceeds the allowed window.
+
+Common pitfalls:
+- Assuming 401 means the token expired. A 401 with a valid OIDC token is far more often an audience or header-shape problem than an expiry problem.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-rest-api-401-oidc`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set he-012 — Latin tokens REST/API/401/Unauthorized/OIDC
+    // literal; bare Hebrew nouns "טוקן", "תקף" verbatim.
+    id: SEED_FIXTURE_IDS["he-012"],
+    title: "REST API של פריוריטי מחזיר 401 Unauthorized אבל טוקן OIDC תקף",
+    category: "diagnostic",
+    tags: ["rest-api", "errors", "authentication", "hebrew"],
+    body: `כאשר ה-REST API של פריוריטי מחזיר 401 Unauthorized למרות שטוקן ה-OIDC שלך תקף ולא פג, הטוקן עצמו בדרך כלל תקין — הדחייה נובעת מאופן הצגת הטוקן, מהטננט שאליו הוא מכוון, או מאי-התאמה של קהל (audience) או שעון.
+
+למה ה-REST API מחזיר 401 עם טוקן OIDC תקף:
+
+1. צורת כותרת Authorization שגויה. ה-REST API מצפה ל-"Authorization: Bearer <token>". חוסר בקידומת "Bearer ", או תו שורה חדשה בכותרת, מחזיר 401 גם עם טוקן מושלם.
+2. אי-התאמת קהל (aud). טוקן OIDC שהונפק עבור קהל API אחר תקף מבחינה מבנית אך נדחה כי תביעת ה-aud אינה תואמת את משאב פריוריטי.
+3. אי-התאמת טננט/סביבה. טוקן שהונפק מול טננט הבדיקות והוצג ל-REST API של הייצור אינו מורשה — הטוקן תקף, פשוט לא לאותה סביבה.
+4. סטיית שעון. אם שעון השרת ותביעות ה-nbf/exp של הטוקן רחוקים מעבר לסטייה המותרת, טוקן תקף נקרא כפג או כעדיין-לא-תקף.
+
+צעדי אבחון:
+
+1. פענח את הטוקן (בלי לסמוך עליו) ובדוק את תביעות ה-aud, iss ו-exp מול מה שה-REST API מצפה.
+2. שחזר את הקריאה עם לקוח מינימלי (curl) וודא את כותרת ה-Authorization המדויקת — קידומת "Bearer ", שורה אחת, ללא רווח עוקב.
+3. ודא שהמנפיק/הטננט של הטוקן תואם את סביבת נקודת הקצה של ה-REST API.
+
+טעות נפוצה: הנחה ש-401 פירושו שהטוקן פג. 401 עם טוקן OIDC תקף הוא הרבה יותר פעמים בעיית קהל או צורת כותרת מאשר בעיית תפוגה.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-rest-api-401-oidc-he`,
     last_verified_at: new Date("2026-05-29T00:00:00Z"),
     sensitivity: "internal" as const,
   },

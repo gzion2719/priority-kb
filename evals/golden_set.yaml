@@ -104,8 +104,10 @@ cases:
     query: "How do I configure the Priority Web SDK formStart event handler?"
     language: en
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "ae467bbd-f42a-4984-bdf2-a52ffd21b60e"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   # ─────────────────────────────────────────────────────────────────────
   # English — diagnostic (en-009 .. en-012)
@@ -123,8 +125,10 @@ cases:
     query: "Why is my custom report missing rows after the most recent Priority upgrade?"
     language: en
     category: diagnostic
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "b47319b9-4890-4a34-bed4-317164d05386"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   - id: en-011
     query: "Order status stuck on 'Open' even after all lines have been shipped"
@@ -139,8 +143,10 @@ cases:
     query: "Priority REST API returns 401 Unauthorized even though my OIDC token is valid"
     language: en
     category: diagnostic
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "571a6646-855a-4272-8a30-af7fb7c06b58"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   # ─────────────────────────────────────────────────────────────────────
   # English — conceptual (en-013 .. en-014)
@@ -249,8 +255,10 @@ cases:
     query: "איך מגדירים מטפל אירועים formStart ב-Web SDK של פריוריטי?"
     language: he
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "cf19acc4-59fc-4eb9-9f75-18ff25870921"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   # ─────────────────────────────────────────────────────────────────────
   # Hebrew — diagnostic (he-009 .. he-012)
@@ -266,8 +274,10 @@ cases:
     query: "למה הדוח המותאם שלי חסר שורות אחרי השדרוג האחרון של פריוריטי?"
     language: he
     category: diagnostic
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "69e9d7aa-ecdd-45db-864f-d70eac93884f"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   - id: he-011
     query: "סטטוס הזמנה תקוע על 'פתוח' למרות שכל השורות כבר נשלחו"
@@ -282,8 +292,10 @@ cases:
     query: "REST API של פריוריטי מחזיר 401 Unauthorized אבל טוקן OIDC שלי תקף"
     language: he
     category: diagnostic
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "9db12e1d-238a-4954-ba40-458ce0992bb2"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   # ─────────────────────────────────────────────────────────────────────
   # Hebrew — conceptual (he-013 .. he-014)
