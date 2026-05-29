@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-29 — Two M2b build slices: #8 stronger PII scrub + #6 Tesseract OCR fallback (2 PR pairs through main)
+
+- **Two PR pairs, all merged to main.** M2b #8 scrub [#347](https://github.com/gzion2719/priority-kb/pull/347)→[#348](https://github.com/gzion2719/priority-kb/pull/348); M2b #6 OCR fallback [#349](https://github.com/gzion2719/priority-kb/pull/349)→[#350](https://github.com/gzion2719/priority-kb/pull/350). Node tests 1008→1022; Python 232 local / 256 CI. Commits `2c5b4a5`, `51fa78b`.
+- **M2b #8 — price + label-anchored vendor/customer-ID scrub, Node-side.** `scrubPii` ([lib/scrub.ts](lib/scrub.ts)) is the single choke point all bodies pass through (ADR-0021 Option Y → no Python scrub); price→`[price]` (currency-marker-adjacent), vendor/customer ID→`[id]` (anchored on Hebrew labels `מס. לקוח`/`מס. ספק`; CHAR(16) key can't be shape-matched). Customer NAMES deferred (NER-hard, BACKLOG). [ADR-0024](docs/adr/0024-pii-scrub-stronger-pass.md).
+- **M2b #6 — Tesseract production fallback closes iron-rule #12.** `FallbackOcrAdapter(Azure, Tesseract)`, `ocr_failed`-only trigger, `ocr_fallback_engaged:` WARN signal — an Azure outage degrades to local Tesseract instead of hard-failing. [ADR-0022 A9](docs/adr/0022-ocr-adapter.md); CI proved the real binary + `heb` pack (smokes executed, not skipped). ROADMAP #6 → `[x]`.
+- **Two-pass Step 7b load-bearing on both.** Scrub: plan-CR caught the `\b` suffix-symbol gap + separator-less under-redaction; code-CR caught the suffix-pattern ReDoS (27s→11ms) + over-length numeric leak. OCR: plan-CR caught the factory-test mutation + `api_version` import-crash + exception-escape; code-CR caught the `DecompressionBombError` gap + wasted version-probe on blank images.
+- **Session Score 9/10** (Code 4/4, Protocol 3/3, Efficiency 2/3 — a `gh pr checks` poll exited early on a state case-mismatch → re-poll). **Drift flag:** the prior-session "M2b ROADMAP checkbox reconcile" entry (branch `docs/m2b-tickbox-reconcile`) is absent from dev's CHATLOG — next opening ritual should reconcile.
+- **Process improvement:** none codifiable this session — the `gh pr checks --json state` case-mismatch is 1st occurrence per `feedback_prefer_mechanical_over_prose`; Ceiling carries it (verify the field's case/format before writing the poll condition).
+- **Next session:** **M2b #10 synthetic-fixture manual smoke** (last unblocked M2b item; gates M2b Acceptance) OR M3 #6 27-entry synthetic seed (multi-session; lifts CI evals to a real recall gate). **Fresh chat strongly recommended.**
+
+---
+
 ## 2026-05-28 — M2b worker-orchestration tests (1 PR pair through main)
 
 - **1 PR pair.** [#342](https://github.com/gzion2719/priority-kb/pull/342)→[#343](https://github.com/gzion2719/priority-kb/pull/343) `test(worker)` — new [api/tests/test_worker.py](api/tests/test_worker.py): 11 stub-only tests covering `api/worker.py` orchestration (`poll_loop`, `_handle_shutdown`, `install_signal_handler`, `_default_handler`, `make_worker_id`, the new module-level `dispatch`). Python tests 201 → 212; Node unchanged 1008. The media-ingest handler was already fully covered, so the real gap was the poll-loop layer above it.
