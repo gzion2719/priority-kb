@@ -18,6 +18,10 @@
 //   - en-002 / he-002: F11 record-lock keyboard shortcut
 //   - en-007 / he-007: recurring journal entry in the GL
 //   - en-011 / he-011: order status stuck on "Open" after all lines shipped
+// Batch 3 (2026-05-29, M3 #6 second expansion) — 3 topics x 2 languages:
+//   - en-004 / he-004: add a screen to the main menu via Screen Generator
+//   - en-005 / he-005: BPM workflow trigger on sales-order creation
+//   - en-006 / he-006: publish a customization from test to production
 //
 // Embedder: stub (per ADR-0011 Amendment 2026-05-27 + lib/embedding.ts
 // `getEmbedder()` — Voyage adapter not wired). Stub vectors are NOT
@@ -69,6 +73,9 @@ const SEED_DATE = "2026-05-27";
 // Batch 2 (M3 #6 first expansion) carries its own date so the original 3
 // pointers stay on 2026-05-27 — bumping SEED_DATE would re-date the existing
 // rows, breaking idempotency (new pointer → re-insert → pinned-id PK clash).
+// NOTE: batch 2 AND batch 3 both seed on calendar day 2026-05-29, so both
+// reuse this constant. A future batch on a NEW day must add its own dated
+// constant rather than reuse this one (else it would re-date these rows).
 const SEED_DATE_BATCH2 = "2026-05-29";
 
 // Three synthetic Priority Q&A entries. Content is hand-crafted to match the
@@ -332,6 +339,163 @@ Common pitfalls:
 - משלוחים חלקיים משאירים כמות שארית; ההזמנה פתוחה כצפוי עד שהשארית נשלחת או שהשורה נסגרת ידנית.
 - כמות שהוחזרה (זיכוי) יכולה לפתוח מחדש שורה ולהחזיר את ההזמנה לסטטוס פתוח אחרי שנסגרה.`,
     source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-order-status-stuck-open-he`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+
+  // ── Batch 3 (M3 #6 second expansion, 2026-05-29) ─────────────────────────
+  // Same same-language-anchor pattern. Hebrew bodies repeat the query's BARE
+  // (unprefixed) content nouns verbatim because the `simple` config does NOT
+  // strip Hebrew clitics (ב/ל/מ/ה): a body "סביבת" does NOT match a query
+  // "מסביבת". Titles are written close to the query so every token bridges.
+
+  {
+    // Maps to golden-set en-004
+    id: SEED_FIXTURE_IDS["en-004"],
+    title: "Adding a new screen to the main menu via the Screen Generator",
+    category: "procedural",
+    tags: ["customization", "screens", "menu", "screen-generator"],
+    body: `The Screen Generator is the Priority tool for building a new screen (form) and attaching it to the main menu so users can open it from the navigation tree.
+
+To add a new screen to the main menu via the Screen Generator:
+
+1. Open the Screen Generator from System Management > Generators > Screen Generator.
+2. Create a new screen definition: give it a name, a title, and bind it to the table or query the screen will display. The Screen Generator lets you pick columns, set column order, and mark fields read-only or required.
+3. Define the screen's form type — a standalone screen, a sublevel screen under a parent, or a linked screen reached from another form.
+4. Generate the screen. The Screen Generator compiles the definition into a runnable form.
+5. Attach the new screen to the main menu: open the Menu Generator, navigate to the menu branch where the screen should appear, and add a menu line pointing at the generated screen.
+6. Grant the relevant user groups permission to the new menu line — a screen with no permission is invisible on the main menu even after it is attached.
+
+Common pitfalls:
+- Generating the screen does NOT add it to the main menu automatically; the menu line is a separate step (step 5). A freshly generated screen exists but is unreachable until it is placed on a menu.
+- A new screen placed on the main menu but missing group permissions appears for the developer (who has full rights) and is invisible to everyone else — test with a non-admin user before declaring done.
+- Renaming the underlying table after generation breaks the screen binding; regenerate the screen if the source table changes.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-screen-generator-menu-add`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set he-004 — query bare tokens: מסך, חדש, מחולל, המסכים,
+    // התפריט/תפריט, הראשי must appear verbatim.
+    id: SEED_FIXTURE_IDS["he-004"],
+    title: "הוספת מסך חדש לתפריט הראשי דרך מחולל המסכים",
+    category: "procedural",
+    tags: ["customization", "screens", "menu", "hebrew"],
+    body: `מחולל המסכים הוא הכלי בפריוריטי להוספת מסך חדש (טופס) ולחיבורו אל התפריט הראשי, כך שמשתמשים יוכלו לפתוח אותו מעץ הניווט.
+
+כדי להוסיף מסך חדש לתפריט הראשי דרך מחולל המסכים:
+
+1. פתח את מחולל המסכים מתוך ניהול מערכת > מחוללים > מחולל המסכים.
+2. צור הגדרת מסך חדשה: תן לה שם, כותרת, וקשר אותה לטבלה או לשאילתה שהמסך יציג. מחולל המסכים מאפשר לבחור עמודות, לקבוע את סדר העמודות, ולסמן שדות כקריאה-בלבד או כחובה.
+3. הגדר את סוג הטופס — מסך עצמאי, מסך משנה תחת אב, או מסך מקושר שמגיעים אליו מטופס אחר.
+4. הפק את המסך. מחולל המסכים מהדר את ההגדרה לטופס שניתן להריץ.
+5. חבר את המסך החדש אל התפריט הראשי: פתח את מחולל התפריטים, נווט אל ענף התפריט שבו המסך אמור להופיע, והוסף שורת תפריט שמצביעה על המסך שהופק.
+6. הענק לקבוצות המשתמשים הרשאה לשורת התפריט החדשה — מסך ללא הרשאה אינו נראה בתפריט הראשי גם לאחר שחובר.
+
+טעויות נפוצות:
+- הפקת המסך אינה מוסיפה אותו לתפריט הראשי אוטומטית; שורת התפריט היא שלב נפרד (שלב 5). מסך שהופק זה עתה קיים אך לא נגיש עד שמציבים אותו בתפריט.
+- מסך חדש שהוצב בתפריט הראשי אך חסר הרשאות קבוצה מופיע למפתח (בעל הרשאות מלאות) ואינו נראה לאף אחד אחר — בדוק עם משתמש שאינו מנהל לפני סיום.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-screen-generator-menu-add-he`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set en-005 — "BPM" and "sales order" must appear verbatim.
+    id: SEED_FIXTURE_IDS["en-005"],
+    title: "Configuring a BPM workflow trigger on sales-order creation",
+    category: "procedural",
+    tags: ["customization", "bpm", "workflow", "orders"],
+    body: `A BPM workflow trigger lets you start a Business Process Management flow automatically when a sales order is created — for example, to route a new order for credit approval or to notify a warehouse.
+
+To configure a BPM workflow trigger on sales-order creation:
+
+1. Open the BPM workflow designer from System Management > Business Process Management > Workflows.
+2. Create a new workflow and set its trigger object to the sales order document (ORDERS). The trigger is what tells Priority when to start the workflow.
+3. Set the trigger event to "on creation" (post-insert) so the BPM flow fires when a new sales order is first saved. You can add a condition so the trigger only fires for specific order types or customers.
+4. Lay out the workflow steps: approval tasks, notifications, and any procedural step the flow must run. Each step can branch on the order's fields.
+5. Activate the workflow. An inactive workflow is saved but its trigger never fires.
+
+Common pitfalls:
+- A BPM trigger set to "on update" instead of "on creation" will fire on every edit of the sales order, not just when it is created — choose the event deliberately.
+- If the workflow has no activation, the trigger is dormant; saving the workflow is not the same as activating it.
+- Heavy synchronous steps inside a creation trigger slow down order entry for the user. Push long-running work to an asynchronous step so the sales order saves immediately.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-bpm-trigger-sales-order`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set he-005 — query "טריגר BPM ביצירת הזמנת מכר"; the title
+    // mirrors the prefixed "ביצירת" and the body repeats "טריגר", "BPM",
+    // "הזמנת מכר" verbatim.
+    id: SEED_FIXTURE_IDS["he-005"],
+    title: "הגדרת טריגר BPM ביצירת הזמנת מכר",
+    category: "procedural",
+    tags: ["customization", "bpm", "workflow", "hebrew"],
+    body: `טריגר BPM מאפשר להפעיל תהליך עסקי (Business Process Management) אוטומטית כאשר נוצרת הזמנת מכר — למשל כדי לנתב הזמנה חדשה לאישור אשראי או להודיע למחסן.
+
+כדי להגדיר טריגר BPM ביצירת הזמנת מכר:
+
+1. פתח את מעצב תהליכי ה-BPM מתוך ניהול מערכת > ניהול תהליכים עסקיים > תהליכי עבודה.
+2. צור תהליך חדש וקבע את אובייקט הטריגר לטופס הזמנת מכר (ORDERS). הטריגר הוא מה שמורה לפריוריטי מתי להפעיל את התהליך.
+3. קבע את אירוע הטריגר ל"ביצירה" (לאחר הוספה) כך שתהליך ה-BPM ייצא לדרך כאשר הזמנת מכר חדשה נשמרת לראשונה. ניתן להוסיף תנאי כך שהטריגר יופעל רק עבור סוגי הזמנה או לקוחות מסוימים.
+4. סדר את שלבי התהליך: משימות אישור, התראות, וכל שלב פרוצדורלי שהתהליך צריך להריץ. כל שלב יכול להסתעף לפי שדות ההזמנה.
+5. הפעל את התהליך. תהליך שאינו פעיל נשמר אך הטריגר שלו לעולם אינו יוצא לדרך.
+
+טעויות נפוצות:
+- טריגר BPM שמוגדר ל"בעדכון" במקום ל"ביצירה" יופעל בכל עריכה של הזמנת מכר, לא רק כשהיא נוצרת — בחר את האירוע בכוונה.
+- אם התהליך לא הופעל, הטריגר רדום; שמירת התהליך אינה זהה להפעלתו.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-bpm-trigger-sales-order-he`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set en-006
+    id: SEED_FIXTURE_IDS["en-006"],
+    title: "Publishing a customization from the test environment to production",
+    category: "procedural",
+    tags: ["customization", "deployment", "environments", "publish"],
+    body: `When a customization (a new screen, a procedure, a report, or a BPM workflow) is built and validated in the test environment, you publish it to the production environment so end users get it.
+
+Steps to publish a customization from test to production:
+
+1. In the test environment, confirm the customization is complete and validated — run it end-to-end against test data first. Production is not the place to discover a missing step.
+2. Export the customization package: open System Management > Customization > Export, select the objects (screens, procedures, reports, workflows) that make up the change, and produce an export file.
+3. Take a backup of the production environment before importing anything. A failed import is far easier to recover from a pre-import snapshot than to unwind by hand.
+4. In production, open System Management > Customization > Import and load the export file. Review the import preview — it lists every object that will be created or overwritten.
+5. Run the import. Priority applies the objects in dependency order (a screen that depends on a procedure imports the procedure first).
+6. Smoke-test in production: open the new screen, run the report, or trigger the workflow with a low-risk record to confirm the customization behaves as it did in test.
+
+Common pitfalls:
+- Publishing only the screen but not the procedure it calls produces a screen that errors at runtime in production. Export the full dependency set, not just the visible object.
+- Environment-specific settings (file paths, integration endpoints) do NOT travel with the package and must be re-pointed in production after import.
+- Skipping the pre-import production backup turns a bad import into a manual cleanup; always snapshot first.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-publish-customization-test-to-prod`,
+    last_verified_at: new Date("2026-05-29T00:00:00Z"),
+    sensitivity: "internal" as const,
+  },
+  {
+    // Maps to golden-set he-006 — query is ALL Hebrew with prefixed clitics
+    // (לפרסום/מסביבת/לסביבת). Title mirrors the query verbatim (so the
+    // prefixed forms bridge); body repeats bare nouns התאמה/אישית/בדיקות/ייצור.
+    id: SEED_FIXTURE_IDS["he-006"],
+    title: "צעדים לפרסום התאמה אישית מסביבת בדיקות לסביבת ייצור",
+    category: "procedural",
+    tags: ["customization", "deployment", "environments", "hebrew"],
+    body: `כאשר התאמה אישית (מסך חדש, פרוצדורה, דוח או תהליך BPM) נבנתה ואומתה בסביבת בדיקות, מפרסמים אותה לסביבת ייצור כדי שמשתמשי הקצה יקבלו אותה.
+
+צעדים לפרסום התאמה אישית מסביבת בדיקות לסביבת ייצור:
+
+1. בסביבת הבדיקות, ודא שההתאמה האישית הושלמה ואומתה — הרץ אותה מקצה לקצה על נתוני בדיקה תחילה. סביבת הייצור אינה המקום לגלות שלב חסר.
+2. ייצא את חבילת ההתאמה האישית: פתח ניהול מערכת > התאמה אישית > ייצוא, בחר את האובייקטים (מסכים, פרוצדורות, דוחות, תהליכים) שמרכיבים את השינוי, והפק קובץ ייצוא.
+3. גבה את סביבת הייצור לפני ייבוא כלשהו. קל הרבה יותר לשחזר ייבוא שנכשל מתוך גיבוי מאשר לבטל אותו ידנית.
+4. בסביבת הייצור, פתח ניהול מערכת > התאמה אישית > ייבוא וטען את קובץ הייצוא. עבור על תצוגת הייבוא — היא מציגה כל אובייקט שייווצר או יידרס.
+5. הרץ את הייבוא. פריוריטי מחיל את האובייקטים בסדר תלויות.
+6. בצע בדיקת עשן בייצור: פתח את המסך החדש או הרץ את הדוח על רשומה בסיכון נמוך כדי לוודא שההתאמה האישית מתנהגת כפי שהתנהגה בבדיקות.
+
+טעויות נפוצות:
+- פרסום המסך בלבד בלי הפרוצדורה שהוא קורא לה מייצר מסך שנכשל בזמן ריצה בייצור. ייצא את כל מערך התלויות.
+- הגדרות ספציפיות לסביבה (נתיבי קבצים, נקודות קצה לאינטגרציה) אינן עוברות עם החבילה ויש לכוון אותן מחדש בייצור לאחר הייבוא.`,
+    source_pointer: `synthetic-fixture-${SEED_DATE_BATCH2}-publish-customization-test-to-prod-he`,
     last_verified_at: new Date("2026-05-29T00:00:00Z"),
     sensitivity: "internal" as const,
   },

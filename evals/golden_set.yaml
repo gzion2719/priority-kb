@@ -68,22 +68,28 @@ cases:
     query: "How do I add a new screen to the main menu via Screen Generator?"
     language: en
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "85e550c1-7071-4032-94b7-84ea29d9fbc1"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: en-005
     query: "How do I configure a BPM workflow trigger on sales-order creation?"
     language: en
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "259fd122-e7ca-4628-9f1b-6e7e0d366e33"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: en-006
     query: "Steps to publish a customization from test environment to production"
     language: en
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "596cc28e-963e-4a5f-97e9-7c06a5de0b02"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: en-007
     query: "How do I set up a recurring journal entry in the GL module?"
@@ -207,22 +213,28 @@ cases:
     query: "איך מוסיפים מסך חדש לתפריט הראשי דרך מחולל המסכים?"
     language: he
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "69a0f6bb-4b60-4f48-aa22-7c4af19b409f"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: he-005
     query: "איך מגדירים טריגר BPM ביצירת הזמנת מכר?"
     language: he
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "522d0da3-2333-4820-8395-eee0e4d134bf"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: he-006
     query: "צעדים לפרסום התאמה אישית מסביבת בדיקות לסביבת ייצור"
     language: he
     category: procedural
-    phase: queued
-    expected_source_ids: []
+    phase: ready
+    expected_source_ids:
+      - "ef7a47c5-cd79-47f1-9108-590ae4a27afc"
+    notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: he-007
     query: "איך מגדירים פקודת יומן חוזרת במודול הנהלת חשבונות?"
