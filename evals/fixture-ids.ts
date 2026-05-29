@@ -36,4 +36,13 @@ export const SEED_FIXTURE_IDS = {
   "he-005": "522d0da3-2333-4820-8395-eee0e4d134bf",
   "en-006": "596cc28e-963e-4a5f-97e9-7c06a5de0b02",
   "he-006": "ef7a47c5-cd79-47f1-9108-590ae4a27afc",
+  // Batch 4 — seeded 2026-05-29 (M3 #6, third expansion → measurable-n 21,
+  // clears the n≥20 recall-gate threshold). 3 topics x 2 languages: Web SDK
+  // formStart handler, custom-report-missing-rows-after-upgrade, REST 401/OIDC.
+  "en-008": "ae467bbd-f42a-4984-bdf2-a52ffd21b60e",
+  "he-008": "cf19acc4-59fc-4eb9-9f75-18ff25870921",
+  "en-010": "b47319b9-4890-4a34-bed4-317164d05386",
+  "he-010": "69e9d7aa-ecdd-45db-864f-d70eac93884f",
+  "en-012": "571a6646-855a-4272-8a30-af7fb7c06b58",
+  "he-012": "9db12e1d-238a-4954-ba40-458ce0992bb2",
 } as const;
