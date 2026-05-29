@@ -39,6 +39,9 @@ describe("evals/run.ts — wiring guards", () => {
     ORIGINAL_ENV.EVAL_USE_LIVE_SYNTH = process.env.EVAL_USE_LIVE_SYNTH;
     ORIGINAL_ENV.SYNTH_PROVIDER = process.env.SYNTH_PROVIDER;
     ORIGINAL_ENV.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    ORIGINAL_ENV.EVAL_USE_LIVE_EMBED = process.env.EVAL_USE_LIVE_EMBED;
+    ORIGINAL_ENV.EVAL_USE_LIVE_RERANK = process.env.EVAL_USE_LIVE_RERANK;
+    ORIGINAL_ENV.VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
   });
 
   afterEach(() => {
@@ -175,6 +178,89 @@ describe("evals/run.ts — wiring guards", () => {
       const { pinStubProviders } = await import("./run-adapter");
       expect(() => pinStubProviders()).not.toThrow();
       expect(process.env.SYNTH_PROVIDER).toBeUndefined();
+    });
+  });
+
+  describe("pinStubProviders — live-embed opt-in gate (ADR-0012 §7 Amendment 2026-05-29)", () => {
+    // Each test below would PASS (no throw / different state) if the opt-in
+    // gate were absent — that's the distinguishing property vs the default pin.
+
+    it("EVAL_USE_LIVE_EMBED unset still REJECTS EMBEDDING_PROVIDER=voyage (default pin)", async () => {
+      delete process.env.EVAL_USE_LIVE_EMBED;
+      process.env.EMBEDDING_PROVIDER = "voyage";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).toThrow(/EMBEDDING_PROVIDER/);
+    });
+
+    it("EVAL_USE_LIVE_EMBED=1 + missing VOYAGE_API_KEY MUST fail loud", async () => {
+      process.env.EVAL_USE_LIVE_EMBED = "1";
+      delete process.env.VOYAGE_API_KEY;
+      delete process.env.EMBEDDING_PROVIDER;
+      process.env.RERANK_PROVIDER = "stub";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).toThrow(/VOYAGE_API_KEY/);
+    });
+
+    it("EVAL_USE_LIVE_EMBED=1 + explicit EMBEDDING_PROVIDER=stub MUST be rejected (silent-fake-recall trap)", async () => {
+      process.env.EVAL_USE_LIVE_EMBED = "1";
+      process.env.EMBEDDING_PROVIDER = "stub";
+      process.env.VOYAGE_API_KEY = "pa-test-key-not-real";
+      process.env.RERANK_PROVIDER = "stub";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).toThrow(/EMBEDDING_PROVIDER/);
+    });
+
+    it("EVAL_USE_LIVE_EMBED=1 + unset provider + key present pins EMBEDDING_PROVIDER=voyage", async () => {
+      process.env.EVAL_USE_LIVE_EMBED = "1";
+      delete process.env.EMBEDDING_PROVIDER;
+      process.env.VOYAGE_API_KEY = "pa-test-key-not-real";
+      process.env.RERANK_PROVIDER = "stub";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).not.toThrow();
+      expect(process.env.EMBEDDING_PROVIDER).toBe("voyage");
+    });
+  });
+
+  describe("pinStubProviders — live-rerank opt-in gate (ADR-0012 §7 Amendment 2026-05-29)", () => {
+    it("EVAL_USE_LIVE_RERANK unset still REJECTS RERANK_PROVIDER=voyage (default pin)", async () => {
+      delete process.env.EVAL_USE_LIVE_RERANK;
+      process.env.RERANK_PROVIDER = "voyage";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).toThrow(/RERANK_PROVIDER/);
+    });
+
+    it("EVAL_USE_LIVE_RERANK=1 + missing VOYAGE_API_KEY MUST fail loud", async () => {
+      process.env.EVAL_USE_LIVE_RERANK = "1";
+      delete process.env.VOYAGE_API_KEY;
+      delete process.env.RERANK_PROVIDER;
+      process.env.EMBEDDING_PROVIDER = "stub";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).toThrow(/VOYAGE_API_KEY/);
+    });
+
+    it("EVAL_USE_LIVE_RERANK=1 + unset provider + key present pins RERANK_PROVIDER=voyage", async () => {
+      process.env.EVAL_USE_LIVE_RERANK = "1";
+      delete process.env.RERANK_PROVIDER;
+      process.env.VOYAGE_API_KEY = "pa-test-key-not-real";
+      process.env.EMBEDDING_PROVIDER = "stub";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).not.toThrow();
+      expect(process.env.RERANK_PROVIDER).toBe("voyage");
+    });
+
+    it("both opt-ins together (the faithful M3 acceptance path) pin embed+rerank to voyage on one key", async () => {
+      // The ADR-documented acceptance run sets EVAL_USE_LIVE_EMBED +
+      // EVAL_USE_LIVE_RERANK (+ synth) together. The two gates are independent
+      // if-blocks sharing only VOYAGE_API_KEY — assert the combined path.
+      process.env.EVAL_USE_LIVE_EMBED = "1";
+      process.env.EVAL_USE_LIVE_RERANK = "1";
+      delete process.env.EMBEDDING_PROVIDER;
+      delete process.env.RERANK_PROVIDER;
+      process.env.VOYAGE_API_KEY = "pa-test-key-not-real";
+      const { pinStubProviders } = await import("./run-adapter");
+      expect(() => pinStubProviders()).not.toThrow();
+      expect(process.env.EMBEDDING_PROVIDER).toBe("voyage");
+      expect(process.env.RERANK_PROVIDER).toBe("voyage");
     });
   });
 

@@ -1,8 +1,9 @@
 // lib/embedding.ts — embedding abstraction (M1 contract; no Voyage call yet).
 //
-// The interface every embedder must satisfy. M1 ships only the deterministic
-// stub for tests; M2a wires the real Voyage `voyage-3-large` adapter behind
-// the same interface. ROADMAP M1 line 18.
+// The interface every embedder must satisfy. The deterministic stub serves
+// tests + dev; the real Voyage `voyage-3-large` adapter lives in
+// `./embedding-voyage` and is selected via `EMBEDDING_PROVIDER=voyage`
+// (M3 — the last acceptance gate). ROADMAP M1 line 18 / M3 acceptance.
 //
 // Design notes:
 // - `embedBatch` is the primary surface — Voyage is batch-shaped and returns
@@ -38,6 +39,14 @@
 //   §9 names the heavier mechanical floor for M2a.
 
 import { createHash } from "node:crypto";
+
+// Static import of the Voyage adapter. SAFE against the iron-rule-#8
+// source-scan in lib/embedding.test.ts: those regexes forbid the Voyage SDK
+// bare-package-name (and an import specifier starting with it), but a relative
+// path like "./embedding-voyage" matches none of them. The adapter file owns
+// the Voyage URL + SDK-free fetch; this file adds no SDK-namespace literal.
+// Mirrors lib/retrieval.ts → retrieval-voyage-rerank.
+import { createVoyageEmbedder } from "./embedding-voyage";
 
 /** Wire-authoritative embedder output. Iron rule #9 columns travel with the vector. */
 export type EmbeddingResult = {
@@ -158,11 +167,19 @@ declare global {
 /**
  * Env-driven embedder factory. Reads `process.env.EMBEDDING_PROVIDER`:
  * - unset or `"stub"` → deterministic stub.
- * - `"voyage"` → throws `RangeError` (M2a will wire the adapter).
+ * - `"voyage"` → reads `process.env.VOYAGE_API_KEY`. Missing key throws
+ *   `RangeError` (iron rule #1 floor: misconfig surfaces loud at the factory
+ *   boundary, never as a transient `EmbeddingUnavailableError` that would mask
+ *   it as a degraded-mode outage). VOYAGE_API_KEY is the SAME key the reranker
+ *   uses — a future rename must update both `getEmbedder` and `getReranker`.
  * - any other value → throws `RangeError` (fail-loud, no silent fallback).
  *
  * Cached on `globalThis.__embedder` after first call. Use
  * `resetEmbedderForTests()` between tests that need a fresh resolution.
+ *
+ * The bare-package-name string for the Voyage SDK is forbidden in THIS file
+ * by the source-file scan at lib/embedding.test.ts:217-251 (iron rule #8
+ * floor). The adapter file `./embedding-voyage` owns the Voyage URL + naming.
  */
 export function getEmbedder(): Embedder {
   if (!globalThis.__embedder) {
@@ -170,13 +187,14 @@ export function getEmbedder(): Embedder {
     if (provider === "stub") {
       globalThis.__embedder = createStubEmbedder();
     } else if (provider === "voyage") {
-      throw new RangeError(
-        `EMBEDDING_PROVIDER=voyage is not wired yet; the Voyage adapter lands with M2a /api/ingest`,
-      );
+      if (!process.env.VOYAGE_API_KEY) {
+        throw new RangeError(
+          `missing VOYAGE_API_KEY — required when EMBEDDING_PROVIDER=voyage (iron rule #1)`,
+        );
+      }
+      globalThis.__embedder = createVoyageEmbedder({ apiKey: process.env.VOYAGE_API_KEY });
     } else {
-      throw new RangeError(
-        `unknown EMBEDDING_PROVIDER=${provider}; expected "stub" or (post-M2a) "voyage"`,
-      );
+      throw new RangeError(`unknown EMBEDDING_PROVIDER=${provider}; expected "stub" or "voyage"`);
     }
   }
   return globalThis.__embedder;
