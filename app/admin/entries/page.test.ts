@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHref, clampFiltersForAudit, parseFilters } from "@/app/admin/entries/page";
+import {
+  buildHref,
+  clampFiltersForAudit,
+  clampQueryForAudit,
+  parseFilters,
+  parseSearchQuery,
+} from "@/app/admin/entries/page";
 
 // ---------------------------------------------------------------------------
 // buildHref — single source of truth for /admin/entries URLs.
@@ -170,5 +176,132 @@ describe("clampFiltersForAudit — unauthorized-branch payload bound", () => {
   it("sensitivity is NOT truncated (enum-validated upstream, bounded by construction)", () => {
     const out = clampFiltersForAudit({ sensitivity: "restricted" }, "unauthorized");
     expect(out.sensitivity).toBe("restricted");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseSearchQuery (M4 #1c) — same first-wins + invalid-drops policy
+// ---------------------------------------------------------------------------
+
+describe("parseSearchQuery — ?q= ingest", () => {
+  it("valid string passes through (trimmed)", () => {
+    expect(parseSearchQuery({ q: "invoice" })).toBe("invoice");
+    expect(parseSearchQuery({ q: "  multi keyword  " })).toBe("multi keyword");
+  });
+
+  it("missing / empty / whitespace-only → null (no chip rendered)", () => {
+    expect(parseSearchQuery({})).toBeNull();
+    expect(parseSearchQuery({ q: "" })).toBeNull();
+    expect(parseSearchQuery({ q: "   " })).toBeNull();
+  });
+
+  it("first-wins on repeated params (matches firstParam policy)", () => {
+    expect(parseSearchQuery({ q: ["A", "B"] })).toBe("A");
+  });
+
+  it("invalid (control char) drops silently — no chip will render", () => {
+    // Mirror of the parseFilters regression pin: a regression that
+    // returned the raw value here would render an invisible "active"
+    // chip the SQL is ignoring.
+    expect(parseSearchQuery({ q: "a\nb" })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildHref — query handling + emission order
+// ---------------------------------------------------------------------------
+
+describe("buildHref — query parameter handling", () => {
+  it("query alone emits ?q= only", () => {
+    expect(buildHref({ cursor: null, filters: {}, query: "invoice" })).toBe(
+      "/admin/entries?q=invoice",
+    );
+  });
+
+  it("query undefined or null → no q param", () => {
+    expect(buildHref({ cursor: null, filters: {} })).toBe("/admin/entries");
+    expect(buildHref({ cursor: null, filters: {}, query: null })).toBe("/admin/entries");
+  });
+
+  it("emission order is cursor → q → CHIP_ORDER (sensitivity → category → tag)", () => {
+    // Regression pin for the canonical order. A future change that
+    // reordered (e.g. CHIP_ORDER moved before q) would break screenshot
+    // tests and any consumer relying on the documented contract.
+    const href = buildHref({
+      cursor: {
+        updatedAt: new Date("2026-01-15T10:00:00.000Z"),
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+      filters: { tag: "voyage", category: "howto", sensitivity: "public" },
+      query: "invoice",
+    });
+    const cursorIdx = href.indexOf("cursor_updated_at=");
+    const qIdx = href.indexOf("q=");
+    const sIdx = href.indexOf("sensitivity=");
+    const cIdx = href.indexOf("category=");
+    const tIdx = href.indexOf("tag=");
+    expect(cursorIdx).toBeGreaterThan(-1);
+    expect(qIdx).toBeGreaterThan(cursorIdx);
+    expect(sIdx).toBeGreaterThan(qIdx);
+    expect(cIdx).toBeGreaterThan(sIdx);
+    expect(tIdx).toBeGreaterThan(cIdx);
+  });
+
+  it("Load-more path: cursor + filters + query all preserved", () => {
+    const cursor = {
+      updatedAt: new Date("2026-01-15T10:00:00.000Z"),
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    };
+    const href = buildHref({ cursor, filters: { category: "howto" }, query: "invoice" });
+    expect(href).toContain("cursor_updated_at=2026-01-15T10%3A00%3A00.000Z");
+    expect(href).toContain("q=invoice");
+    expect(href).toContain("category=howto");
+  });
+
+  it("query-chip-remove path: query dropped, filters preserved, cursor dropped", () => {
+    // Chip-remove for the search chip emits the URL with query:null.
+    // Filters should survive; cursor should not (filter/query change
+    // resets pagination).
+    const href = buildHref({
+      cursor: null,
+      filters: { category: "howto", sensitivity: "public" },
+      query: null,
+    });
+    expect(href).not.toContain("q=");
+    expect(href).not.toContain("cursor_");
+    expect(href).toContain("category=howto");
+    expect(href).toContain("sensitivity=public");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clampQueryForAudit (M4 #1c) — served vs unauthorized branch
+// ---------------------------------------------------------------------------
+
+describe("clampQueryForAudit — anonymous-rate log-amp guard for query", () => {
+  it("returns null when no query supplied (always-three-keys serialization)", () => {
+    expect(clampQueryForAudit(null, "served")).toBeNull();
+    expect(clampQueryForAudit(null, "unauthorized")).toBeNull();
+  });
+
+  it("served branch: passes through up to 256 chars verbatim", () => {
+    expect(clampQueryForAudit("invoice", "served")).toBe("invoice");
+    expect(clampQueryForAudit("x".repeat(256), "served")).toBe("x".repeat(256));
+  });
+
+  it("served branch: truncates above 256 to compromise log-row size", () => {
+    // Validator allows 500 chars; served-branch audit caps at 256 to
+    // keep payload size comparable to filter rows.
+    const out = clampQueryForAudit("x".repeat(500), "served");
+    expect(out).toHaveLength(256);
+  });
+
+  it("unauthorized branch: caps at 64 chars (FILTER_LOG_MAX precedent)", () => {
+    const out = clampQueryForAudit("x".repeat(500), "unauthorized");
+    expect(out).toHaveLength(64);
+  });
+
+  it("unauthorized branch: short queries pass through unchanged", () => {
+    expect(clampQueryForAudit("invoice", "unauthorized")).toBe("invoice");
   });
 });

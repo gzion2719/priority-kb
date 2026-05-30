@@ -356,6 +356,23 @@ pre {
 }
 
 /*
+ * Visually-hidden helper — screen-reader-only content (search-form label,
+ * etc.). Standard clip pattern; keep on a single declaration block so
+ * future reuse stays one shape.
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
  * Citation hover preview (M4 #6)
  * --------------------
  * Glass-card surface shown on hover/focus of a citation card in /query.
