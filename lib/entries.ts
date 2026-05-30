@@ -160,6 +160,15 @@ export interface ListEntriesOptions {
   limit?: number;
   cursor?: ListCursor | null;
   filters?: ListFilters;
+  /**
+   * Free-text search query (M4 #1c). Matched against the trigger-maintained
+   * `entries.tsv` column via `websearch_to_tsquery('simple', unaccent(
+   * regexp_replace($, '<niqqud-class>', '', 'g')))`. Pre-validated via
+   * `validateSearchQuery` at the page layer — callers MUST NOT pass raw
+   * URL strings without validation (no length cap or control-char
+   * rejection happens inside the SQL builder).
+   */
+  query?: string;
 }
 
 export interface ListEntriesResult {
@@ -216,6 +225,30 @@ export function validateSensitivityFilter(raw: unknown): Sensitivity | null {
 }
 
 /**
+ * Length cap for raw search query strings (M4 #1c). Larger than
+ * FILTER_STRING_MAX because legitimate search inputs are often
+ * multi-keyword sentences. Over-length collapses to no-query — same
+ * "treat-as-no-filter" discipline as validateFilterString.
+ */
+const SEARCH_QUERY_MAX = 500;
+
+/**
+ * Validate a free-text search query. Trim, reject whitespace-only,
+ * reject control chars, length cap. Returns the trimmed string when
+ * valid, else `null`. A typo like `?q=%0A` therefore renders no chip
+ * and emits no `tsv @@ ...` clause — the chip-row never claims a
+ * filter the SQL is ignoring.
+ */
+export function validateSearchQuery(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > SEARCH_QUERY_MAX) return null;
+  if (CONTROL_CHAR_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
+/**
  * List entries for the admin browser, gated by the requester's sensitivity
  * tier. Returns rows ordered by `updated_at DESC, id DESC` (deterministic
  * tiebreak on ties) and a keyset `nextCursor` when more rows exist.
@@ -242,6 +275,7 @@ export async function listEntriesForAdmin(
   const allowed: Sensitivity[] = sensitivityAllowedForRole(role);
   const cursor = options.cursor ?? null;
   const filters = options.filters ?? {};
+  const query = options.query ?? null;
 
   // Bind-parameter contract (load-bearing — unit tests assert on these
   // positions; do NOT reorder without updating lib/entries.test.ts):
@@ -288,6 +322,28 @@ export async function listEntriesForAdmin(
     const p = params.length + 1;
     where += ` AND sensitivity = $${p}`;
     params.push(filters.sensitivity);
+  }
+  if (query !== null) {
+    const p = params.length + 1;
+    // CANONICAL niqqud-strip class — byte-identical to migration 0002 line 43
+    // (the index-side trigger). Non-contiguous: includes U+0591..U+05BD
+    // (combining marks) + U+05BF (rafe) + U+05C1..U+05C2 (sin/shin dot) +
+    // U+05C4..U+05C5 (mark + dot) + U+05C7 (qamats qatan). DELIBERATELY
+    // EXCLUDES U+05BE MAQAF, U+05C0 PASEQ, U+05C3 SOF PASUQ, U+05C6 NUN
+    // HAFUKHA — those are visible punctuation; stripping the maqaf would
+    // silently corrupt compound nouns (בית־ספר → ביתספר).
+    //
+    // KEEP IN SYNC with THREE sites — any change here must land in all:
+    //   1. drizzle/migrations/0002_unaccent_tsv_trigger.sql:43 (index-side trigger)
+    //   2. lib/retrieval-keyword.ts:68 (retrieval keyword lane)
+    //   3. lib/entries.ts (this file — admin list keyword search)
+    // BACKLOG entry tracks extracting a shared `lib/keyword-tsquery.ts`
+    // module + fixing the existing drift at retrieval-keyword.ts:68
+    // (which currently uses the contiguous range '[U+0591-U+05C7]'). The
+    // shared-module extraction is the 3rd-recurrence mechanical floor per
+    // feedback_prefer_mechanical_over_prose; queued for next session.
+    where += ` AND tsv @@ websearch_to_tsquery('simple', unaccent(regexp_replace($${p}, '[֑-ֽֿׁ-ׂׄ-ׇׅ]', '', 'g')))`;
+    params.push(query);
   }
 
   const result = await pool.query<{
