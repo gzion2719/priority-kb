@@ -144,9 +144,22 @@ export interface ListCursor {
   id: string;
 }
 
+// M4 #1b — admin facet filters. All three filters are SINGLE-VALUE in
+// this slice; multi-value variants are queued in BACKLOG. Tag matching
+// is CASE-SENSITIVE exact (matches storage — lib/ingest.ts writes tags
+// verbatim, no normalization). Filter case-mismatch silently returns
+// empty; the page must therefore render a chip only for POST-VALIDATION
+// filters so an unhonored typo never shows as "active."
+export interface ListFilters {
+  category?: string;
+  tag?: string;
+  sensitivity?: Sensitivity;
+}
+
 export interface ListEntriesOptions {
   limit?: number;
   cursor?: ListCursor | null;
+  filters?: ListFilters;
 }
 
 export interface ListEntriesResult {
@@ -156,6 +169,51 @@ export interface ListEntriesResult {
 
 const LIST_DEFAULT_LIMIT = 25;
 const LIST_MAX_LIMIT = 100;
+/**
+ * Length cap for raw category / tag filter strings. Strings longer than
+ * this are treated as no-filter (returned `null` by the validators);
+ * keeps the audit payload bounded and prevents the URL surface from
+ * being a log-amplification vector. Real category/tag values are short
+ * (≤ ~50 chars in practice).
+ */
+const FILTER_STRING_MAX = 200;
+
+const SENSITIVITY_VALUES = new Set<Sensitivity>(["public", "internal", "restricted"]);
+
+/**
+ * Validate a free-text filter param (category or tag). Returns the
+ * trimmed string if non-empty and within the length cap, else `null`
+ * (treat-as-no-filter). The page MUST render a chip only when this
+ * returns non-null — otherwise a typo (e.g., `?tag=<201 chars>`) would
+ * show as an "active" filter the SQL never honored.
+ */
+// ASCII control range + DEL — rejecting these in filter strings keeps
+// the chip-row from rendering an invisible-but-active chip (a stray
+// newline value would show as an empty pill with no × target) and
+// prevents the audit payload from carrying log-poisoning whitespace.
+const CONTROL_CHAR_RE = /[\x00-\x1F\x7F]/;
+
+export function validateFilterString(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  // Trim BEFORE the length check so a 200-char string of leading
+  // whitespace doesn't sneak past the cap.
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > FILTER_STRING_MAX) return null;
+  if (CONTROL_CHAR_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
+/**
+ * Validate a sensitivity filter against the canonical enum. Case-sensitive
+ * — `?sensitivity=PUBLIC` returns null (no normalization to lowercase).
+ * Returns `null` for any value outside the three known tiers.
+ */
+export function validateSensitivityFilter(raw: unknown): Sensitivity | null {
+  if (typeof raw !== "string") return null;
+  if (!SENSITIVITY_VALUES.has(raw as Sensitivity)) return null;
+  return raw as Sensitivity;
+}
 
 /**
  * List entries for the admin browser, gated by the requester's sensitivity
@@ -183,18 +241,53 @@ export async function listEntriesForAdmin(
   const limit = Math.max(1, Math.min(LIST_MAX_LIMIT, Math.floor(rawLimit)));
   const allowed: Sensitivity[] = sensitivityAllowedForRole(role);
   const cursor = options.cursor ?? null;
+  const filters = options.filters ?? {};
 
   // Bind-parameter contract (load-bearing — unit tests assert on these
   // positions; do NOT reorder without updating lib/entries.test.ts):
-  //   $1 = sensitivity allow-list  (text[])
+  //   $1 = sensitivity allow-list  (text[]) — ALWAYS present (iron rule #6)
   //   $2 = limit + 1               (peek-ahead — see file-top comment)
   //   $3 = cursor.updated_at       (optional; only when cursor !== null)
   //   $4 = cursor.id               (optional; only when cursor !== null)
+  //   $N+ = filter params, appended in this order when present:
+  //         category, tag, sensitivity-filter
+  //
+  // Filters AND-compose with the allow-list rather than REPLACING it:
+  // a non-admin requesting `sensitivity=restricted` produces
+  // `sensitivity = $X AND sensitivity = ANY($1::text[])` — empty result
+  // at the DB level. The allow-list is never widened by a filter, and
+  // iron rule #6 stays mechanically obvious in the SQL.
+  //
+  // Performance note: there is no index on `category` and no GIN on
+  // `tags`; the filter clauses are evaluated during the keyset btree
+  // walk (the planner uses entries_updated_at_id_idx for ORDER BY and
+  // applies the filter predicates in-place). Fine at the current
+  // corpus scale (~33 entries post-M3 seed); revisit when a filter
+  // facet is the slow lane on a real-traffic dashboard. BACKLOG entry
+  // covers the index strategy.
   const params: unknown[] = [allowed, limit + 1];
   let where = "sensitivity = ANY($1::text[])";
   if (cursor !== null) {
     where += " AND (updated_at, id) < ($3, $4)";
     params.push(cursor.updatedAt, cursor.id);
+  }
+  if (filters.category !== undefined) {
+    const p = params.length + 1;
+    where += ` AND category = $${p}`;
+    params.push(filters.category);
+  }
+  if (filters.tag !== undefined) {
+    const p = params.length + 1;
+    // CASE-SENSITIVE exact match against an element of tags[].
+    // Mismatched case (e.g., filter "Receipt" vs stored "receipt")
+    // silently returns []. See ListFilters JSDoc for the rationale.
+    where += ` AND $${p} = ANY(tags)`;
+    params.push(filters.tag);
+  }
+  if (filters.sensitivity !== undefined) {
+    const p = params.length + 1;
+    where += ` AND sensitivity = $${p}`;
+    params.push(filters.sensitivity);
   }
 
   const result = await pool.query<{

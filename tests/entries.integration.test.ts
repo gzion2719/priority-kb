@@ -307,3 +307,142 @@ describeIfDb("listEntriesForAdmin — integration against Postgres", () => {
     expect(result).toEqual({ rows: [], nextCursor: null });
   });
 });
+
+// ---------------------------------------------------------------------------
+// listEntriesForAdmin — filter facets (M4 #1b) integration
+//
+// Every filter test asserts BOTH `length === N` AND
+// `result.every(r => r.<field> === filterValue)`. The length-only check
+// would pass a regression that accidentally dropped the WHERE clause and
+// returned N+M rows under the limit; the `every` check distinguishes
+// "filter applied" from "filter ignored". Per WORKFLOW.md negative-
+// assertion-tests-distinguish-from-the-regression.
+// ---------------------------------------------------------------------------
+describeIfDb("listEntriesForAdmin — filter facets integration", () => {
+  let pool: Pool;
+
+  beforeAll(() => {
+    pool = new Pool({ connectionString: databaseUrl });
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  afterEach(async () => {
+    await pool.query("TRUNCATE audit_log, chunks, entries_versions, entries CASCADE");
+  });
+
+  async function seedRow(opts: {
+    title: string;
+    category: string;
+    tags: string[];
+    sensitivity: "public" | "internal" | "restricted";
+  }): Promise<void> {
+    await pool.query(
+      `INSERT INTO entries (title, category, tags, body, source_pointer,
+                            last_verified_at, sensitivity)
+       VALUES ($1, $2, $3::text[], 'body', 'ticket://' || $1,
+               NOW(), $4)`,
+      [opts.title, opts.category, opts.tags, opts.sensitivity],
+    );
+  }
+
+  it("category filter: only matching rows + every row matches", async () => {
+    await seedRow({ title: "a", category: "howto", tags: ["t"], sensitivity: "public" });
+    await seedRow({ title: "b", category: "howto", tags: ["t"], sensitivity: "public" });
+    await seedRow({ title: "c", category: "ticket", tags: ["t"], sensitivity: "public" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      filters: { category: "howto" },
+    });
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows.every((r) => r.category === "howto")).toBe(true);
+  });
+
+  it("tag filter: membership match (any-of-array), not exact equality", async () => {
+    await seedRow({ title: "a", category: "x", tags: ["voyage", "embed"], sensitivity: "public" });
+    await seedRow({ title: "b", category: "x", tags: ["voyage"], sensitivity: "public" });
+    await seedRow({ title: "c", category: "x", tags: ["other"], sensitivity: "public" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      filters: { tag: "voyage" },
+    });
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows.every((r) => r.tags.includes("voyage"))).toBe(true);
+  });
+
+  it("tag filter is CASE-SENSITIVE (matches storage; documented in ListFilters JSDoc)", async () => {
+    await seedRow({ title: "a", category: "x", tags: ["voyage"], sensitivity: "public" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      filters: { tag: "Voyage" },
+    });
+    expect(result.rows).toHaveLength(0);
+  });
+
+  it("sensitivity filter for admin: every row matches the filter", async () => {
+    // Positive control: admin's allow-list is all-3, so a filter to a
+    // single tier narrows in. A regression that ANDed `sensitivity=$X`
+    // but dropped the allow-list would still pass length here (admin
+    // sees all anyway), but the `every` check pins the AND-compose.
+    await seedRow({ title: "a", category: "x", tags: ["t"], sensitivity: "public" });
+    await seedRow({ title: "b", category: "x", tags: ["t"], sensitivity: "internal" });
+    await seedRow({ title: "c", category: "x", tags: ["t"], sensitivity: "restricted" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      filters: { sensitivity: "restricted" },
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows.every((r) => r.sensitivity === "restricted")).toBe(true);
+  });
+
+  it("sensitivity filter outside user allow-list → empty (iron-rule #6 still in WHERE)", async () => {
+    // THE load-bearing iron-rule pin: user role filters by `restricted`.
+    // SQL produces `sensitivity = ANY($1::text[]) AND sensitivity = $X`
+    // — the allow-list at $1 is [public, internal], the filter value is
+    // 'restricted'; intersection is ∅. Returns 0 rows even though the
+    // restricted entry exists in the table.
+    await seedRow({ title: "a", category: "x", tags: ["t"], sensitivity: "restricted" });
+
+    const result = await listEntriesForAdmin(pool, "user", {
+      filters: { sensitivity: "restricted" },
+    });
+    expect(result.rows).toHaveLength(0);
+  });
+
+  it("combined filters AND: all three must match", async () => {
+    await seedRow({ title: "a", category: "howto", tags: ["voyage"], sensitivity: "public" });
+    await seedRow({ title: "b", category: "howto", tags: ["voyage"], sensitivity: "internal" });
+    await seedRow({ title: "c", category: "howto", tags: ["other"], sensitivity: "public" });
+    await seedRow({ title: "d", category: "ticket", tags: ["voyage"], sensitivity: "public" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      filters: { category: "howto", tag: "voyage", sensitivity: "public" },
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].title).toBe("a");
+    // Every-check on each filter axis (negative-assertion distinguishes
+    // a regression that dropped any one AND-clause).
+    expect(result.rows.every((r) => r.category === "howto")).toBe(true);
+    expect(result.rows.every((r) => r.tags.includes("voyage"))).toBe(true);
+    expect(result.rows.every((r) => r.sensitivity === "public")).toBe(true);
+  });
+
+  it("filter narrows BEFORE pagination: limit applies to the filtered set", async () => {
+    // 5 matching rows + 5 non-matching, limit 3 → 3 matching rows + cursor.
+    for (let i = 0; i < 5; i++) {
+      await seedRow({ title: `m${i}`, category: "match", tags: ["t"], sensitivity: "public" });
+    }
+    for (let i = 0; i < 5; i++) {
+      await seedRow({ title: `n${i}`, category: "skip", tags: ["t"], sensitivity: "public" });
+    }
+    const result = await listEntriesForAdmin(pool, "admin", {
+      limit: 3,
+      filters: { category: "match" },
+    });
+    expect(result.rows).toHaveLength(3);
+    expect(result.rows.every((r) => r.category === "match")).toBe(true);
+    expect(result.nextCursor).not.toBeNull();
+  });
+});
