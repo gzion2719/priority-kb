@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-05-30 — Stacked-PR baseRef mechanical floor SHIPPED (4th-recurrence floor; 2 PR pairs + Layer 2 empirical verification)
+
+- **4th-recurrence stacked-PR floor live on main.** `.github/workflows/stacked-pr-baseref-check.yml` ([#381](https://github.com/gzion2719/priority-kb/pull/381)→[#382](https://github.com/gzion2719/priority-kb/pull/382)) — `pull_request[opened,reopened,synchronize,edited]`; early-exits when `base.ref ∈ {dev,main}`; FAILs when base.tip is ancestor of `origin/dev` OR base ref deleted. Pinned job name `stacked-pr-baseref-check` for required-status-check binding; FAIL annotation surfaces workflow file + exact retarget recovery sequence.
+- **Layer 2 verification empirically passed.** Throwaway [#383](https://github.com/gzion2719/priority-kb/pull/383) exercised FAIL → `gh pr edit --base dev` → SUCCESS cycle. Trick: parent branch at dev tip (no commits) → parent_tip == dev_tip → ancestor check trivially fires; avoided needing a real merge. PR closed + branches deleted.
+- **User-side branch-protection completed (race-condition closed).** `stacked-pr-baseref-check` added to required-checks on both `dev` and `main`; `strict=true` toggled on both — closes the documented race ([community discussion #25798](https://github.com/orgs/community/discussions/25798)) where parent merges to dev after child opens with no further child pushes.
+- **Step 7b plan-CR load-bearing.** Caught empirical kill-shot: the `gh api .../branches 404` lane would never have fired (M1b parent branch still exists on origin — auto-delete is off on this repo); also caught the undefined `BASE_HEAD_SHA` variable + the open race condition. Pre-code probes confirmed `pull_request.edited` fires on base change + dev protection `strict: false` BEFORE YAML was written.
+- **Session Score 9/10.** Code 4/4 (every gate green first-try; Layer 2 empirical PASS). Protocol 3/3 (plan-CR + empirical probes + Verification-layer-matching honored). Efficiency 2/3 (−1: would-it-have-fired probe on M1b should have been MY pre-plan check, not the reviewer's catch).
+- **Process improvement:** SESSION_PROTOCOL.md Step 7 Platform-capability-empirical-check gained the **would-this-have-fired-on-the-cited-recurrence** sub-clause (see [SESSION_PROTOCOL.md](SESSION_PROTOCOL.md) Step 7).
+- **Next session:** the Hebrew niqqud-class drift bug in `lib/retrieval-keyword.ts:68` (2nd-recurrence flag for production-tokenization-mirror class) — shared `lib/keyword-tsquery.ts` module + fix the contiguous-vs-non-contiguous class drift; OR M4 #2 admin entry editor (next ROADMAP item).
+
+---
+
 ## 2026-05-30 — M4 #1 shipped: list + filter + search (3 PR pairs + 1 recovery + 1 release)
 
 - **M4 #1 functionally complete.** #1a list view + keyset pagination ([#374](https://github.com/gzion2719/priority-kb/pull/374)→[#373](https://github.com/gzion2719/priority-kb/pull/373)) → #1b filter facets ([#375](https://github.com/gzion2719/priority-kb/pull/375)) → #1c free-text search ([#376](https://github.com/gzion2719/priority-kb/pull/376)/[#377](https://github.com/gzion2719/priority-kb/pull/377) recovery → [#378](https://github.com/gzion2719/priority-kb/pull/378) release). Node tests 1070 → 1152 (+82). New surfaces: `lib/entries.ts` `listEntriesForAdmin` + validators, `app/admin/entries/page.tsx` server component + chip-row + search form, `entry_list_view` audit kind, btree index migration 0006, `.filter-chip` + `.sr-only` brand classes.
