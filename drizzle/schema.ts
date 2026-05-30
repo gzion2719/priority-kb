@@ -60,6 +60,9 @@ export const entries = pgTable(
     ),
     idSensitivityUnique: unique("entries_id_sensitivity_uq").on(t.id, t.sensitivity),
     tsvGin: index("entries_tsv_gin_idx").using("gin", t.tsv),
+    // M4 #1a — backs listEntriesForAdmin keyset pagination
+    // (ORDER BY updated_at DESC, id DESC). See migration 0006.
+    updatedAtIdIdx: index("entries_updated_at_id_idx").on(t.updated_at.desc(), t.id.desc()),
   }),
 );
 

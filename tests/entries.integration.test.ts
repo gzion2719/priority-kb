@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 
-import { findEntryForRole } from "@/lib/entries";
+import { findEntryForRole, listEntriesForAdmin } from "@/lib/entries";
 
 // Integration test: flip-positive sensitivity proof against real
 // Postgres — the unit tests with a mock Pool show iron-rule #6 lands
@@ -138,5 +138,172 @@ describeIfDb("findEntryForRole — integration against Postgres", () => {
     // gate is in front of the pool.query call.
     await expect(findEntryForRole(pool, "not-a-uuid", "admin")).resolves.toBeNull();
     await expect(findEntryForRole(pool, "''; DROP TABLE entries; --", "admin")).resolves.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listEntriesForAdmin — integration against real Postgres
+//
+// The unit tests pin wire shape. Only the DB can prove that the keyset
+// row-comparison `(updated_at, id) < ($, $)` paired with
+// `ORDER BY updated_at DESC, id DESC` actually yields no-overlap +
+// no-gap pages. That requires real lexicographic semantics + a real
+// btree, not a mock.
+// ---------------------------------------------------------------------------
+describeIfDb("listEntriesForAdmin — integration against Postgres", () => {
+  let pool: Pool;
+
+  beforeAll(() => {
+    pool = new Pool({ connectionString: databaseUrl });
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  afterEach(async () => {
+    await pool.query("TRUNCATE audit_log, chunks, entries_versions, entries CASCADE");
+  });
+
+  async function seedN(
+    n: number,
+    sensitivity: "public" | "internal" | "restricted" = "public",
+  ): Promise<void> {
+    // Distinct updated_at per row so the keyset has a clean ordering for
+    // most assertions; the tie-break test below seeds equal updated_at
+    // values explicitly and relies on id DESC.
+    for (let i = 0; i < n; i++) {
+      // UTC explicit — the `Date(y, m, d, …)` form interprets in host
+      // local time which would make the seeded timestamps machine-dependent.
+      const ts = new Date(Date.UTC(2026, 0, 1, 0, 0, 0, i)).toISOString();
+      await pool.query(
+        `INSERT INTO entries (title, category, tags, body, source_pointer,
+                              last_verified_at, sensitivity,
+                              created_at, updated_at)
+         VALUES ($1, 'cat', ARRAY['t'], 'body ' || $1, 'ticket://' || $1,
+                 NOW(), $2, $3, $3)`,
+        [`row-${i.toString().padStart(3, "0")}`, sensitivity, ts],
+      );
+    }
+  }
+
+  it("30 rows paginated 25 + 5: full coverage, no overlap, no gap (with tied-timestamp boundary)", async () => {
+    // THE load-bearing pagination test. Negative-assertions this fixture
+    // distinguishes:
+    //   - cursor IGNORED  → page2 re-includes page1's rows → disjointness fails.
+    //   - cursor HALF-honored: drops `id` from the row-compare → at the
+    //     tied-timestamp boundary the row(s) sharing the cursor's
+    //     updated_at are either ALL skipped (`updated_at < $cu`) or ALL
+    //     re-included (`updated_at <= $cu`) — either way coverage OR
+    //     disjointness fails.
+    //   - cursor HALF-honored: drops `updated_at` from the row-compare
+    //     (only `id < $ci`) → smaller-id rows with larger updated_at get
+    //     skipped → coverage fails.
+    //
+    // The boundary tie is the load-bearing fixture detail: rows 24 + 25
+    // (zero-indexed: the LAST row of page1 and the FIRST row of page2)
+    // share an `updated_at`. With strictly distinct timestamps a
+    // dropped-`id` regression would yield IDENTICAL row sets and the
+    // disjointness check would falsely pass.
+    const N = 30;
+    const tiedBoundaryIndex = 24; // page1 row 25 (zero-indexed 24)
+    for (let i = 0; i < N; i++) {
+      // Tie row 24 and row 25 by reusing the same millisecond stamp.
+      const stampIndex = i === tiedBoundaryIndex + 1 ? tiedBoundaryIndex : i;
+      const ts = new Date(Date.UTC(2026, 0, 1, 0, 0, 0, stampIndex)).toISOString();
+      await pool.query(
+        `INSERT INTO entries (title, category, tags, body, source_pointer,
+                              last_verified_at, sensitivity,
+                              created_at, updated_at)
+         VALUES ($1, 'cat', ARRAY['t'], 'body', 'ticket://' || $1,
+                 NOW(), 'public', $2, $2)`,
+        [`row-${i.toString().padStart(3, "0")}`, ts],
+      );
+    }
+
+    const page1 = await listEntriesForAdmin(pool, "admin", { limit: 25 });
+    expect(page1.rows).toHaveLength(25);
+    expect(page1.nextCursor).not.toBeNull();
+
+    const page2 = await listEntriesForAdmin(pool, "admin", {
+      limit: 25,
+      cursor: page1.nextCursor,
+    });
+    expect(page2.rows).toHaveLength(5);
+    expect(page2.nextCursor).toBeNull();
+
+    const ids1 = new Set(page1.rows.map((r) => r.id));
+    const ids2 = new Set(page2.rows.map((r) => r.id));
+
+    // Disjointness: no row appears on both pages.
+    for (const id of ids2) {
+      expect(ids1.has(id)).toBe(false);
+    }
+
+    // Coverage: page1 ∪ page2 covers ALL 30 seeded rows.
+    const union = new Set([...ids1, ...ids2]);
+    expect(union.size).toBe(N);
+  });
+
+  it("admin sees all three sensitivity tiers in one page", async () => {
+    // Positive-control mirror of the findEntryForRole integration test:
+    // the SQL allow-list for admin includes restricted, so a single-page
+    // listing must surface a row of each tier.
+    await seedN(1, "public");
+    await seedN(1, "internal");
+    await seedN(1, "restricted");
+
+    const result = await listEntriesForAdmin(pool, "admin");
+    const tiers = new Set(result.rows.map((r) => r.sensitivity));
+    expect(tiers).toEqual(new Set(["public", "internal", "restricted"]));
+  });
+
+  it("user role omits restricted rows (defense-in-depth)", async () => {
+    // The page rejects non-admin upstream; but listEntriesForAdmin
+    // called with role="user" MUST still honor iron-rule #6. Seed one of
+    // each tier; user should see public + internal only.
+    await seedN(1, "public");
+    await seedN(1, "internal");
+    await seedN(1, "restricted");
+
+    const result = await listEntriesForAdmin(pool, "user");
+    const tiers = new Set(result.rows.map((r) => r.sensitivity));
+    expect(tiers).toEqual(new Set(["public", "internal"]));
+    expect(tiers).not.toContain("restricted");
+  });
+
+  it("deterministic tiebreak on equal updated_at: order by id DESC", async () => {
+    // All three rows share updated_at; the only differentiator is id.
+    // Without `, id DESC` in the ORDER BY the row order would be
+    // implementation-defined and pagination would not survive ties.
+    const sameTs = "2026-02-01T00:00:00.000Z";
+    const ids = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333",
+    ];
+    for (const id of ids) {
+      await pool.query(
+        `INSERT INTO entries (id, title, category, tags, body, source_pointer,
+                              last_verified_at, sensitivity,
+                              created_at, updated_at)
+         VALUES ($1, 'tie', 'cat', ARRAY['t'], 'b', 's',
+                 NOW(), 'public', $2, $2)`,
+        [id, sameTs],
+      );
+    }
+
+    const result = await listEntriesForAdmin(pool, "admin");
+    // ORDER BY updated_at DESC, id DESC → ids descending. Postgres stores
+    // uuid as 16 binary bytes; for these specific UUIDs (`1111…`/`2222…`/
+    // `3333…`) the binary byte order matches the leading-hex-digit lex
+    // order, so the assertion is shape-dependent on this fixture. Do NOT
+    // generalize to random UUIDs without re-deriving the expected order.
+    expect(result.rows.map((r) => r.id)).toEqual([ids[2], ids[1], ids[0]]);
+  });
+
+  it("empty table → rows:[], nextCursor:null", async () => {
+    const result = await listEntriesForAdmin(pool, "admin");
+    expect(result).toEqual({ rows: [], nextCursor: null });
   });
 });
