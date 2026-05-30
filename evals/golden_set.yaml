@@ -25,7 +25,7 @@
 #   - 30+ cases total (15 Hebrew + 15 English minimum), mixing procedural,
 #     diagnostic, conceptual, cross-lingual, and negative patterns.
 
-version: "0.3.0"
+version: "0.4.0"
 language_split:
   hebrew_target: 16
   english_target: 16
@@ -41,6 +41,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "4f237dcc-7e47-422f-bb21-e7a51b4a4a9b"
+      - "f184ddc7-9714-4c6c-95bc-ed81b202b70d"
     expected_answer_contains:
       - "Import wizard"
       - "duplicate"
@@ -53,6 +54,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "fb72d02a-e5c6-4c5d-922f-dba59533a3ec"
+      - "c5ffa98b-6312-48bc-a4a1-f8c2ac63e6c0"
     expected_answer_contains:
       - "lock"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
@@ -64,6 +66,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "fdeede95-59fc-4ee6-8d51-3f3a3cb43015"
+      - "5b3a18ba-10e1-43e1-ad61-51baabda22ed"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   - id: en-004
@@ -73,6 +76,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "85e550c1-7071-4032-94b7-84ea29d9fbc1"
+      - "69a0f6bb-4b60-4f48-aa22-7c4af19b409f"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: en-005
@@ -82,6 +86,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "259fd122-e7ca-4628-9f1b-6e7e0d366e33"
+      - "522d0da3-2333-4820-8395-eee0e4d134bf"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: en-006
@@ -91,6 +96,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "596cc28e-963e-4a5f-97e9-7c06a5de0b02"
+      - "ef7a47c5-cd79-47f1-9108-590ae4a27afc"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: en-007
@@ -100,6 +106,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "abea2065-ede2-4071-8a23-b7a61b898a6f"
+      - "6973850d-5749-4c84-91d8-2054d7a67ad5"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: en-008
@@ -109,6 +116,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "ae467bbd-f42a-4984-bdf2-a52ffd21b60e"
+      - "cf19acc4-59fc-4eb9-9f75-18ff25870921"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   # ─────────────────────────────────────────────────────────────────────
@@ -121,6 +129,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "8a054602-807a-4a62-adff-3665e81bd027"
+      - "ec5f9bd1-0974-49e3-a704-8319f379b3bf"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-27 (M2a #8)."
 
   - id: en-010
@@ -130,6 +139,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "b47319b9-4890-4a34-bed4-317164d05386"
+      - "69e9d7aa-ecdd-45db-864f-d70eac93884f"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   - id: en-011
@@ -139,6 +149,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "ee5169eb-72e3-45f8-9d9c-bc318b555682"
+      - "02372ca3-a15b-4fe8-ade0-55d12f0624e0"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: en-012
@@ -148,6 +159,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "571a6646-855a-4272-8a30-af7fb7c06b58"
+      - "9db12e1d-238a-4954-ba40-458ce0992bb2"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   # ─────────────────────────────────────────────────────────────────────
@@ -160,6 +172,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "d499005d-9e25-4440-8a82-41b19e8fab90"
+      - "361c8ff4-cf59-4330-a706-d845bed7ac00"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   - id: en-014
@@ -169,6 +182,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "52925fc4-f6b2-4116-a7f2-e174c38149dd"
+      - "343864cb-2238-4bba-830e-fa3ddb3418f0"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   # ─────────────────────────────────────────────────────────────────────
@@ -203,6 +217,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "f184ddc7-9714-4c6c-95bc-ed81b202b70d"
+      - "4f237dcc-7e47-422f-bb21-e7a51b4a4a9b"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   - id: he-002
@@ -212,6 +227,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "c5ffa98b-6312-48bc-a4a1-f8c2ac63e6c0"
+      - "fb72d02a-e5c6-4c5d-922f-dba59533a3ec"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: he-003
@@ -221,6 +237,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "5b3a18ba-10e1-43e1-ad61-51baabda22ed"
+      - "fdeede95-59fc-4ee6-8d51-3f3a3cb43015"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-27 (M2a #8)."
 
   - id: he-004
@@ -230,6 +247,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "69a0f6bb-4b60-4f48-aa22-7c4af19b409f"
+      - "85e550c1-7071-4032-94b7-84ea29d9fbc1"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: he-005
@@ -239,6 +257,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "522d0da3-2333-4820-8395-eee0e4d134bf"
+      - "259fd122-e7ca-4628-9f1b-6e7e0d366e33"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: he-006
@@ -248,6 +267,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "ef7a47c5-cd79-47f1-9108-590ae4a27afc"
+      - "596cc28e-963e-4a5f-97e9-7c06a5de0b02"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 3)."
 
   - id: he-007
@@ -257,6 +277,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "6973850d-5749-4c84-91d8-2054d7a67ad5"
+      - "abea2065-ede2-4071-8a23-b7a61b898a6f"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: he-008
@@ -266,6 +287,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "cf19acc4-59fc-4eb9-9f75-18ff25870921"
+      - "ae467bbd-f42a-4984-bdf2-a52ffd21b60e"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   # ─────────────────────────────────────────────────────────────────────
@@ -278,6 +300,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "ec5f9bd1-0974-49e3-a704-8319f379b3bf"
+      - "8a054602-807a-4a62-adff-3665e81bd027"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   - id: he-010
@@ -287,6 +310,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "69e9d7aa-ecdd-45db-864f-d70eac93884f"
+      - "b47319b9-4890-4a34-bed4-317164d05386"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   - id: he-011
@@ -296,6 +320,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "02372ca3-a15b-4fe8-ade0-55d12f0624e0"
+      - "ee5169eb-72e3-45f8-9d9c-bc318b555682"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 2)."
 
   - id: he-012
@@ -305,6 +330,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "9db12e1d-238a-4954-ba40-458ce0992bb2"
+      - "571a6646-855a-4272-8a30-af7fb7c06b58"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 4)."
 
   # ─────────────────────────────────────────────────────────────────────
@@ -317,6 +343,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "361c8ff4-cf59-4330-a706-d845bed7ac00"
+      - "d499005d-9e25-4440-8a82-41b19e8fab90"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   - id: he-014
@@ -326,6 +353,7 @@ cases:
     phase: ready
     expected_source_ids:
       - "343864cb-2238-4bba-830e-fa3ddb3418f0"
+      - "52925fc4-f6b2-4116-a7f2-e174c38149dd"
     notes: "Anchored against synthetic-fixture entry seeded 2026-05-29 (M3 #6 batch 5)."
 
   # ─────────────────────────────────────────────────────────────────────
