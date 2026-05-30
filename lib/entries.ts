@@ -218,12 +218,17 @@ export async function listEntriesForAdmin(
   if (rows.length <= limit) {
     return { rows, nextCursor: null };
   }
-  // The (limit+1)th row is the peek-ahead — it becomes the next cursor
-  // and does NOT ship in the current page.
+  // Peek-ahead disclosed that more rows exist; the cursor is the LAST
+  // row of the CURRENT page (not the peek itself). Next page query is
+  // `(updated_at, id) < lastOfPage` — strictly less — so the peek row
+  // (which we did NOT return in the current page) becomes the FIRST
+  // row of the next page. Using `peek` here with `<` would silently
+  // skip the peek row from the next page; using `peek` with `<=` would
+  // also work but conflates two strategies. Stay with last-of-page + `<`.
   const pageRows = rows.slice(0, limit);
-  const peek = rows[limit];
+  const lastOfPage = pageRows[pageRows.length - 1];
   return {
     rows: pageRows,
-    nextCursor: { updatedAt: peek.updated_at, id: peek.id },
+    nextCursor: { updatedAt: lastOfPage.updated_at, id: lastOfPage.id },
   };
 }

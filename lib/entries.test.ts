@@ -288,7 +288,13 @@ describe("listEntriesForAdmin — peek-ahead → nextCursor", () => {
     expect(result.nextCursor).toBeNull();
   });
 
-  it("rows.length === limit+1 → drops the peek row and emits it as nextCursor", async () => {
+  it("rows.length === limit+1 → drops the peek row; cursor is LAST-of-page (not peek)", async () => {
+    // Regression pin for the off-by-one fix: nextCursor is the row at
+    // index `limit-1` (last row we DID return), not `limit` (the peek
+    // we did NOT return). Page 2's `(updated_at, id) < lastOfPage`
+    // strictly-less compare then surfaces the peek as page-2's first row.
+    // Using the peek as cursor with `<` would silently drop the peek
+    // entirely — the failure mode CI caught on the tied-boundary fixture.
     const limit = 2;
     const at = (s: string) => new Date(`2026-01-${s}T00:00:00Z`);
     const a = makeRow({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", updated_at: at("03") });
@@ -301,6 +307,8 @@ describe("listEntriesForAdmin — peek-ahead → nextCursor", () => {
     const result = await listEntriesForAdmin(pool, "admin", { limit });
     expect(result.rows).toEqual([a, b]);
     expect(result.rows).not.toContain(peek);
-    expect(result.nextCursor).toEqual({ updatedAt: peek.updated_at, id: peek.id });
+    // Cursor is `b` (last row of page), NOT `peek`.
+    expect(result.nextCursor).toEqual({ updatedAt: b.updated_at, id: b.id });
+    expect(result.nextCursor).not.toEqual({ updatedAt: peek.updated_at, id: peek.id });
   });
 });
