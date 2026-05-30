@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 
 import { findEntryForRole, listEntriesForAdmin } from "@/lib/entries";
+import type { Sensitivity } from "@/drizzle/schema";
 
 // Integration test: flip-positive sensitivity proof against real
 // Postgres — the unit tests with a mock Pool show iron-rule #6 lands
@@ -305,5 +306,281 @@ describeIfDb("listEntriesForAdmin — integration against Postgres", () => {
   it("empty table → rows:[], nextCursor:null", async () => {
     const result = await listEntriesForAdmin(pool, "admin");
     expect(result).toEqual({ rows: [], nextCursor: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listEntriesForAdmin — filter facets (M4 #1b) integration
+//
+// Every filter test asserts BOTH `length === N` AND
+// `result.every(r => r.<field> === filterValue)`. The length-only check
+// would pass a regression that accidentally dropped the WHERE clause and
+// returned N+M rows under the limit; the `every` check distinguishes
+// "filter applied" from "filter ignored". Per WORKFLOW.md negative-
+// assertion-tests-distinguish-from-the-regression.
+// ---------------------------------------------------------------------------
+describeIfDb("listEntriesForAdmin — filter facets integration", () => {
+  let pool: Pool;
+
+  beforeAll(() => {
+    pool = new Pool({ connectionString: databaseUrl });
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  afterEach(async () => {
+    await pool.query("TRUNCATE audit_log, chunks, entries_versions, entries CASCADE");
+  });
+
+  async function seedRow(opts: {
+    title: string;
+    category: string;
+    tags: string[];
+    sensitivity: "public" | "internal" | "restricted";
+  }): Promise<void> {
+    await pool.query(
+      `INSERT INTO entries (title, category, tags, body, source_pointer,
+                            last_verified_at, sensitivity)
+       VALUES ($1, $2, $3::text[], 'body', 'ticket://' || $1,
+               NOW(), $4)`,
+      [opts.title, opts.category, opts.tags, opts.sensitivity],
+    );
+  }
+
+  it("category filter: only matching rows + every row matches", async () => {
+    await seedRow({ title: "a", category: "howto", tags: ["t"], sensitivity: "public" });
+    await seedRow({ title: "b", category: "howto", tags: ["t"], sensitivity: "public" });
+    await seedRow({ title: "c", category: "ticket", tags: ["t"], sensitivity: "public" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      filters: { category: "howto" },
+    });
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows.every((r) => r.category === "howto")).toBe(true);
+  });
+
+  it("tag filter: membership match (any-of-array), not exact equality", async () => {
+    await seedRow({ title: "a", category: "x", tags: ["voyage", "embed"], sensitivity: "public" });
+    await seedRow({ title: "b", category: "x", tags: ["voyage"], sensitivity: "public" });
+    await seedRow({ title: "c", category: "x", tags: ["other"], sensitivity: "public" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      filters: { tag: "voyage" },
+    });
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows.every((r) => r.tags.includes("voyage"))).toBe(true);
+  });
+
+  it("tag filter is CASE-SENSITIVE (matches storage; documented in ListFilters JSDoc)", async () => {
+    await seedRow({ title: "a", category: "x", tags: ["voyage"], sensitivity: "public" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      filters: { tag: "Voyage" },
+    });
+    expect(result.rows).toHaveLength(0);
+  });
+
+  it("sensitivity filter for admin: every row matches the filter", async () => {
+    // Positive control: admin's allow-list is all-3, so a filter to a
+    // single tier narrows in. A regression that ANDed `sensitivity=$X`
+    // but dropped the allow-list would still pass length here (admin
+    // sees all anyway), but the `every` check pins the AND-compose.
+    await seedRow({ title: "a", category: "x", tags: ["t"], sensitivity: "public" });
+    await seedRow({ title: "b", category: "x", tags: ["t"], sensitivity: "internal" });
+    await seedRow({ title: "c", category: "x", tags: ["t"], sensitivity: "restricted" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      filters: { sensitivity: "restricted" },
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows.every((r) => r.sensitivity === "restricted")).toBe(true);
+  });
+
+  it("sensitivity filter outside user allow-list → empty (iron-rule #6 still in WHERE)", async () => {
+    // THE load-bearing iron-rule pin: user role filters by `restricted`.
+    // SQL produces `sensitivity = ANY($1::text[]) AND sensitivity = $X`
+    // — the allow-list at $1 is [public, internal], the filter value is
+    // 'restricted'; intersection is ∅. Returns 0 rows even though the
+    // restricted entry exists in the table.
+    await seedRow({ title: "a", category: "x", tags: ["t"], sensitivity: "restricted" });
+
+    const result = await listEntriesForAdmin(pool, "user", {
+      filters: { sensitivity: "restricted" },
+    });
+    expect(result.rows).toHaveLength(0);
+  });
+
+  it("combined filters AND: all three must match", async () => {
+    await seedRow({ title: "a", category: "howto", tags: ["voyage"], sensitivity: "public" });
+    await seedRow({ title: "b", category: "howto", tags: ["voyage"], sensitivity: "internal" });
+    await seedRow({ title: "c", category: "howto", tags: ["other"], sensitivity: "public" });
+    await seedRow({ title: "d", category: "ticket", tags: ["voyage"], sensitivity: "public" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      filters: { category: "howto", tag: "voyage", sensitivity: "public" },
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].title).toBe("a");
+    // Every-check on each filter axis (negative-assertion distinguishes
+    // a regression that dropped any one AND-clause).
+    expect(result.rows.every((r) => r.category === "howto")).toBe(true);
+    expect(result.rows.every((r) => r.tags.includes("voyage"))).toBe(true);
+    expect(result.rows.every((r) => r.sensitivity === "public")).toBe(true);
+  });
+
+  it("filter narrows BEFORE pagination: limit applies to the filtered set", async () => {
+    // 5 matching rows + 5 non-matching, limit 3 → 3 matching rows + cursor.
+    for (let i = 0; i < 5; i++) {
+      await seedRow({ title: `m${i}`, category: "match", tags: ["t"], sensitivity: "public" });
+    }
+    for (let i = 0; i < 5; i++) {
+      await seedRow({ title: `n${i}`, category: "skip", tags: ["t"], sensitivity: "public" });
+    }
+    const result = await listEntriesForAdmin(pool, "admin", {
+      limit: 3,
+      filters: { category: "match" },
+    });
+    expect(result.rows).toHaveLength(3);
+    expect(result.rows.every((r) => r.category === "match")).toBe(true);
+    expect(result.nextCursor).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listEntriesForAdmin — free-text search (M4 #1c) integration
+//
+// Production-tokenization-mirror sub-rule applied throughout:
+// - English seed body contains the bare token `invoice` as a standalone
+//   alphanumeric run, so the simple-config tokenizer + websearch_to_tsquery
+//   produce the same lexeme on both index and query sides.
+// - Hebrew tests exercise the niqqud-strip pipeline BIDIRECTIONALLY:
+//   one direction seeds body with niqqud + queries bare (proves index
+//   strips); the other seeds bare + queries with niqqud (proves query
+//   strips). Either side dropping the regexp_replace breaks one direction.
+// ---------------------------------------------------------------------------
+describeIfDb("listEntriesForAdmin — search (tsv lane) integration", () => {
+  let pool: Pool;
+
+  beforeAll(() => {
+    pool = new Pool({ connectionString: databaseUrl });
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  afterEach(async () => {
+    await pool.query("TRUNCATE audit_log, chunks, entries_versions, entries CASCADE");
+  });
+
+  async function seedRow(opts: {
+    title: string;
+    body: string;
+    category?: string;
+    tags?: string[];
+    sensitivity?: Sensitivity;
+  }): Promise<void> {
+    await pool.query(
+      `INSERT INTO entries (title, category, tags, body, source_pointer,
+                            last_verified_at, sensitivity)
+       VALUES ($1, $2, $3::text[], $4, 'ticket://' || $1,
+               NOW(), $5)`,
+      [
+        opts.title,
+        opts.category ?? "x",
+        opts.tags ?? ["t"],
+        opts.body,
+        opts.sensitivity ?? "public",
+      ],
+    );
+  }
+
+  it("English search: only matching rows + every row contains the lexeme", async () => {
+    await seedRow({ title: "a", body: "this is the invoice approval flow" });
+    await seedRow({ title: "b", body: "another invoice clarification" });
+    await seedRow({ title: "c", body: "purchase order receipt" });
+
+    const result = await listEntriesForAdmin(pool, "admin", { query: "invoice" });
+    expect(result.rows).toHaveLength(2);
+    // Negative-assertion via set-wise pin on titles. EntryListItem does
+    // NOT carry `body` (the list projection excludes it for #1a payload
+    // size), so the distinguishing check is "the right two rows came
+    // back" rather than "every row's body contains the token." A
+    // regression that returned the wrong 2 rows (e.g. dropped `unaccent`
+    // corrupting the lexeme match) or returned all 3 rows (dropped the
+    // tsv clause entirely) would fail this assertion. Per WORKFLOW.md
+    // "Negative-assertion tests distinguish from the regression."
+    const titles = result.rows.map((r) => r.title).sort();
+    expect(titles).toEqual(["a", "b"]);
+  });
+
+  it("Hebrew bidirectional: index-side niqqud-strip alive (body niqqud, query bare)", async () => {
+    // Seed body with niqqud-padded קַבָּלָה (qof-patah, bet-dagesh+qamats,
+    // lamed-qamats, heh). On INSERT the trigger strips niqqud, so the
+    // index stores the bare lexeme קבלה. A query for bare קבלה matches.
+    // Regression: if the INDEX-side trigger dropped the regexp_replace,
+    // index would store קַבָּלָה literally, and a bare-קבלה query (which
+    // the query-side strips trivially since there are no marks to strip)
+    // would NOT match. This test runs against the live trigger so it
+    // pins the index-side strip alive.
+    await seedRow({ title: "he-a", body: "תהליך קַבָּלָה של מסמכים" });
+    await seedRow({ title: "he-b", body: "מסמכי לקוח" });
+
+    const result = await listEntriesForAdmin(pool, "admin", { query: "קבלה" });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].title).toBe("he-a");
+  });
+
+  it("Hebrew bidirectional: query-side niqqud-strip alive (body bare, query niqqud)", async () => {
+    // Seed body with bare קבלה; query with niqqud-padded קַבָּלָה. The
+    // INDEX stores the bare lexeme; the QUERY-side regexp_replace must
+    // strip the marks from the query string before websearch_to_tsquery
+    // tokenizes it. If the query-side strip were dropped, websearch
+    // would tokenize 'קַבָּלָה' as a different lexeme than the indexed
+    // 'קבלה', and the match would fail.
+    await seedRow({ title: "he-a", body: "תהליך קבלה של מסמכים" });
+    await seedRow({ title: "he-b", body: "מסמכי לקוח" });
+
+    const result = await listEntriesForAdmin(pool, "admin", { query: "קַבָּלָה" });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].title).toBe("he-a");
+  });
+
+  it("Search AND-composes with filters: query + category narrows further", async () => {
+    await seedRow({ title: "a", body: "invoice", category: "howto" });
+    await seedRow({ title: "b", body: "invoice", category: "ticket" });
+    await seedRow({ title: "c", body: "receipt", category: "howto" });
+
+    const result = await listEntriesForAdmin(pool, "admin", {
+      query: "invoice",
+      filters: { category: "howto" },
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].title).toBe("a");
+    expect(result.rows.every((r) => r.category === "howto")).toBe(true);
+  });
+
+  it("Search AND-composes with iron-rule #6: user role + restricted-only matching row → ∅", async () => {
+    // Seed a restricted-tier row containing the query term. Iron rule
+    // #6's allow-list at $1 plus the filter (none in this case) plus
+    // the tsv clause must still produce 0 rows for user-role since
+    // restricted is not in the user allow-list.
+    await seedRow({
+      title: "secret",
+      body: "internal invoice procedure",
+      sensitivity: "restricted",
+    });
+
+    const result = await listEntriesForAdmin(pool, "user", { query: "invoice" });
+    expect(result.rows).toHaveLength(0);
+  });
+
+  it("Search returning 0 rows on a non-empty corpus → empty page (no error)", async () => {
+    await seedRow({ title: "a", body: "purchase order" });
+    const result = await listEntriesForAdmin(pool, "admin", { query: "nonsense-token-xyz" });
+    expect(result.rows).toHaveLength(0);
+    expect(result.nextCursor).toBeNull();
   });
 });
