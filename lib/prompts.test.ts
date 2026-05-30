@@ -203,12 +203,13 @@ describe("RETRIEVAL_AGENT_PROMPT constant (M3 item 3 system_prompt source)", () 
   });
 });
 
-describe("RETRIEVAL_AGENT_PROMPT v0.2.0 content (M3 item 3 stage E — Sources block contract pinned)", () => {
+describe("RETRIEVAL_AGENT_PROMPT v0.3.0 content (M3 acceptance — single-best-cite tightening; Sources block contract preserved)", () => {
   // Negative-assertion tests per WORKFLOW.md "Negative-assertion tests
   // distinguish from the regression": each pairs a "present" check with
-  // an "alternative-absent" check. v0.2.0 pins the ADR-0012 §D + §5
-  // output contract; a future v0.3.0 (or accidental relaxation) breaks
-  // loudly here.
+  // an "alternative-absent" check. v0.3.0 tightens citation guidance to
+  // "single most directly answering entry" by default while preserving the
+  // v0.2.0 Sources-block contract (ADR-0012 §D + §5). A future bump (or
+  // accidental relaxation of either rule) breaks loudly here.
 
   it("uses the canonical header (and not a partial-prefix variant)", () => {
     expect(RETRIEVAL_AGENT_PROMPT).toContain("# Retrieval Agent — System Prompt");
@@ -219,16 +220,35 @@ describe("RETRIEVAL_AGENT_PROMPT v0.2.0 content (M3 item 3 stage E — Sources b
     expect(RETRIEVAL_AGENT_PROMPT).not.toMatch(/^# Retrieval Agent\n/);
   });
 
-  it("declares v0.2.0 with the full M3 item 3 stage E parenthetical and is NOT v0.1.0", () => {
+  it("declares v0.3.0 with the full M3-acceptance parenthetical and is NOT v0.1.0 or v0.2.0", () => {
     // Pin the FULL parenthetical, not just the version number — a future
     // edit that bumps the version but forgets to update the explanatory
     // suffix would pass a substring-only check.
     expect(RETRIEVAL_AGENT_PROMPT).toContain(
+      "**Version:** 0.3.0 (M3 acceptance — single-best-cite tightening; Sources block contract preserved)",
+    );
+    // If the prompt ever bumps to a new version, these tests fail and
+    // the bumper is forced to update the assertion explicitly.
+    expect(RETRIEVAL_AGENT_PROMPT).not.toContain("**Version:** 0.1.0");
+    expect(RETRIEVAL_AGENT_PROMPT).not.toContain(
       "**Version:** 0.2.0 (M3 item 3 stage E — Sources block contract pinned)",
     );
-    // If M3 item 3 ever bumps the prompt to a new version, this test
-    // fails and the bumper is forced to update the assertion explicitly.
-    expect(RETRIEVAL_AGENT_PROMPT).not.toContain("**Version:** 0.1.0");
+  });
+
+  it("pins the v0.3.0 single-best-cite tightening (default ONE citation per claim)", () => {
+    // The behavioral change in v0.3.0: prefer a single most-directly-
+    // answering entry per claim. Multi-citation only for the narrow
+    // same-claim-multi-source-agreement case. Pin a contiguous phrase
+    // from the new bullet via a regex so the test doesn't silently pass
+    // on unrelated mentions of "single" or "cite".
+    expect(RETRIEVAL_AGENT_PROMPT).toMatch(
+      /cite the single most directly answering entry per claim/i,
+    );
+    // Forbid the v0.2.0 over-citation framing that this bump removed:
+    // "If two entries agree, cite both" actively encouraged stacking
+    // citations on a single claim, which is exactly the over-citation
+    // failure mode the M3 measurement caught.
+    expect(RETRIEVAL_AGENT_PROMPT).not.toContain("If two entries agree, cite both");
   });
 
   it("pins the no-synthesis-from-training-data non-negotiable (iron rule #12 + AGENTS.md)", () => {

@@ -409,6 +409,28 @@ The §K–§O amendment lifted synth to a live opt-in but left **embed + rerank 
   with `VOYAGE_API_KEY` + `ANTHROPIC_API_KEY` set and local Postgres seeded (28 ready cases, n ≥ 20). M3 items 6/7 + Acceptance tick when this clears recall@5 ≥ 0.8 AND citation_precision ≥ 0.9.
 - **No `SCHEMA_VERSION` bump** — runner output shape + golden-set contract unchanged.
 
+## Amendment 2026-05-30 — citation_precision tuning (v0.3.0 prompt + artifact extension)
+
+The first full live M3 acceptance run (real Voyage embed + rerank + Anthropic synth, n=28) measured `recall_at_5_mean = 1.0` (above 0.8) but `citation_precision_mean = 0.446` (well below 0.9). The per-case shape (23 cases at exactly 0.50, several at 0.20/0.25/0.33, 3 at 0.00) showed Sonnet was over-citing — emitting 2–5 entries per answer when expected = 1. The §D prompt v0.2.0 contract said "must cite every claim" + "If two entries agree, cite both" + listed multi-citation as a normal pattern, which actively encouraged the failure mode.
+
+### §T — Prompt v0.2.0 → v0.3.0 (single-best-cite tightening)
+
+`prompts/retrieval-agent.md` bumps to **v0.3.0**: default citation is the **single most directly answering entry per claim**, with multi-citation reserved for the narrow same-claim-multi-source-agreement case. The `Sources:` block contract (§D + §5) is **preserved verbatim** — inline ↔ Sources set-equality, no-duplicates, authoritative-citation-list, no-relevant-content branch all unchanged. The hash auto-recomputes via `lib/prompts.ts`; audit rows pin the new hash automatically.
+
+### §U — Eval artifact extension (`per_case.cited_ids` + `expected_source_ids`)
+
+`evals/lib.ts` `CaseResult` gains two optional fields populated on `status:"measured"` rows: `cited_ids` (the synth's actual Sources block) and `expected_source_ids` (the case's golden anchor). The artifact is now self-debuggable when citation_precision lands below target — no need to re-run the eval to see which entries Sonnet chose vs. the expected anchor. Additive change; no `SCHEMA_VERSION` bump.
+
+### §V — Acceptance gate for the v0.3.0 ship
+
+Re-run the same live eval (operator, Phase-2):
+```
+EVAL_USE_LIVE_EMBED=1 EVAL_USE_LIVE_RERANK=1 EVAL_USE_LIVE_SYNTH=1 \
+  EMBEDDING_PROVIDER=voyage RERANK_PROVIDER=voyage SYNTH_PROVIDER=anthropic \
+  npm run eval
+```
+**Pass:** `citation_precision_mean ≥ 0.9` AND `recall_at_5_mean ≥ 0.8` (preserved) → M3 items 6/7 + Acceptance tick. **Iterate:** precision improves over 0.446 but stays below 0.9 → inspect the new `cited_ids` per case (which wrong entries did the synth pick?) and tighten the prompt further. **Revert:** precision drops below 0.446 (regression) → revert the prompt bump and re-investigate; the v0.3.0 wording may have hit a different failure mode (e.g. under-cite, Sources-block contract drift).
+
 ## References
 
 - ROADMAP M3 items 1-8 ([docs/ROADMAP.md §M3](../ROADMAP.md)).
