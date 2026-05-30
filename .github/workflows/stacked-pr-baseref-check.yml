@@ -1,0 +1,154 @@
+name: stacked-pr-baseref-check
+
+# Mechanical floor for the "stacked-PR-merged-into-stale-parent-ref" bug class.
+#
+# Recurrence history (4 occurrences + 1 deferral):
+#   - PRs #158/#161  2026-05-21  1st
+#   - PRs #295/#297  2026-05-26  2nd
+#   - 2026-05-27                  3rd-strike Ceiling — deferred again
+#   - PRs #376/#377  2026-05-30  4th  → THIS floor
+#
+# Per project memory `feedback_prefer_mechanical_over_prose`, the prose
+# rules in WORKFLOW.md (Child-retarget-before-merge sub-rule, Retarget-
+# banner sub-rule) have demonstrably failed four times. Mechanical floor
+# is mandatory.
+#
+# What this catches: a feature PR whose base is another feature branch
+# (e.g. `feat/B` based on `feat/A`) when the parent (`feat/A`) has already
+# merged to dev. Merging the child in that state lands its diff into the
+# now-stale parent ref instead of dev. Recovery is a fresh recovery PR
+# from the child to dev.
+#
+# What this does NOT catch (race condition — accept as known gap):
+#   When the parent merges to dev AFTER the child PR is opened AND the
+#   child receives no further push events, GitHub does not re-trigger
+#   this workflow. The child's last reported status stays green and the
+#   merge UI is unblocked. The mitigation is server-side: enable
+#   `required_status_checks.strict = true` ("Require branches to be up
+#   to date before merging") on the dev branch protection rule. With
+#   strict=true GitHub forces re-evaluation of all required checks against
+#   the current state of the base before allowing merge. See empirical
+#   confirmation in https://github.com/orgs/community/discussions/25798.
+#
+# Trigger choice (`pull_request` not `pull_request_target`):
+#   - Private personal-account repo, no external-fork contributors.
+#   - Workflow is read-only — needs no write perms, no secrets.
+#   - `pull_request` is sufficient and lower blast radius.
+#
+# Sibling pattern: forms the server-side floor alongside the local-side
+# floor in `scripts/hook-gh-pr-merge-block.mjs`. Mirrors the three-layer
+# mechanical floor pattern from ADR-0004 (local hook + server normalize +
+# server validate), here narrowed to two layers since the failure mode
+# fires on the merge button, not on `gh pr merge`.
+#
+# Required-status-check binding: the job name `stacked-pr-baseref-check`
+# (set via `name:` on the job below) is the string to add verbatim to the
+# dev branch-protection rule's required-status-checks list.
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stacked-pr-baseref-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: stacked-pr-baseref-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate base ref is not a stale feature branch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+
+          # Legit integration / release targets — nothing to check.
+          if [ "$BASE_REF" = "dev" ] || [ "$BASE_REF" = "main" ]; then
+            echo "Base ref is '$BASE_REF' — legitimate target; no stacked-PR check needed."
+            exit 0
+          fi
+
+          echo "PR #$PR_NUMBER: head='$HEAD_REF', base='$BASE_REF' (non-standard target — running stacked-PR gate)"
+
+          # Fetch dev (already have the PR's checkout history at fetch-depth: 0).
+          git fetch --no-tags origin dev
+
+          # Try to resolve the base branch's current tip on origin. If the
+          # branch was deleted (rare in this repo — auto-delete is off — but
+          # possible if the user deleted it manually after merge), the
+          # rev-parse fails and we surface the same recovery path.
+          if ! git fetch --no-tags origin "$BASE_REF" 2>/dev/null; then
+            BASE_DELETED=1
+          else
+            BASE_DELETED=0
+          fi
+
+          if [ "$BASE_DELETED" = "1" ]; then
+            echo "::error title=Stacked-PR base ref deleted::Base branch '$BASE_REF' no longer exists on origin. Parent feature branch was deleted (typically after merge) — this PR must be retargeted to dev."
+            cat <<EOF
+
+          Blocked by .github/workflows/stacked-pr-baseref-check.yml
+
+          The base branch '$BASE_REF' no longer exists on origin. If the parent
+          feature branch was already merged to dev, retarget and rebase:
+
+            gh pr edit $PR_NUMBER --base dev
+            git fetch origin dev
+            git checkout $HEAD_REF
+            git merge origin/dev
+            git push
+
+          See WORKFLOW.md "Child-retarget-before-merge sub-rule" + "Retarget-banner sub-rule".
+          EOF
+            exit 1
+          fi
+
+          BASE_TIP="$(git rev-parse "origin/$BASE_REF")"
+          DEV_TIP="$(git rev-parse origin/dev)"
+          echo "BASE_TIP=$BASE_TIP (origin/$BASE_REF)"
+          echo "DEV_TIP=$DEV_TIP  (origin/dev)"
+
+          # If base.tip is an ancestor of dev, the parent has already merged
+          # to dev. Merging this child as-is would land its diff into the
+          # stale parent ref, not dev.
+          if git merge-base --is-ancestor "$BASE_TIP" "$DEV_TIP"; then
+            echo "::error title=Stacked-PR parent already merged::Base branch '$BASE_REF' ($BASE_TIP) is an ancestor of origin/dev ($DEV_TIP) — parent feature branch was already merged. This PR must be retargeted to dev before merging."
+            cat <<EOF
+
+          Blocked by .github/workflows/stacked-pr-baseref-check.yml
+
+          The base branch '$BASE_REF' has already been merged to dev. Merging
+          this PR as-is would land its diff into the stale parent ref instead
+          of dev. Retarget and rebase before merging:
+
+            gh pr edit $PR_NUMBER --base dev
+            git fetch origin dev
+            git checkout $HEAD_REF
+            git merge origin/dev
+            git push
+
+          The 'edited' event from 'gh pr edit --base' re-triggers this workflow
+          and the check clears once base.ref is dev.
+
+          See WORKFLOW.md "Child-retarget-before-merge sub-rule" + "Retarget-banner sub-rule".
+          EOF
+            exit 1
+          fi
+
+          echo "Base '$BASE_REF' is a live, unmerged feature branch — legitimate stacked PR. PASS."
