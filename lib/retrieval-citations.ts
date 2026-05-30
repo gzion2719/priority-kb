@@ -154,8 +154,9 @@ export function parseSourcesBlock(answer: string): {
  * is stripped first so its IDs aren't double-counted as inline citations.
  *
  * Returns IDs in occurrence order with duplicates preserved — inline
- * duplicates are legal per prompt v0.2.0 (a single claim may re-cite the
- * same entry on multiple sentences). Set-equality with the Sources block
+ * duplicates are legal (a single claim may re-cite the same entry on
+ * multiple sentences); v0.3.0's single-best-cite tightening discourages
+ * the practice but does not forbid it. Set-equality with the Sources block
  * is computed against the deduplicated set by {@link validateCitations}.
  *
  * Captures are NOT v4-validated here; the validator's `invalid_uuid` check
