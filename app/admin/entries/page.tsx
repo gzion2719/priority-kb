@@ -30,6 +30,7 @@ import {
   isUuid,
   listEntriesForAdmin,
   validateFilterString,
+  validateSearchQuery,
   validateSensitivityFilter,
   type EntryListItem,
   type ListCursor,
@@ -53,7 +54,22 @@ interface PageProps {
     category?: string | string[];
     tag?: string | string[];
     sensitivity?: string | string[];
+    q?: string | string[];
   }>;
+}
+
+const SEARCH_INPUT_MAXLENGTH = 500;
+
+/**
+ * `shouldDropCursor` — when ANY of {filter, query} is present in the
+ * URL alongside `cursor_*`, drop the cursor. A pasted URL that mixes
+ * a stale cursor (from an unfiltered/unsearched browse) with a fresh
+ * filter or query would land mid-page on a different result set —
+ * confusing UX with newer matching rows hidden above the cursor.
+ * Filter/query change always resets to page 1 of the new set.
+ */
+function shouldDropCursor(filters: ListFilters, query: string | null): boolean {
+  return query !== null || CHIP_ORDER.some((k) => filters[k] !== undefined);
 }
 
 // Deterministic chip-row + URL emission order — sensitivity → category → tag.
@@ -75,11 +91,13 @@ export default async function AdminEntriesListPage({
   const headerStore = await headers();
   const role = resolveRoleFromHeader(headerStore.get(STUB_ROLE_HEADER));
 
-  // Parse filters BEFORE the auth gate so the audit row on the
-  // unauthorized branch can capture the attempted filters (forensic
-  // value when a non-admin URL-pokes `?sensitivity=restricted`).
+  // Parse filters + query BEFORE the auth gate so the audit row on the
+  // unauthorized branch can capture the attempted state (forensic value
+  // when a non-admin URL-pokes `?sensitivity=restricted` or `?q=foo`).
   const filters = parseFilters(sp);
+  const query = parseSearchQuery(sp);
   const hasActiveFilter = CHIP_ORDER.some((k) => filters[k] !== undefined);
+  const hasActiveQuery = query !== null;
 
   // Non-admin collapses to notFound() — same shape as a missing route.
   // Audit row is written FIRST (mirrors detail-page discipline), then
@@ -91,21 +109,19 @@ export default async function AdminEntriesListPage({
       resultCount: 0,
       outcome: "unauthorized",
       filters,
+      query,
     });
     notFound();
   }
 
-  // Filter+cursor coherence: a pasted URL that combines `?category=foo`
-  // with `?cursor_*` would query the FILTERED result set against a
-  // cursor derived from the UNFILTERED set — the user lands mid-list
-  // with newer matching rows hidden above. Drop the cursor in that
-  // case so a pasted filter URL always starts at page 1 of the filter.
-  const cursor = hasActiveFilter ? null : parseCursor(sp);
+  // Filter/query + cursor coherence: see shouldDropCursor docstring.
+  const cursor = shouldDropCursor(filters, query) ? null : parseCursor(sp);
 
   const result = await listEntriesForAdmin(getPool(), role, {
     limit: PAGE_LIMIT,
     cursor,
     filters,
+    query: query ?? undefined,
   });
 
   await writeListAuditRow({
@@ -114,6 +130,7 @@ export default async function AdminEntriesListPage({
     resultCount: result.rows.length,
     outcome: "served",
     filters,
+    query,
   });
 
   return (
@@ -127,20 +144,19 @@ export default async function AdminEntriesListPage({
         gap: "1.25rem",
       }}
     >
-      <header>
+      <header style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
         <h1 style={{ margin: 0 }}>Entries</h1>
-        <p style={{ fontSize: "0.875rem", color: "var(--kramer-neutral)", marginTop: "0.25rem" }}>
-          Admin browser — read-only. {hasActiveFilter ? "Showing " : ""}
-          {result.rows.length} {hasActiveFilter ? "filtered " : ""}row
-          {result.rows.length === 1 ? "" : "s"} on this page.
+        <p style={{ fontSize: "0.875rem", color: "var(--kramer-neutral)", margin: 0 }}>
+          {composeListSummary(result.rows.length, hasActiveFilter, hasActiveQuery)}
         </p>
+        <SearchForm query={query} filters={filters} />
       </header>
 
-      {hasActiveFilter && <FilterChipRow filters={filters} />}
+      {(hasActiveFilter || hasActiveQuery) && <FilterChipRow filters={filters} query={query} />}
 
       {result.rows.length === 0 ? (
         <p data-testid="admin-entries-empty" style={{ opacity: 0.8 }}>
-          {hasActiveFilter ? "No entries match the active filters." : "No entries yet."}
+          {composeEmptyCopy(query, hasActiveFilter)}
         </p>
       ) : (
         <ul
@@ -165,7 +181,7 @@ export default async function AdminEntriesListPage({
         <nav style={{ fontSize: "0.875rem" }}>
           <Link
             data-testid="admin-entries-load-more"
-            href={buildHref({ cursor: result.nextCursor, filters })}
+            href={buildHref({ cursor: result.nextCursor, filters, query })}
           >
             Load more →
           </Link>
@@ -175,7 +191,110 @@ export default async function AdminEntriesListPage({
   );
 }
 
-function FilterChipRow({ filters }: { filters: ListFilters }): React.ReactNode {
+function composeListSummary(rowCount: number, hasFilter: boolean, hasQuery: boolean): string {
+  // Single "matching" adjective when filter and/or query is active —
+  // the chip-row above the list communicates WHICH constraints are in
+  // effect, so the header copy doesn't need to enumerate them.
+  // Previous "matched"-only fallthrough when both were active hid the
+  // filter signal in the summary line.
+  const prefix = hasFilter || hasQuery ? "Showing " : "";
+  const adjective = hasFilter || hasQuery ? "matching " : "";
+  const plural = rowCount === 1 ? "" : "s";
+  return `Admin browser — read-only. ${prefix}${rowCount} ${adjective}row${plural} on this page.`;
+}
+
+function composeEmptyCopy(query: string | null, hasFilter: boolean): string {
+  // Branched per iron-rule-#12 degraded-mode UX: an admin needs to
+  // distinguish "no matches for this search" from "no filters match"
+  // from "the corpus is empty."
+  if (query !== null && hasFilter) {
+    return `No entries match "${query}" with the active filters.`;
+  }
+  if (query !== null) {
+    return `No entries match "${query}".`;
+  }
+  if (hasFilter) {
+    return "No entries match the active filters.";
+  }
+  return "No entries yet.";
+}
+
+function SearchForm({
+  query,
+  filters,
+}: {
+  query: string | null;
+  filters: ListFilters;
+}): React.ReactNode {
+  return (
+    <form
+      method="get"
+      action="/admin/entries"
+      role="search"
+      aria-label="Search entries"
+      data-testid="admin-entries-search-form"
+      style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}
+    >
+      {/* Visually-hidden label for screen readers. */}
+      <label htmlFor="admin-entries-search-input" className="sr-only">
+        Search entries
+      </label>
+      <input
+        id="admin-entries-search-input"
+        name="q"
+        type="search"
+        defaultValue={query ?? ""}
+        placeholder="Search title, tags, body…"
+        maxLength={SEARCH_INPUT_MAXLENGTH}
+        autoComplete="off"
+        style={{
+          flex: "1 1 18rem",
+          fontFamily: "inherit",
+          fontSize: "0.875rem",
+          padding: "0.375rem 0.625rem",
+          borderRadius: "0.375rem",
+          border: "1px solid var(--kramer-neutral)",
+          background: "rgba(220, 221, 222, 0.04)",
+          color: "inherit",
+        }}
+      />
+      {/*
+        Preserve active filters across the GET submit so search composes
+        WITH filters rather than replacing them. Hidden inputs for cursor
+        are DELIBERATELY omitted — submitting the form resets to page 1
+        (same rule as any chip-row edit).
+      */}
+      {CHIP_ORDER.map((key) => {
+        const value = filters[key];
+        if (value === undefined) return null;
+        return <input key={key} type="hidden" name={key} value={value} />;
+      })}
+      <button
+        type="submit"
+        style={{
+          fontFamily: "inherit",
+          fontSize: "0.875rem",
+          padding: "0.375rem 0.875rem",
+          borderRadius: "0.375rem",
+          border: "1px solid var(--kramer-neutral)",
+          background: "var(--kramer-neutral)",
+          color: "var(--kramer-bg)",
+          cursor: "pointer",
+        }}
+      >
+        Search
+      </button>
+    </form>
+  );
+}
+
+function FilterChipRow({
+  filters,
+  query,
+}: {
+  filters: ListFilters;
+  query: string | null;
+}): React.ReactNode {
   return (
     <ul
       aria-label="Active filters"
@@ -189,14 +308,36 @@ function FilterChipRow({ filters }: { filters: ListFilters }): React.ReactNode {
         gap: "0.5rem",
       }}
     >
+      {/*
+        Search chip renders FIRST — the broadest active constraint and
+        the most actionable thing to clear. Reading order: search →
+        sensitivity → category → tag (CHIP_ORDER).
+      */}
+      {query !== null && (
+        <li className="filter-chip" data-testid="admin-entries-filter-chip-q" data-filter-key="q">
+          <span className="filter-chip-label">search:</span>{" "}
+          <span className="filter-chip-value">{`"${query}"`}</span>
+          <Link
+            aria-label="Remove search query"
+            data-testid="admin-entries-filter-chip-remove-q"
+            href={buildHref({ cursor: null, filters, query: null })}
+            className="filter-chip-remove"
+          >
+            ×
+          </Link>
+        </li>
+      )}
       {CHIP_ORDER.map((key) => {
         const value = filters[key];
         if (value === undefined) return null;
         // Chip-remove drops the cursor in addition to the removed filter
         // (filter change resets pagination — same rule as filter-add).
+        // Search query is PRESERVED across a filter-chip remove (the two
+        // chip families compose independently).
         const removeHref = buildHref({
           cursor: null,
           filters: { ...filters, [key]: undefined },
+          query,
         });
         return (
           <li
@@ -348,13 +489,25 @@ function firstParam(value: string | string[] | undefined): string | null {
  * silently drift between them.
  *
  * Param emission order is stable for screenshot-test friendliness:
- * cursor_* first, then sensitivity → category → tag (matches CHIP_ORDER).
+ * cursor_* first, then `q` (search), then sensitivity → category → tag
+ * (matches CHIP_ORDER). Note the form-GET submission path emits in
+ * field-declaration order rather than this canonical order — both shapes
+ * are accepted by `parseFilters` + `parseSearchQuery` (order-independent),
+ * so users browsing via the form and users following Load-more links
+ * land on the same result set regardless of param order.
  */
-export function buildHref(state: { cursor: ListCursor | null; filters: ListFilters }): string {
+export function buildHref(state: {
+  cursor: ListCursor | null;
+  filters: ListFilters;
+  query?: string | null;
+}): string {
   const params = new URLSearchParams();
   if (state.cursor !== null) {
     params.set("cursor_updated_at", state.cursor.updatedAt.toISOString());
     params.set("cursor_id", state.cursor.id);
+  }
+  if (state.query !== null && state.query !== undefined) {
+    params.set("q", state.query);
   }
   for (const key of CHIP_ORDER) {
     const value = state.filters[key];
@@ -395,6 +548,17 @@ export function parseFilters(sp: {
   return filters;
 }
 
+/**
+ * Parse + validate the `?q=` search-query param. Returns the post-
+ * validation trimmed string or `null`. Same first-wins repeated-param
+ * policy as `parseFilters`; same drop-silently-on-invalid policy so a
+ * typo like `?q=\n` renders no chip and emits no `tsv @@ ...` clause.
+ */
+export function parseSearchQuery(sp: { q?: string | string[] }): string | null {
+  const raw = firstParam(sp.q);
+  return validateSearchQuery(raw);
+}
+
 // ---------------------------------------------------------------------------
 // Audit row. Mirrors the detail-page discipline (entry_view): one row per
 // page render, served AND denied branches, single jsonb payload. The kind
@@ -410,6 +574,16 @@ export function parseFilters(sp: {
  * 200-char `tag` strings.
  */
 const FILTER_LOG_MAX = 64;
+
+/**
+ * Served-branch audit cap on the search query value. Larger than
+ * FILTER_LOG_MAX because legitimate queries are sometimes long
+ * (multi-keyword sentences); smaller than the validator's 500 char
+ * cap because the served-branch row otherwise grows to 2.5x the
+ * filter-row size. Unauthorized-branch uses the smaller
+ * FILTER_LOG_MAX (anonymous-rate log-amplification ceiling).
+ */
+const QUERY_LOG_MAX_SERVED = 256;
 
 /**
  * Audit-payload shape for `filters`. Always serializes the three keys
@@ -442,12 +616,30 @@ export function clampFiltersForAudit(
   };
 }
 
+/**
+ * Per-branch cap on the search query value written to audit_log.payload.
+ * Served branch: QUERY_LOG_MAX_SERVED (256) — keeps the row from being
+ * 2.5x the size of filter rows while leaving headroom for legitimate
+ * multi-keyword searches. Unauthorized branch: FILTER_LOG_MAX (64) —
+ * caps anonymous-rate log amplification at the same ceiling as the
+ * filter axes. Returns null when no query was supplied.
+ */
+export function clampQueryForAudit(
+  query: string | null,
+  outcome: "served" | "unauthorized",
+): string | null {
+  if (query === null) return null;
+  const cap = outcome === "served" ? QUERY_LOG_MAX_SERVED : FILTER_LOG_MAX;
+  return query.length > cap ? query.slice(0, cap) : query;
+}
+
 async function writeListAuditRow(args: {
   role: Role | null;
   cursor: ListCursor | null;
   resultCount: number;
   outcome: "served" | "unauthorized";
   filters: ListFilters;
+  query: string | null;
 }): Promise<void> {
   try {
     await getDb()
@@ -486,6 +678,7 @@ async function writeListAuditRow(args: {
           // full 200-char window (admin requests are auth-gated and
           // forensically more valuable).
           filters: clampFiltersForAudit(args.filters, args.outcome),
+          query: clampQueryForAudit(args.query, args.outcome),
         },
       });
   } catch {
