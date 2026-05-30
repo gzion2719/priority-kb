@@ -93,6 +93,23 @@ export type CaseResult = {
   reason?: string;
   recall_at_k?: number | undefined;
   citation_precision?: number | undefined;
+  /**
+   * Citation IDs the synth emitted for this case (the Sources block,
+   * §5-validated). Populated only on `status:"measured"` rows where the
+   * live-synth opt-in produced a non-empty citation set; absent on
+   * stub-only runs (cited_ids undefined), skipped/shape_error rows, and
+   * cases where validation failed (cited_ids = []). Self-contained debug
+   * record so iteration on citation_precision doesn't require re-running
+   * the eval to see what the synth chose.
+   */
+  cited_ids?: string[];
+  /**
+   * The case's expected anchor(s) from the golden set. Redundant with the
+   * YAML but included so the artifact is self-contained for forensic
+   * comparison with `cited_ids` — a future tooling step that joins the
+   * two doesn't need to re-read the golden set.
+   */
+  expected_source_ids?: string[];
 };
 
 export type EvalRunSummary = {
@@ -173,6 +190,13 @@ export async function runCase(
       status: "measured",
       recall_at_k: recallAtK(c.expected_source_ids, retrieved_ranked, k),
       citation_precision: citationPrecision(c.expected_source_ids, cited_ids),
+      // Expose the live data so the artifact is self-debuggable when
+      // citation_precision lands below target — see CaseResult JSDoc.
+      // cited_ids is omitted when the adapter returned undefined (stub
+      // path); JSON.stringify drops undefined fields, so the artifact
+      // simply lacks the key on stub runs — the type stays `string[]?`.
+      ...(cited_ids !== undefined ? { cited_ids } : {}),
+      expected_source_ids: c.expected_source_ids,
     };
   } catch (e) {
     return {
