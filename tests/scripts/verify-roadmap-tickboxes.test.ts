@@ -203,16 +203,13 @@ describe("findStaleCandidates — real ROADMAP.md guard", () => {
   // reason; new entries arriving here without a Step-6 conversation is
   // exactly the noise this gate exists to prevent.
   const KNOWN_PENDING_TICKBOXES: Array<{ firstLineSubstring: string; reason: string }> = [
-    {
-      firstLineSubstring: "`evals/golden_set.yaml` filled in: 30+ Q/A pairs",
-      reason:
-        "M3 item 6 — Phase A shipped (32 cases, 16 he + 16 en); Phase B (populate UUIDs) gated on ADR-0011 private-revert + M2a item 8 real entries.",
-    },
-    {
-      firstLineSubstring: "Eval runner (`npm run eval` or `pytest evals/`)",
-      reason:
-        "M3 item 7 — runner shipped (evals/run.ts + lib.ts + schema.ts + npm scripts); metrics report n/a until item 6 Phase B flips.",
-    },
+    // Empty as of 2026-05-30: M3 items 6 and 7 both ticked when M3 Acceptance
+    // measurement cleared the 0.8/0.9 bar (recall 1.000 / citation_precision
+    // 0.943 on real Voyage + Anthropic synth, n=28). The two prior entries
+    // (M3 #6 golden-set Phase B, M3 #7 eval runner metrics) are removed
+    // because the boxes they allow-listed are now [x]. New unchecked-but-
+    // implementation-shipped tickboxes added here MUST carry a one-line
+    // reason per the gate convention.
   ];
 
   it("real ROADMAP candidate set ⊆ KNOWN_PENDING_TICKBOXES", () => {
