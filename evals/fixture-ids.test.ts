@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import { UUID_V4_REGEX } from "@/lib/retrieval-citations";
-import { SEED_FIXTURE_IDS } from "./fixture-ids";
+import { CASE_SIBLINGS, SEED_FIXTURE_IDS, acceptedSeedIds } from "./fixture-ids";
 import { loadGoldenSet } from "./lib";
 import type { EvalCase } from "./schema";
 
@@ -38,16 +38,42 @@ describe("seed↔golden fixture-id reconciliation", () => {
     expect(readyIds).toEqual(pinnedIds);
   });
 
-  it("each ready case's expected_source_ids is exactly its pinned seed id", async () => {
-    // Catches a golden-set UUID edited without re-pinning the seed.
+  it("each ready case's expected_source_ids equals acceptedSeedIds(caseId) in [own, sibling] order", async () => {
+    // Catches: (a) a golden-set UUID edited without re-pinning the seed,
+    // (b) a paired case whose sibling UUID drifted, (c) the YAML ordering
+    // convention being broken (own first, sibling second — load-bearing
+    // because the toEqual is order-sensitive). Multi-anchor expected sets
+    // are the v0.4.0 contract per ADR-0012 §W.
     const ready = await readyCases();
     for (const c of ready) {
-      const pinned = SEED_FIXTURE_IDS[c.id as keyof typeof SEED_FIXTURE_IDS];
-      expect(pinned, `no pinned seed id for ready case ${c.id}`).toBeDefined();
+      const expected = acceptedSeedIds(c.id);
       expect(
         c.expected_source_ids,
-        `expected_source_ids for ${c.id} must be exactly the pinned seed id`,
-      ).toEqual([pinned]);
+        `expected_source_ids for ${c.id} must equal acceptedSeedIds(${c.id}) in [own, sibling] order`,
+      ).toEqual(expected);
+    }
+  });
+
+  it("acceptedSeedIds returns [own, sibling] order for paired cases and singleton [own] for unpaired", () => {
+    // Pin the stable-order contract independently — the per-case toEqual above
+    // relies on this order; if acceptedSeedIds is refactored to sort or
+    // shuffle, that assertion would still pass by coincidence on a sorted
+    // YAML but break on the [own, sibling] convention. This test guards the
+    // helper directly.
+    const ownEn001 = SEED_FIXTURE_IDS["en-001"];
+    const ownHe001 = SEED_FIXTURE_IDS["he-001"];
+    expect(acceptedSeedIds("en-001")).toEqual([ownEn001, ownHe001]);
+    expect(acceptedSeedIds("he-001")).toEqual([ownHe001, ownEn001]);
+    // Unknown case throws loudly (catches a typo in a future test).
+    expect(() => acceptedSeedIds("xx-999")).toThrow(/unknown case id/);
+  });
+
+  it("CASE_SIBLINGS is symmetric: every pair points back at each other", () => {
+    // A drift where CASE_SIBLINGS["en-001"]="he-001" but CASE_SIBLINGS lacks
+    // "he-001"→"en-001" would make acceptedSeedIds inconsistent across the pair
+    // (en-001 sees a sibling, he-001 thinks it has none). Mechanical check.
+    for (const [a, b] of Object.entries(CASE_SIBLINGS)) {
+      expect(CASE_SIBLINGS[b], `CASE_SIBLINGS["${b}"] should point back to "${a}"`).toBe(a);
     }
   });
 

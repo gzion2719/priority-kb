@@ -203,13 +203,13 @@ describe("RETRIEVAL_AGENT_PROMPT constant (M3 item 3 system_prompt source)", () 
   });
 });
 
-describe("RETRIEVAL_AGENT_PROMPT v0.3.0 content (M3 acceptance — single-best-cite tightening; Sources block contract preserved)", () => {
+describe("RETRIEVAL_AGENT_PROMPT v0.4.0 content (M3 acceptance — same-language citation tie-breaker; single-best-cite + Sources block contract preserved)", () => {
   // Negative-assertion tests per WORKFLOW.md "Negative-assertion tests
   // distinguish from the regression": each pairs a "present" check with
-  // an "alternative-absent" check. v0.3.0 tightens citation guidance to
-  // "single most directly answering entry" by default while preserving the
-  // v0.2.0 Sources-block contract (ADR-0012 §D + §5). A future bump (or
-  // accidental relaxation of either rule) breaks loudly here.
+  // an "alternative-absent" check. v0.4.0 adds a same-language citation
+  // tie-breaker on top of v0.3.0's single-best-cite default; both layered
+  // on the v0.2.0 Sources-block contract (ADR-0012 §D + §5). A future bump
+  // (or accidental relaxation of any rule) breaks loudly here.
 
   it("uses the canonical header (and not a partial-prefix variant)", () => {
     expect(RETRIEVAL_AGENT_PROMPT).toContain("# Retrieval Agent — System Prompt");
@@ -220,12 +220,12 @@ describe("RETRIEVAL_AGENT_PROMPT v0.3.0 content (M3 acceptance — single-best-c
     expect(RETRIEVAL_AGENT_PROMPT).not.toMatch(/^# Retrieval Agent\n/);
   });
 
-  it("declares v0.3.0 with the full M3-acceptance parenthetical and is NOT v0.1.0 or v0.2.0", () => {
+  it("declares v0.4.0 with the full M3-acceptance parenthetical and is NOT v0.1.0/0.2.0/0.3.0", () => {
     // Pin the FULL parenthetical, not just the version number — a future
     // edit that bumps the version but forgets to update the explanatory
     // suffix would pass a substring-only check.
     expect(RETRIEVAL_AGENT_PROMPT).toContain(
-      "**Version:** 0.3.0 (M3 acceptance — single-best-cite tightening; Sources block contract preserved)",
+      "**Version:** 0.4.0 (M3 acceptance — same-language citation tie-breaker; single-best-cite + Sources block contract preserved)",
     );
     // If the prompt ever bumps to a new version, these tests fail and
     // the bumper is forced to update the assertion explicitly.
@@ -233,22 +233,35 @@ describe("RETRIEVAL_AGENT_PROMPT v0.3.0 content (M3 acceptance — single-best-c
     expect(RETRIEVAL_AGENT_PROMPT).not.toContain(
       "**Version:** 0.2.0 (M3 item 3 stage E — Sources block contract pinned)",
     );
+    expect(RETRIEVAL_AGENT_PROMPT).not.toContain(
+      "**Version:** 0.3.0 (M3 acceptance — single-best-cite tightening; Sources block contract preserved)",
+    );
   });
 
-  it("pins the v0.3.0 single-best-cite tightening (default ONE citation per claim)", () => {
-    // The behavioral change in v0.3.0: prefer a single most-directly-
-    // answering entry per claim. Multi-citation only for the narrow
-    // same-claim-multi-source-agreement case. Pin a contiguous phrase
-    // from the new bullet via a regex so the test doesn't silently pass
-    // on unrelated mentions of "single" or "cite".
+  it("pins the v0.3.0 single-best-cite tightening (default ONE citation per claim) — preserved in v0.4.0", () => {
+    // The v0.3.0 behavioral change is preserved verbatim in v0.4.0: prefer a
+    // single most-directly-answering entry per claim. Multi-citation only for
+    // the narrow same-claim-multi-source-agreement case.
     expect(RETRIEVAL_AGENT_PROMPT).toMatch(
       /cite the single most directly answering entry per claim/i,
     );
-    // Forbid the v0.2.0 over-citation framing that this bump removed:
-    // "If two entries agree, cite both" actively encouraged stacking
-    // citations on a single claim, which is exactly the over-citation
-    // failure mode the M3 measurement caught.
+    // Forbid the v0.2.0 over-citation framing that v0.3.0 removed.
     expect(RETRIEVAL_AGENT_PROMPT).not.toContain("If two entries agree, cite both");
+  });
+
+  it("pins the v0.4.0 same-language citation tie-breaker", () => {
+    // The behavioral addition in v0.4.0: when EN+HE siblings both directly
+    // answer, prefer the one matching the user's query language. Framed as
+    // a tie-breaker, NOT a hard rule (so a genuinely-more-complete other-
+    // language entry can still be cited on the merits). Pin a contiguous
+    // phrase via regex so the test doesn't pass on unrelated language mentions.
+    expect(RETRIEVAL_AGENT_PROMPT).toMatch(/Same-language citation tie-breaker/i);
+    expect(RETRIEVAL_AGENT_PROMPT).toMatch(/prefer the one matching the user's query language/i);
+    // Negative-assertion: forbid an absolute "always cite same-language"
+    // framing that would conflict with citing-on-the-merits when the other
+    // language is genuinely more directly answering.
+    expect(RETRIEVAL_AGENT_PROMPT).not.toContain("always cite the same-language entry");
+    expect(RETRIEVAL_AGENT_PROMPT).not.toContain("never cite an entry in a different language");
   });
 
   it("pins the no-synthesis-from-training-data non-negotiable (iron rule #12 + AGENTS.md)", () => {

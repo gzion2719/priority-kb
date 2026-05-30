@@ -155,7 +155,7 @@ export function parseSourcesBlock(answer: string): {
  *
  * Returns IDs in occurrence order with duplicates preserved — inline
  * duplicates are legal (a single claim may re-cite the same entry on
- * multiple sentences); v0.3.0's single-best-cite tightening discourages
+ * multiple sentences); v0.3.0+ single-best-cite tightening discourages
  * the practice but does not forbid it. Set-equality with the Sources block
  * is computed against the deduplicated set by {@link validateCitations}.
  *
