@@ -110,3 +110,125 @@ export async function findEntryForRole(
   if (result.rows.length === 0) return null;
   return result.rows[0];
 }
+
+// ---------------------------------------------------------------------------
+// M4 #1a — listEntriesForAdmin
+//
+// Read sibling to findEntryForRole: powers the read-only admin entries
+// browser at /admin/entries. Mirrors the iron-rule-#6 discipline of the
+// detail-path: sensitivity is compiled into the SQL WHERE via
+// `sensitivityAllowedForRole(role)` even though `admin` resolves to all
+// three tiers — the gate is the SQL, never JS post-hoc filtering. An
+// accidental future call with role="user" therefore degrades to the
+// correct user-tier allow-list rather than leaking restricted rows.
+//
+// Pagination is keyset on (updated_at, id) — see migration 0006 for the
+// matching btree. Cursor semantics: `(updated_at, id) < ($1, $2)` is
+// Postgres row-comparison in NATURAL (ASC) lex order, which is precisely
+// "after the cursor in DESC,DESC sort order". No OFFSET — keyset survives
+// concurrent inserts without page drift or duplicate rows.
+// ---------------------------------------------------------------------------
+
+export interface EntryListItem {
+  id: string;
+  title: string;
+  category: string;
+  tags: string[];
+  sensitivity: Sensitivity;
+  last_verified_at: Date;
+  updated_at: Date;
+}
+
+export interface ListCursor {
+  updatedAt: Date;
+  id: string;
+}
+
+export interface ListEntriesOptions {
+  limit?: number;
+  cursor?: ListCursor | null;
+}
+
+export interface ListEntriesResult {
+  rows: EntryListItem[];
+  nextCursor: ListCursor | null;
+}
+
+const LIST_DEFAULT_LIMIT = 25;
+const LIST_MAX_LIMIT = 100;
+
+/**
+ * List entries for the admin browser, gated by the requester's sensitivity
+ * tier. Returns rows ordered by `updated_at DESC, id DESC` (deterministic
+ * tiebreak on ties) and a keyset `nextCursor` when more rows exist.
+ *
+ * Iron rule #6: the SQL WHERE always carries `sensitivity = ANY($::text[])`
+ * — even for admin (which resolves to all three tiers). Never post-hoc
+ * filter in JS.
+ *
+ * @param pool node-postgres Pool
+ * @param role admin or user (the page should reject non-admin earlier;
+ *             user-role behavior is defined here as a defense-in-depth
+ *             property, not a UI affordance)
+ * @param options.limit  default 25, clamped to [1, 100]
+ * @param options.cursor null/undefined for first page; otherwise the
+ *                       `nextCursor` returned from the previous call
+ */
+export async function listEntriesForAdmin(
+  pool: Pool,
+  role: Role,
+  options: ListEntriesOptions = {},
+): Promise<ListEntriesResult> {
+  const rawLimit = options.limit ?? LIST_DEFAULT_LIMIT;
+  const limit = Math.max(1, Math.min(LIST_MAX_LIMIT, Math.floor(rawLimit)));
+  const allowed: Sensitivity[] = sensitivityAllowedForRole(role);
+  const cursor = options.cursor ?? null;
+
+  // Bind-parameter contract (load-bearing — unit tests assert on these
+  // positions; do NOT reorder without updating lib/entries.test.ts):
+  //   $1 = sensitivity allow-list  (text[])
+  //   $2 = limit + 1               (peek-ahead — see file-top comment)
+  //   $3 = cursor.updated_at       (optional; only when cursor !== null)
+  //   $4 = cursor.id               (optional; only when cursor !== null)
+  const params: unknown[] = [allowed, limit + 1];
+  let where = "sensitivity = ANY($1::text[])";
+  if (cursor !== null) {
+    where += " AND (updated_at, id) < ($3, $4)";
+    params.push(cursor.updatedAt, cursor.id);
+  }
+
+  const result = await pool.query<{
+    id: string;
+    title: string;
+    category: string;
+    tags: string[];
+    sensitivity: Sensitivity;
+    last_verified_at: Date;
+    updated_at: Date;
+  }>(
+    `SELECT id, title, category, tags, sensitivity, last_verified_at, updated_at
+       FROM entries
+      WHERE ${where}
+      ORDER BY updated_at DESC, id DESC
+      LIMIT $2`,
+    params,
+  );
+
+  const rows = result.rows;
+  if (rows.length <= limit) {
+    return { rows, nextCursor: null };
+  }
+  // Peek-ahead disclosed that more rows exist; the cursor is the LAST
+  // row of the CURRENT page (not the peek itself). Next page query is
+  // `(updated_at, id) < lastOfPage` — strictly less — so the peek row
+  // (which we did NOT return in the current page) becomes the FIRST
+  // row of the next page. Using `peek` here with `<` would silently
+  // skip the peek row from the next page; using `peek` with `<=` would
+  // also work but conflates two strategies. Stay with last-of-page + `<`.
+  const pageRows = rows.slice(0, limit);
+  const lastOfPage = pageRows[pageRows.length - 1];
+  return {
+    rows: pageRows,
+    nextCursor: { updatedAt: lastOfPage.updated_at, id: lastOfPage.id },
+  };
+}
