@@ -6,6 +6,7 @@ import {
   isUuid,
   listEntriesForAdmin,
   validateFilterString,
+  validateSearchQuery,
   validateSensitivityFilter,
   type EntryListItem,
 } from "@/lib/entries";
@@ -455,5 +456,116 @@ describe("listEntriesForAdmin — filters AND-compose with allow-list (iron rule
     expect(calls[0].sql).not.toMatch(/AND\s+category\s*=/);
     expect(calls[0].sql).not.toMatch(/AND\s+\$\d+\s*=\s*ANY\s*\(\s*tags\s*\)/);
     expect(calls[0].sql).not.toMatch(/AND\s+sensitivity\s*=\s*\$\d+/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateSearchQuery (M4 #1c)
+// ---------------------------------------------------------------------------
+
+describe("validateSearchQuery — free-text search input gate", () => {
+  it("returns the trimmed string when 1..500 chars", () => {
+    expect(validateSearchQuery("invoice")).toBe("invoice");
+    expect(validateSearchQuery("  invoice  ")).toBe("invoice");
+    expect(validateSearchQuery("a".repeat(500))).toBe("a".repeat(500));
+  });
+
+  it("returns null for empty / whitespace-only / over-length", () => {
+    expect(validateSearchQuery("")).toBeNull();
+    expect(validateSearchQuery("   ")).toBeNull();
+    expect(validateSearchQuery("\t\n  ")).toBeNull();
+    expect(validateSearchQuery("a".repeat(501))).toBeNull();
+  });
+
+  it("REJECTS control chars (newline, tab, NUL, DEL)", () => {
+    expect(validateSearchQuery("inv\noice")).toBeNull();
+    expect(validateSearchQuery("a\tb")).toBeNull();
+    expect(validateSearchQuery("a\x00b")).toBeNull();
+    expect(validateSearchQuery("a\x7Fb")).toBeNull();
+  });
+
+  it.each([null, undefined, 123, {}, []])("returns null for non-string %s", (v) => {
+    expect(validateSearchQuery(v)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listEntriesForAdmin — query (tsv) clause composition + tokenizer-mirror
+// ---------------------------------------------------------------------------
+
+describe("listEntriesForAdmin — query clause SQL composition", () => {
+  it("query alone: tsv @@ websearch_to_tsquery clause lands at the next free position", async () => {
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin", { query: "invoice" });
+    // No cursor + no filters → query lands at $3.
+    expect(calls[0].sql).toMatch(
+      /AND\s+tsv\s*@@\s*websearch_to_tsquery\s*\(\s*'simple'\s*,\s*unaccent\s*\(\s*regexp_replace\s*\(\s*\$3/,
+    );
+    expect(calls[0].params[2]).toBe("invoice");
+    expect(calls[0].params).toHaveLength(3);
+  });
+
+  it("query clause uses the 'simple' tsearch config (NOT 'english' or any other)", async () => {
+    // Regression pin: any future drift away from 'simple' would break
+    // the Hebrew lane silently. Migration 0002 pins 'simple' on the
+    // INDEX side; the query lane must mirror exactly.
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin", { query: "invoice" });
+    expect(calls[0].sql).toMatch(/websearch_to_tsquery\s*\(\s*'simple'/);
+    expect(calls[0].sql).not.toMatch(/websearch_to_tsquery\s*\(\s*'english'/);
+  });
+
+  it("query clause includes the unaccent + regexp_replace niqqud-strip pipeline", async () => {
+    // Pin the structure: regexp_replace(... niqqud class ...) wrapped
+    // in unaccent(...) wrapped in websearch_to_tsquery(...). A
+    // regression that dropped any of the three layers would either
+    // miss Hebrew rows (no niqqud-strip) or Latin diacritics
+    // (no unaccent) — both class-of-bug repeats.
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin", { query: "x" });
+    expect(calls[0].sql).toMatch(/unaccent\s*\(\s*regexp_replace\s*\(/);
+  });
+
+  it("query clause niqqud class is byte-IDENTICAL to migration 0002 (Production-tokenization-mirror)", async () => {
+    // The SQL substring is read out of the captured SQL and compared
+    // against the canonical migration 0002 class. ANY drift (different
+    // ordering of the union members, swapped ranges, missing exclusion)
+    // surfaces here. This is the regression pin for the Hebrew
+    // compound-noun bug class — bytes are the only invariant.
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin", { query: "x" });
+    const match = calls[0].sql.match(/regexp_replace\(\$\d+,\s*'\[([^\]]+)\]'/);
+    expect(match).not.toBeNull();
+    // Canonical class bytes from drizzle/migrations/0002_unaccent_tsv_trigger.sql:43.
+    // Hex: d6912dd6bdd6bfd7812dd782d7842dd785d787 — non-contiguous,
+    // excludes maqaf U+05BE, paseq U+05C0, sof pasuq U+05C3, nun hafukha U+05C6.
+    const canonicalHex = "d6912dd6bdd6bfd7812dd782d7842dd785d787";
+    const observedHex = Buffer.from(match![1], "utf8").toString("hex");
+    expect(observedHex).toBe(canonicalHex);
+  });
+
+  it("query AND-composes with filters (cursor + all filters + query)", async () => {
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin", {
+      cursor: {
+        updatedAt: new Date("2026-01-01T00:00:00Z"),
+        id: "11111111-1111-4111-8111-111111111111",
+      },
+      filters: { category: "howto", tag: "voyage", sensitivity: "public" },
+      query: "invoice",
+    });
+    // $1 allow-list, $2 limit, $3+$4 cursor, $5 category, $6 tag, $7 sensitivity, $8 query.
+    expect(calls[0].sql).toMatch(
+      /\(updated_at,\s*id\)\s*<\s*\(\$3,\s*\$4\)[\s\S]*AND\s+category\s*=\s*\$5[\s\S]*AND\s+\$6\s*=\s*ANY\(tags\)[\s\S]*AND\s+sensitivity\s*=\s*\$7[\s\S]*AND\s+tsv\s*@@\s*websearch_to_tsquery\s*\(\s*'simple'\s*,\s*unaccent\s*\(\s*regexp_replace\s*\(\s*\$8/,
+    );
+    expect(calls[0].params[7]).toBe("invoice");
+    expect(calls[0].params).toHaveLength(8);
+  });
+
+  it("no query → SQL has no tsv clause (negative pin)", async () => {
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin");
+    expect(calls[0].sql).not.toMatch(/tsv\s*@@/);
+    expect(calls[0].sql).not.toMatch(/websearch_to_tsquery/);
   });
 });
