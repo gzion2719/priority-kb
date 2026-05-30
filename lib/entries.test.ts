@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Pool } from "pg";
 
-import { findEntryForRole, isUuid } from "@/lib/entries";
+import { findEntryForRole, isUuid, listEntriesForAdmin, type EntryListItem } from "@/lib/entries";
 
 // Mock-pool factory: returns a Pool-shaped object whose .query returns
 // `rows`. We assert on the captured (sql, params) tuple to prove the
@@ -169,5 +169,138 @@ describe("findEntryForRole — iron-rule #6 lives in SQL WHERE, not in JS", () =
     const result = await findEntryForRole(pool, VALID_UUID, "user");
     expect(result).not.toBeNull();
     expect(result?.sensitivity).toBe("restricted");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listEntriesForAdmin — unit tests (mocked Pool)
+//
+// Properties pinned here:
+//   - iron-rule-#6: allow-list ALWAYS lands in SQL params, even for admin
+//   - default + clamp behavior on `limit`
+//   - peek-ahead (LIMIT N+1) → nextCursor non-null when more rows exist
+//   - empty-result invariant
+//   - cursor params reach SQL in the documented positions
+//
+// The negative-assertion "page-1 ∪ page-2 covers everything, no overlap"
+// regression test runs in the DB-backed integration suite — it needs real
+// Postgres for the row-comparison to mean anything. The unit tests below
+// pin the wire shape, not the actual ordering.
+// ---------------------------------------------------------------------------
+
+function makeRow(over: Partial<EntryListItem> = {}): EntryListItem {
+  return {
+    id: VALID_UUID,
+    title: "row",
+    category: "cat",
+    tags: [],
+    sensitivity: "public",
+    last_verified_at: new Date("2026-01-01T00:00:00Z"),
+    updated_at: new Date("2026-01-01T00:00:00Z"),
+    ...over,
+  };
+}
+
+describe("listEntriesForAdmin — iron-rule #6 lives in SQL WHERE", () => {
+  it("admin allow-list (all three tiers) lands in SQL params, never JS post-filter", async () => {
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sql).toMatch(/sensitivity\s*=\s*ANY\s*\(\s*\$1/i);
+    expect(calls[0].params[0]).toEqual(["public", "internal", "restricted"]);
+  });
+
+  it("user allow-list (public + internal) lands in SQL params (defense-in-depth)", async () => {
+    // The /admin/entries page rejects non-admin before calling this fn,
+    // but the fn itself MUST degrade safely: a user-role call must NOT
+    // leak `restricted` rows. Pin that property here.
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "user");
+    expect(calls[0].params[0]).toEqual(["public", "internal"]);
+    expect(calls[0].params[0]).not.toContain("restricted");
+  });
+});
+
+describe("listEntriesForAdmin — limit + cursor wire shape", () => {
+  it("default limit is 25 (peek-ahead → LIMIT 26 in SQL)", async () => {
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin");
+    expect(calls[0].params[1]).toBe(26);
+  });
+
+  it("clamps limit to LIST_MAX_LIMIT (100) when caller asks for more", async () => {
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin", { limit: 1000 });
+    expect(calls[0].params[1]).toBe(101);
+  });
+
+  it("clamps limit floor to 1 when caller asks for 0 or negative", async () => {
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin", { limit: 0 });
+    expect(calls[0].params[1]).toBe(2);
+  });
+
+  it("floors fractional limit (Math.floor)", async () => {
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin", { limit: 25.9 });
+    expect(calls[0].params[1]).toBe(26);
+  });
+
+  it("first page: no cursor → no row-compare in SQL, 2 params", async () => {
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin");
+    expect(calls[0].sql).not.toMatch(/\(updated_at,\s*id\)\s*</);
+    expect(calls[0].params).toHaveLength(2);
+  });
+
+  it("next page: cursor lands in $3, $4 with row-compare in SQL", async () => {
+    const { pool, calls } = mockPool([]);
+    const cursorUpdatedAt = new Date("2025-12-31T12:00:00Z");
+    const cursorId = "99999999-9999-4999-8999-999999999999";
+    await listEntriesForAdmin(pool, "admin", {
+      cursor: { updatedAt: cursorUpdatedAt, id: cursorId },
+    });
+    expect(calls[0].sql).toMatch(/\(updated_at,\s*id\)\s*<\s*\(\$3,\s*\$4\)/);
+    expect(calls[0].params[2]).toBe(cursorUpdatedAt);
+    expect(calls[0].params[3]).toBe(cursorId);
+  });
+
+  it("ORDER BY is updated_at DESC, id DESC (deterministic tiebreak in SQL)", async () => {
+    const { pool, calls } = mockPool([]);
+    await listEntriesForAdmin(pool, "admin");
+    expect(calls[0].sql).toMatch(/ORDER\s+BY\s+updated_at\s+DESC\s*,\s*id\s+DESC/i);
+  });
+});
+
+describe("listEntriesForAdmin — peek-ahead → nextCursor", () => {
+  it("empty result → rows:[], nextCursor:null", async () => {
+    const { pool } = mockPool([]);
+    const result = await listEntriesForAdmin(pool, "admin");
+    expect(result).toEqual({ rows: [], nextCursor: null });
+  });
+
+  it("rows.length <= limit → nextCursor is null (no more pages)", async () => {
+    // 3 rows returned, limit 25 → no peek-ahead consumed, no next page.
+    const rows = [makeRow({ id: "11111111-1111-4111-8111-111111111111" })];
+    const { pool } = mockPool(rows);
+    const result = await listEntriesForAdmin(pool, "admin");
+    expect(result.rows).toHaveLength(1);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("rows.length === limit+1 → drops the peek row and emits it as nextCursor", async () => {
+    const limit = 2;
+    const at = (s: string) => new Date(`2026-01-${s}T00:00:00Z`);
+    const a = makeRow({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", updated_at: at("03") });
+    const b = makeRow({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", updated_at: at("02") });
+    const peek = makeRow({
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      updated_at: at("01"),
+    });
+    const { pool } = mockPool([a, b, peek]);
+    const result = await listEntriesForAdmin(pool, "admin", { limit });
+    expect(result.rows).toEqual([a, b]);
+    expect(result.rows).not.toContain(peek);
+    expect(result.nextCursor).toEqual({ updatedAt: peek.updated_at, id: peek.id });
   });
 });
