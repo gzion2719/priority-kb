@@ -146,6 +146,57 @@ describe("runCase", () => {
     expect(result.citation_precision).toBe(0.5); // a hits, hallucinated misses
   });
 
+  it("multi-anchor expected: Sonnet cites one sibling + one topically-adjacent → precision = 1/2 (regression floor for v0.4.0)", async () => {
+    // The v0.4.0 multi-anchor golden set accepts [own, sibling] as valid
+    // expected_source_ids. This test pins the citationPrecision math under
+    // the new contract for the "one sibling + one bystander" case observed
+    // in the v0.3.0 live run (e.g. en-005 cited [en-005, he-005, he-014]).
+    // With expected = [en-005-id, he-005-id], cited ∩ expected = {en-005-id,
+    // he-005-id} = 2; |cited| = 3 → precision = 2/3 ≈ 0.667. Documenting
+    // this math in a test prevents an accidental metric-shape change.
+    const readyCase: EvalCase = {
+      ...baseQueuedCase,
+      id: "en-005",
+      phase: "ready",
+      expected_source_ids: [UUID.a, UUID.b], // [own, sibling]
+    };
+    const adapter: RetrievalAdapter = {
+      retrieve: async () => ({
+        retrieved_ranked: [UUID.a, UUID.b, UUID.c],
+        cited_ids: [UUID.a, UUID.b, UUID.c], // own + sibling + bystander
+      }),
+    };
+    const result = await runCase(readyCase, 5, adapter);
+    expect(result.status).toBe("measured");
+    expect(result.recall_at_k).toBe(1.0); // both expected in top-5
+    expect(result.citation_precision).toBeCloseTo(2 / 3, 5); // 2 hits of 3 cited
+  });
+
+  it("multi-anchor expected: Sonnet cites only the cross-language sibling → precision = 1/1 (the v0.4.0 unlock)", async () => {
+    // The v0.3.0 run had 11 cases at precision=0.0 because Sonnet cited
+    // only the cross-language sibling (e.g. en-001 query cited he-001's
+    // UUID, not en-001's). With v0.4.0's multi-anchor expected = [own,
+    // sibling], cited = [sibling] yields 1/1 = 1.0. This is the metric-
+    // side half of the M3 acceptance unlock; the prompt-side tie-breaker
+    // is asserted in lib/prompts.test.ts.
+    const readyCase: EvalCase = {
+      ...baseQueuedCase,
+      id: "en-001",
+      phase: "ready",
+      expected_source_ids: [UUID.a, UUID.b], // [own=en-001, sibling=he-001]
+    };
+    const adapter: RetrievalAdapter = {
+      retrieve: async () => ({
+        retrieved_ranked: [UUID.b, UUID.a, UUID.c], // sibling ranks first
+        cited_ids: [UUID.b], // synth picks only the sibling
+      }),
+    };
+    const result = await runCase(readyCase, 5, adapter);
+    expect(result.status).toBe("measured");
+    expect(result.recall_at_k).toBe(1.0);
+    expect(result.citation_precision).toBe(1.0); // sibling alone is accepted
+  });
+
   it('returns status="shape_error" when adapter throws', async () => {
     const readyCase: EvalCase = {
       ...baseQueuedCase,

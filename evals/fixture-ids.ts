@@ -59,3 +59,74 @@ export const SEED_FIXTURE_IDS = {
   "en-014": "52925fc4-f6b2-4116-a7f2-e174c38149dd",
   "he-014": "343864cb-2238-4bba-830e-fa3ddb3418f0",
 } as const;
+
+/**
+ * Cross-language sibling map (case-id → sibling case-id, symmetric).
+ *
+ * Every ready case in the golden set was authored as one of a same-topic
+ * EN/HE pair: en-001 dup-customer-codes ↔ he-001 same topic in Hebrew, etc.
+ * Voyage's multilingual embeddings + rerank-2 legitimately surface BOTH
+ * siblings for a query in either language — measured empirically in the
+ * 2026-05-30 M3 acceptance run (ADR-0012 §W). The golden set therefore
+ * accepts EITHER sibling's seeded UUID as a valid citation expected_source_id,
+ * and `acceptedSeedIds()` is the single chokepoint that derives that set
+ * from a case id for the reconciliation test (the live citation_precision
+ * metric reads `expected_source_ids` from the YAML directly — `acceptedSeedIds`
+ * is NOT a metric helper; it exists to keep the YAML in sync with the pin
+ * map without duplicating the pair list in the test).
+ */
+export const CASE_SIBLINGS: Record<string, string> = {
+  "en-001": "he-001",
+  "he-001": "en-001",
+  "en-002": "he-002",
+  "he-002": "en-002",
+  "en-003": "he-003",
+  "he-003": "en-003",
+  "en-004": "he-004",
+  "he-004": "en-004",
+  "en-005": "he-005",
+  "he-005": "en-005",
+  "en-006": "he-006",
+  "he-006": "en-006",
+  "en-007": "he-007",
+  "he-007": "en-007",
+  "en-008": "he-008",
+  "he-008": "en-008",
+  "en-009": "he-009",
+  "he-009": "en-009",
+  "en-010": "he-010",
+  "he-010": "en-010",
+  "en-011": "he-011",
+  "he-011": "en-011",
+  "en-012": "he-012",
+  "he-012": "en-012",
+  "en-013": "he-013",
+  "he-013": "en-013",
+  "en-014": "he-014",
+  "he-014": "en-014",
+};
+
+/**
+ * Accepted seed UUIDs for a case: itself + its sibling (if paired), in
+ * **stable [own, sibling] order**. Order is load-bearing for the
+ * reconciliation test's `toEqual` assertion — never sort or shuffle.
+ * For an unpaired case (none today; reserved for future single-language
+ * cases) returns the singleton `[ownId]`.
+ */
+export function acceptedSeedIds(caseId: string): string[] {
+  const own = SEED_FIXTURE_IDS[caseId as keyof typeof SEED_FIXTURE_IDS];
+  if (!own) {
+    throw new Error(`acceptedSeedIds: unknown case id "${caseId}"`);
+  }
+  const siblingCaseId = CASE_SIBLINGS[caseId];
+  if (!siblingCaseId) {
+    return [own];
+  }
+  const sibling = SEED_FIXTURE_IDS[siblingCaseId as keyof typeof SEED_FIXTURE_IDS];
+  if (!sibling) {
+    throw new Error(
+      `acceptedSeedIds: sibling case id "${siblingCaseId}" (paired with "${caseId}") is not in SEED_FIXTURE_IDS`,
+    );
+  }
+  return [own, sibling];
+}
