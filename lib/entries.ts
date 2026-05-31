@@ -381,3 +381,238 @@ export async function listEntriesForAdmin(
     nextCursor: { updatedAt: lastOfPage.updated_at, id: lastOfPage.id },
   };
 }
+
+// ---------------------------------------------------------------------------
+// M4 #3 — version history (entries_versions reads)
+//
+// Read sibling to findEntryForRole + listEntriesForAdmin: powers the read-only
+// admin history viewer at /admin/entries/[id]/history. Both functions are
+// admin-only by CALL-SITE — the pages enforce role via resolveRoleFromHeader
+// + findEntryForRole before calling here. We deliberately skip a SQL role
+// filter at this layer because:
+//   (a) the metadata (version_no, created_at) is sensitivity-agnostic;
+//   (b) the full snapshot's sensitivity is part of the row, so a caller
+//       MUST pair this with findEntryForRole on the entry first (which
+//       enforces iron-rule #6 at the entry level — if the role can't see
+//       the current entry, the page does notFound() before calling here);
+//   (c) smearing a role filter into a metadata-only query would over-engineer
+//       the read.
+// ---------------------------------------------------------------------------
+
+export interface VersionListItem {
+  version_no: number;
+  created_at: Date;
+}
+
+/**
+ * Full snapshot of one `entries_versions` row. Note: source_pointer and
+ * last_verified_at are NOT included — the snapshot schema does not carry
+ * them (see `lib/ingest.ts:343-347`). Revert callers MUST pull those two
+ * fields from the current `entries` row, not from a snapshot.
+ */
+export interface VersionSnapshot {
+  version_no: number;
+  title: string;
+  category: string;
+  tags: string[];
+  body: string;
+  sensitivity: Sensitivity;
+  created_at: Date;
+}
+
+/**
+ * List all versions of an entry, ordered newest first. The list is small-
+ * bounded (one row per edit; typical entries have ≤10 versions) so no
+ * pagination cap is needed today. Add one when a single entry's history
+ * grows past ~100 versions in real usage.
+ */
+export async function listVersionsForEntry(
+  pool: Pool,
+  entryId: string,
+): Promise<VersionListItem[]> {
+  if (!isUuid(entryId)) return [];
+  const result = await pool.query<{ version_no: number; created_at: Date }>(
+    `SELECT version_no, created_at
+       FROM entries_versions
+      WHERE entry_id = $1
+      ORDER BY version_no DESC`,
+    [entryId],
+  );
+  return result.rows;
+}
+
+/**
+ * Fetch one version snapshot by (entryId, versionNo). Returns null when
+ * the version doesn't exist (unknown entry, unknown version_no, or
+ * malformed UUID). Same null-collapse discipline as findEntryForRole.
+ */
+export async function getVersion(
+  pool: Pool,
+  entryId: string,
+  versionNo: number,
+): Promise<VersionSnapshot | null> {
+  if (!isUuid(entryId)) return null;
+  if (!Number.isInteger(versionNo) || versionNo < 1) return null;
+  const result = await pool.query<{
+    version_no: number;
+    title: string;
+    category: string;
+    tags: string[];
+    body: string;
+    sensitivity: Sensitivity;
+    created_at: Date;
+  }>(
+    `SELECT version_no, title, category, tags, body, sensitivity, created_at
+       FROM entries_versions
+      WHERE entry_id = $1 AND version_no = $2
+      LIMIT 1`,
+    [entryId, versionNo],
+  );
+  if (result.rows.length === 0) return null;
+  return result.rows[0];
+}
+
+// ---------------------------------------------------------------------------
+// M4 #5 — stale-entries dashboard (read-only)
+//
+// `listStaleEntries` powers the admin dashboard at /admin/stale-entries.
+// Same iron-rule-#6 discipline as listEntriesForAdmin: the role-derived
+// allow-list lands in SQL WHERE at $1, never JS post-hoc-filter. Keyset
+// pagination on (last_verified_at ASC, id ASC) so oldest comes first.
+//
+// Scope is read-only. The ROADMAP item bundles three pieces (cron +
+// retrieval-frequency intersection + dashboard); cron and the retrieval-
+// frequency intersection are decision-heavy (M2b worker maturity, M5
+// hosting) and are filed in BACKLOG. The dashboard ships today.
+// ---------------------------------------------------------------------------
+
+/**
+ * Default threshold for "stale" — six months un-reverified. The ROADMAP
+ * M4 #5 line names "> 6 months ago"; 180 days is the rounded equivalent.
+ * Mirrors `LIST_DEFAULT_LIMIT`'s home in this module (a default for the
+ * helper's optional param). The page module re-references for UI labels.
+ */
+export const STALE_THRESHOLD_DAYS = 180;
+
+/**
+ * Keyset cursor for `listStaleEntries`. Distinct from `ListCursor` (above)
+ * because the orderings encode different ASC/DESC semantics:
+ *   - `ListCursor`       — (updated_at DESC, id DESC) for newest-first browsing
+ *   - `StaleListCursor`  — (last_verified_at ASC, id ASC) for oldest-first staleness
+ * Mixing one for the other would land at a stale-side cursor on the fresh-
+ * side helper or vice versa — the typed distinction makes that impossible
+ * at the type-checker level.
+ */
+export interface StaleListCursor {
+  lastVerifiedAt: Date;
+  id: string;
+}
+
+export interface ListStaleOptions {
+  /**
+   * Entries are "stale" when `last_verified_at < NOW() - INTERVAL`.
+   * Default = STALE_THRESHOLD_DAYS * 1 day, in milliseconds.
+   */
+  olderThanMs?: number;
+  limit?: number;
+  cursor?: StaleListCursor | null;
+}
+
+export interface ListStaleResult {
+  rows: EntryListItem[];
+  nextCursor: StaleListCursor | null;
+}
+
+/**
+ * List entries whose `last_verified_at` is older than `olderThanMs`,
+ * gated by the requester's sensitivity tier. Oldest first.
+ *
+ * Iron rule #6: the SQL WHERE always carries `sensitivity = ANY($::text[])`
+ * — even for admin (which resolves to all three tiers). Never post-hoc
+ * filter in JS. Mirrors `listEntriesForAdmin`'s bind-position convention
+ * ($1 allow-list, $2 limit+1 peek-ahead) and clamps limit identically.
+ *
+ * Postgres interval parameterization: the threshold lands as `$3::interval`
+ * with the param being a formatted string `"<days> days"`. The "<days>"
+ * value is derived from `olderThanMs` via `Math.max(1, Math.floor(ms /
+ * 86_400_000))` — defensive floor of 1 day so a malformed call can't
+ * surface the whole table as "stale".
+ *
+ * @param pool node-postgres Pool
+ * @param role admin or user (defense-in-depth — page rejects non-admin
+ *             before calling here)
+ * @param options.olderThanMs default = STALE_THRESHOLD_DAYS * 24h in ms
+ * @param options.limit       default 25, clamped to [1, 100]
+ * @param options.cursor      null/undefined for first page; otherwise the
+ *                            `nextCursor` returned from the previous call
+ *
+ * Cursor µs-vs-ms hazard (shared with `listEntriesForAdmin`): Postgres
+ * timestamptz is µs-precise; node-postgres truncates to ms on read. A
+ * cursor read at ms precision then re-sent compares strictly LESS than
+ * the original µs value, which on this ASC walk re-introduces the
+ * boundary row on the next page (a row's stored µs value > cursor's
+ * truncated ms value → row matches `> cursor` and re-enters page 2).
+ * Production write paths (`createEntry`, `updateEntry`) bind JS Date
+ * values (ms precision) for `last_verified_at`, so the hazard does NOT
+ * manifest on app-written rows. It WOULD manifest on rows written by
+ * raw SQL (NOW() arithmetic, fixup scripts, future migrations) — see
+ * BACKLOG entry "cursor µs/ms round-trip fix".
+ */
+export async function listStaleEntries(
+  pool: Pool,
+  role: Role,
+  options: ListStaleOptions = {},
+): Promise<ListStaleResult> {
+  const rawLimit = options.limit ?? LIST_DEFAULT_LIMIT;
+  const limit = Math.max(1, Math.min(LIST_MAX_LIMIT, Math.floor(rawLimit)));
+  const allowed: Sensitivity[] = sensitivityAllowedForRole(role);
+  const cursor = options.cursor ?? null;
+  const olderThanMs = options.olderThanMs ?? STALE_THRESHOLD_DAYS * 86_400_000;
+  // Defensive floor: a caller passing 0 or a negative number would
+  // otherwise turn the whole table into "stale" (every entry is older
+  // than `NOW() - 0 days`). Floor at 1 day.
+  const days = Math.max(1, Math.floor(olderThanMs / 86_400_000));
+  const intervalStr = `${days} days`;
+
+  // Bind-parameter contract (load-bearing — unit tests assert positions):
+  //   $1 = sensitivity allow-list (text[]) — iron rule #6
+  //   $2 = limit + 1               (peek-ahead)
+  //   $3 = interval string         (e.g. "180 days")
+  //   $4 = cursor.last_verified_at (optional)
+  //   $5 = cursor.id               (optional)
+  const params: unknown[] = [allowed, limit + 1, intervalStr];
+  let where =
+    "sensitivity = ANY($1::text[]) AND last_verified_at IS NOT NULL AND last_verified_at < NOW() - $3::interval";
+  if (cursor !== null) {
+    where += " AND (last_verified_at, id) > ($4, $5)";
+    params.push(cursor.lastVerifiedAt, cursor.id);
+  }
+
+  const result = await pool.query<{
+    id: string;
+    title: string;
+    category: string;
+    tags: string[];
+    sensitivity: Sensitivity;
+    last_verified_at: Date;
+    updated_at: Date;
+  }>(
+    `SELECT id, title, category, tags, sensitivity, last_verified_at, updated_at
+       FROM entries
+      WHERE ${where}
+      ORDER BY last_verified_at ASC, id ASC
+      LIMIT $2`,
+    params,
+  );
+
+  const rows = result.rows;
+  if (rows.length <= limit) {
+    return { rows, nextCursor: null };
+  }
+  const pageRows = rows.slice(0, limit);
+  const lastOfPage = pageRows[pageRows.length - 1];
+  return {
+    rows: pageRows,
+    nextCursor: { lastVerifiedAt: lastOfPage.last_verified_at, id: lastOfPage.id },
+  };
+}

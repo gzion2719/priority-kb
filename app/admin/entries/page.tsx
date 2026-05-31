@@ -149,6 +149,11 @@ export default async function AdminEntriesListPage({
         <p style={{ fontSize: "0.875rem", color: "var(--kramer-neutral)", margin: 0 }}>
           {composeListSummary(result.rows.length, hasActiveFilter, hasActiveQuery)}
         </p>
+        <nav style={{ fontSize: "0.8125rem" }}>
+          <Link href="/admin/stale-entries" data-testid="admin-entries-stale-link">
+            View stale entries →
+          </Link>
+        </nav>
         <SearchForm query={query} filters={filters} />
       </header>
 

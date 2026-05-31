@@ -19,6 +19,7 @@
 //   #10 direct-path PUT — `prompt_hash` never sent from client; route
 //       writes audit with kind:"ingest_update" + prompt_hash:null.
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -296,9 +297,9 @@ export function EditForm({ entryId, initial }: EditFormProps): React.ReactNode {
         >
           {submitting ? "Saving…" : "Save changes"}
         </button>
-        <a href="/admin/entries" style={secondaryLinkStyle}>
+        <Link href="/admin/entries" style={secondaryLinkStyle}>
           Cancel
-        </a>
+        </Link>
       </div>
     </form>
   );
