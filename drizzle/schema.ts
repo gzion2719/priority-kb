@@ -63,6 +63,12 @@ export const entries = pgTable(
     // M4 #1a — backs listEntriesForAdmin keyset pagination
     // (ORDER BY updated_at DESC, id DESC). See migration 0006.
     updatedAtIdIdx: index("entries_updated_at_id_idx").on(t.updated_at.desc(), t.id.desc()),
+    // M4 #5 — backs listStaleEntries keyset pagination
+    // (ORDER BY last_verified_at ASC, id ASC). See migration 0007.
+    lastVerifiedAtIdIdx: index("entries_last_verified_at_id_idx").on(
+      t.last_verified_at.asc(),
+      t.id.asc(),
+    ),
   }),
 );
 

@@ -8,7 +8,9 @@ import {
   findEntryForRole,
   getVersion,
   listEntriesForAdmin,
+  listStaleEntries,
   listVersionsForEntry,
+  STALE_THRESHOLD_DAYS,
 } from "@/lib/entries";
 import { createEntry, updateEntry } from "@/lib/ingest";
 import * as schema from "@/drizzle/schema";
@@ -750,5 +752,138 @@ describeIfDb("version history + revert flow — integration", () => {
     // contract is "first non-empty line of body, grapheme-safe clip".
     expect(currentAfter?.caption).toBe(deriveCaption(v1Body));
     expect(currentAfter?.caption).not.toBe(deriveCaption(v2Body));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listStaleEntries — M4 #5 integration against real Postgres
+//
+// Unit tests pin the SQL wire shape (parameterized interval, ORDER BY ASC,
+// allow-list at $1). Only the DB can prove the actual time-window WHERE
+// fires correctly + that the `(last_verified_at, id) > cursor` row-compare
+// pairs with the ASC sort to give no-overlap-no-gap pages.
+// ---------------------------------------------------------------------------
+describeIfDb("listStaleEntries — integration against Postgres", () => {
+  let pool: Pool;
+
+  beforeAll(() => {
+    pool = new Pool({ connectionString: databaseUrl });
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  afterEach(async () => {
+    await pool.query("TRUNCATE audit_log, chunks, entries_versions, entries CASCADE");
+  });
+
+  async function seedAge(opts: {
+    daysAgo: number;
+    sensitivity?: "public" | "internal" | "restricted";
+    title?: string;
+  }): Promise<string> {
+    const sensitivity = opts.sensitivity ?? "public";
+    const title = opts.title ?? `age-${opts.daysAgo}d`;
+    // Seed with explicit ms-precision ISO string rather than Postgres NOW()
+    // arithmetic. Why: Postgres timestamptz is µs-precision; node-postgres
+    // truncates to ms on read. A cursor read at ms precision then re-sent
+    // as a query param compares strictly less than the µs-precise stored
+    // value, re-introducing the boundary row on the next page — the
+    // pagination disjointness check fails. Seeding the row at ms precision
+    // up front makes the round-trip identity-preserving (same precision
+    // both ways). Same trick as `listEntriesForAdmin`'s pagination test.
+    const ts = new Date(Date.now() - opts.daysAgo * 86_400_000).toISOString();
+    const result = await pool.query<{ id: string }>(
+      `INSERT INTO entries (title, category, tags, body, source_pointer,
+                            last_verified_at, sensitivity)
+       VALUES ($1, 'cat', ARRAY['t'], 'body text', 'ticket://' || $1,
+               $2, $3)
+       RETURNING id`,
+      [title, ts, sensitivity],
+    );
+    return result.rows[0].id;
+  }
+
+  it("default 180-day threshold: only entries older than the threshold surface (negative-assertion via exact set)", async () => {
+    // Seed three entries at 30d / 90d / 200d. With default threshold
+    // (180 days), only the 200d entry is stale. A regression that
+    // dropped the time WHERE clause would surface all 3.
+    await seedAge({ daysAgo: 30, title: "fresh-30d" });
+    await seedAge({ daysAgo: 90, title: "fresh-90d" });
+    const oldId = await seedAge({ daysAgo: 200, title: "stale-200d" });
+
+    const result = await listStaleEntries(pool, "admin");
+    // Exact-set assertion: a regression returning 3 rows or the wrong
+    // pair would fail this distinguishingly.
+    expect(result.rows.map((r) => r.id)).toEqual([oldId]);
+    expect(result.rows.every((r) => r.title === "stale-200d")).toBe(true);
+  });
+
+  it("explicit olderThanMs threshold: 60-day window surfaces the 90d + 200d entries (oldest first)", async () => {
+    const id30 = await seedAge({ daysAgo: 30 });
+    const id90 = await seedAge({ daysAgo: 90 });
+    const id200 = await seedAge({ daysAgo: 200 });
+
+    const result = await listStaleEntries(pool, "admin", {
+      olderThanMs: 60 * 86_400_000,
+    });
+    // 200-day-old entry is the oldest → first; 90-day next; 30d excluded.
+    expect(result.rows.map((r) => r.id)).toEqual([id200, id90]);
+    expect(result.rows.map((r) => r.id)).not.toContain(id30);
+  });
+
+  it("iron-rule #6: user role excludes restricted-tier stale entries even when they exceed the threshold", async () => {
+    // A 200d-stale restricted entry must NOT surface for the user role.
+    const restrictedOld = await seedAge({ daysAgo: 200, sensitivity: "restricted" });
+    const publicOld = await seedAge({ daysAgo: 200, sensitivity: "public" });
+
+    const adminResult = await listStaleEntries(pool, "admin");
+    const userResult = await listStaleEntries(pool, "user");
+
+    expect(adminResult.rows.map((r) => r.id).sort()).toEqual([restrictedOld, publicOld].sort());
+    expect(userResult.rows.map((r) => r.id)).toEqual([publicOld]);
+    expect(userResult.rows.map((r) => r.id)).not.toContain(restrictedOld);
+  });
+
+  it("pagination disjointness + coverage: 3 stale rows paginated 2 + 1", async () => {
+    // Three rows all past the threshold, distinct last_verified_at,
+    // limit 2 → page 1 has the oldest 2, page 2 has the third.
+    const id200 = await seedAge({ daysAgo: 200, title: "stale-a" });
+    const id220 = await seedAge({ daysAgo: 220, title: "stale-b" });
+    const id240 = await seedAge({ daysAgo: 240, title: "stale-c" });
+
+    const page1 = await listStaleEntries(pool, "admin", { limit: 2 });
+    expect(page1.rows).toHaveLength(2);
+    expect(page1.nextCursor).not.toBeNull();
+
+    const page2 = await listStaleEntries(pool, "admin", {
+      limit: 2,
+      cursor: page1.nextCursor,
+    });
+    expect(page2.rows).toHaveLength(1);
+    expect(page2.nextCursor).toBeNull();
+
+    const ids1 = new Set(page1.rows.map((r) => r.id));
+    const ids2 = new Set(page2.rows.map((r) => r.id));
+
+    // Disjointness.
+    for (const id of ids2) expect(ids1.has(id)).toBe(false);
+    // Coverage (all 3 stale rows surface across the two pages).
+    expect(new Set([...ids1, ...ids2])).toEqual(new Set([id200, id220, id240]));
+    // Oldest first on page 1 (240d > 220d > 200d in age, so id240 first).
+    expect(page1.rows[0].id).toBe(id240);
+  });
+
+  it("empty corpus / no stale entries → rows:[], nextCursor:null", async () => {
+    await seedAge({ daysAgo: 10 }); // fresh — not stale
+    const result = await listStaleEntries(pool, "admin");
+    expect(result).toEqual({ rows: [], nextCursor: null });
+  });
+
+  it("STALE_THRESHOLD_DAYS constant matches the production default (180 days)", async () => {
+    // Sanity check: a future change to the constant would surface here
+    // and force the test author to acknowledge the change.
+    expect(STALE_THRESHOLD_DAYS).toBe(180);
   });
 });
