@@ -6,7 +6,9 @@ import {
   getVersion,
   isUuid,
   listEntriesForAdmin,
+  listStaleEntries,
   listVersionsForEntry,
+  STALE_THRESHOLD_DAYS,
   validateFilterString,
   validateSearchQuery,
   validateSensitivityFilter,
@@ -643,5 +645,158 @@ describe("getVersion — SQL contract", () => {
   it("empty result set → returns null (missing version)", async () => {
     const { pool } = mockPool([]);
     expect(await getVersion(pool, VALID_UUID, 999)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listStaleEntries — M4 #5 dashboard SQL contract
+// ---------------------------------------------------------------------------
+
+describe("listStaleEntries — iron-rule #6 lives in SQL WHERE", () => {
+  it("admin allow-list (all three tiers) lands at $1, never JS post-filter", async () => {
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "admin");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sql).toMatch(/sensitivity\s*=\s*ANY\s*\(\s*\$1::text\[\]\)/i);
+    expect(calls[0].params[0]).toEqual(["public", "internal", "restricted"]);
+  });
+
+  it("user allow-list (public + internal) — defense-in-depth", async () => {
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "user");
+    expect(calls[0].params[0]).toEqual(["public", "internal"]);
+    expect(calls[0].params[0]).not.toContain("restricted");
+  });
+});
+
+describe("listStaleEntries — interval parameterization at $3", () => {
+  it("default threshold lands as '180 days' interval string at $3", async () => {
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "admin");
+    // The interval is bound as a parameter (NOT interpolated) and cast
+    // via `$3::interval` — proves the SQL builder uses parameterization,
+    // not string interpolation (SQL injection regression pin).
+    expect(calls[0].sql).toMatch(/NOW\(\)\s*-\s*\$3::interval/i);
+    expect(calls[0].params[2]).toBe(`${STALE_THRESHOLD_DAYS} days`);
+  });
+
+  it("explicit olderThanMs → derived days string", async () => {
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "admin", { olderThanMs: 30 * 86_400_000 });
+    expect(calls[0].params[2]).toBe("30 days");
+  });
+
+  it("defensive floor: olderThanMs = 0 → '1 days' (cannot accidentally surface whole table)", async () => {
+    // Negative-assertion: a regression that removed the floor would
+    // produce '0 days' interval, and `NOW() - INTERVAL '0 days'` =
+    // NOW() — every entry with last_verified_at < NOW() would match,
+    // turning the whole table into "stale". This pins the strict floor.
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "admin", { olderThanMs: 0 });
+    expect(calls[0].params[2]).toBe("1 days");
+  });
+
+  it("defensive floor: negative olderThanMs → '1 days'", async () => {
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "admin", { olderThanMs: -1000 });
+    expect(calls[0].params[2]).toBe("1 days");
+  });
+});
+
+describe("listStaleEntries — WHERE + ORDER BY shape", () => {
+  it("WHERE includes 'last_verified_at IS NOT NULL' (defensive even though schema is NOT NULL)", async () => {
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "admin");
+    expect(calls[0].sql).toMatch(/last_verified_at\s+IS\s+NOT\s+NULL/i);
+  });
+
+  it("ORDER BY last_verified_at ASC, id ASC (oldest first — regression pin against direction drift)", async () => {
+    // Negative-assertion: a regression that emitted DESC (matching
+    // listEntriesForAdmin's newest-first sort) would surface newest
+    // entries on the stale dashboard. Pin the ASC contract.
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "admin");
+    expect(calls[0].sql).toMatch(/ORDER\s+BY\s+last_verified_at\s+ASC\s*,\s*id\s+ASC/i);
+    expect(calls[0].sql).not.toMatch(/ORDER\s+BY\s+last_verified_at\s+DESC/i);
+  });
+
+  it("no cursor → no row-compare clause, 3 params (allow-list + limit + interval)", async () => {
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "admin");
+    expect(calls[0].sql).not.toMatch(/\(last_verified_at,\s*id\)\s*>/);
+    expect(calls[0].params).toHaveLength(3);
+  });
+
+  it("cursor → row-compare lands at $4, $5 with strictly-greater compare", async () => {
+    // The strictly-greater compare is symmetric to listEntriesForAdmin's
+    // strictly-less compare: peek row becomes next page's first row.
+    const { pool, calls } = mockPool([]);
+    const cursorLva = new Date("2024-01-01T00:00:00Z");
+    const cursorId = "99999999-9999-4999-8999-999999999999";
+    await listStaleEntries(pool, "admin", {
+      cursor: { lastVerifiedAt: cursorLva, id: cursorId },
+    });
+    expect(calls[0].sql).toMatch(/\(last_verified_at,\s*id\)\s*>\s*\(\$4,\s*\$5\)/);
+    expect(calls[0].params[3]).toBe(cursorLva);
+    expect(calls[0].params[4]).toBe(cursorId);
+  });
+});
+
+describe("listStaleEntries — limit + peek-ahead nextCursor shape", () => {
+  function makeStaleRow(over: Partial<EntryListItem> = {}): EntryListItem {
+    return {
+      id: VALID_UUID,
+      title: "row",
+      category: "cat",
+      tags: [],
+      sensitivity: "public",
+      last_verified_at: new Date("2024-01-01T00:00:00Z"),
+      updated_at: new Date("2024-01-01T00:00:00Z"),
+      ...over,
+    };
+  }
+
+  it("default limit 25 → peek-ahead LIMIT 26 at $2", async () => {
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "admin");
+    expect(calls[0].params[1]).toBe(26);
+  });
+
+  it("clamps limit to LIST_MAX_LIMIT (100)", async () => {
+    const { pool, calls } = mockPool([]);
+    await listStaleEntries(pool, "admin", { limit: 1000 });
+    expect(calls[0].params[1]).toBe(101);
+  });
+
+  it("rows.length <= limit → nextCursor null", async () => {
+    const rows = [makeStaleRow({ id: "11111111-1111-4111-8111-111111111111" })];
+    const { pool } = mockPool(rows);
+    const result = await listStaleEntries(pool, "admin");
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("rows.length === limit+1 → drops peek; cursor is LAST-of-page (not peek)", async () => {
+    // Strictly-greater compare on next-page query plus last-of-page
+    // cursor means the peek row becomes page 2's first row.
+    const limit = 2;
+    const at = (s: string) => new Date(`2024-01-${s}T00:00:00Z`);
+    const a = makeStaleRow({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      last_verified_at: at("01"),
+    });
+    const b = makeStaleRow({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      last_verified_at: at("02"),
+    });
+    const peek = makeStaleRow({
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      last_verified_at: at("03"),
+    });
+    const { pool } = mockPool([a, b, peek]);
+    const result = await listStaleEntries(pool, "admin", { limit });
+    expect(result.rows).toEqual([a, b]);
+    expect(result.rows).not.toContain(peek);
+    expect(result.nextCursor).toEqual({ lastVerifiedAt: b.last_verified_at, id: b.id });
+    expect(result.nextCursor).not.toEqual({ lastVerifiedAt: peek.last_verified_at, id: peek.id });
   });
 });

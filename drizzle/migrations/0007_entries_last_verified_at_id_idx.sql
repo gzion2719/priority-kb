@@ -1,0 +1,25 @@
+-- M4 #5 — keyset-pagination index for the admin stale-entries dashboard.
+--
+-- Backs the SELECT in lib/entries.ts `listStaleEntries`:
+--   WHERE sensitivity = ANY($1::text[])
+--     AND last_verified_at IS NOT NULL
+--     AND last_verified_at < NOW() - $N::interval
+--     AND (last_verified_at, id) > ($cursor_lva, $cursor_id)  -- when cursor
+--   ORDER BY last_verified_at ASC, id ASC
+--
+-- The cursor row-comparison `(last_verified_at, id) > (...)` is lexicographic
+-- in natural (ASC) order, which gives the correct "next page after cursor"
+-- half-plane for an ORDER BY ASC, ASC sort. A btree declared as
+-- (last_verified_at ASC, id ASC) (= the default) aligns the physical scan
+-- direction with the ORDER BY so the planner uses an index-only walk
+-- instead of sort-after-scan.
+--
+-- Mirror precedent: migration 0006 ships a (DESC, DESC) btree for the
+-- newest-first admin browser; this is its ASC-sibling for the oldest-first
+-- staleness page.
+--
+-- Schema is Drizzle-owned per ADR-0008; this migration is hand-authored
+-- (matching the 0001/0002/0003/0004/0005/0006 convention) and is mirrored
+-- in drizzle/schema.ts `entries.lastVerifiedAtIdIdx`.
+CREATE INDEX IF NOT EXISTS "entries_last_verified_at_id_idx"
+	ON "entries" ("last_verified_at" ASC, "id" ASC);
