@@ -211,3 +211,165 @@ The following are explicitly NOT decided here. Each follows the Deferred-decisio
   - **#12 (degraded mode):** D2's asymmetric-lane window is the explicit cost — keyword lane stays fresh, embedding lane drifts during a Voyage outage. The 24-hour queue-depth alert is the operator escalation path; no automatic cancellation.
 - **Plan-CR coverage (Step 7b on this ADR's plan):** all 3 BLOCKING + 8 MAJOR + 6 MINOR + 6 QUESTIONS from the unbiased plan review are folded into D1-D14. The Amplified rule fires for the implementation PRs — each PR-A/-B/-C will run its own Step 7b on the implemented code.
 - **Reversibility:** every decision in D1-D14 is reversible at the cost of a follow-up ADR. The D7 implementation split is the riskiest reversibility commitment — once PR-A ships the rename/delete primitive, changing D1 from "loop N updateEntry" to "bulk SQL" is a partial rewrite of an already-deployed code path.
+
+---
+
+## Amendment 2026-05-31 — PR-A reconciliation: sync `updateEntry`, async deferred
+
+The PR-A implementation session surfaced a D1↔D2 contradiction that was not caught during the original ADR's Step 7b passes. This amendment resolves it ahead of PR-A code, plus folds the PR-A plan-CR's 3 BLOCKING + 6 MAJOR + 5 MINOR + 6 QUESTIONS findings into the design text so the implementation has a single authoritative source.
+
+### A1 — The D1/D2 contradiction
+
+**D1 said:** "Each affected entry gets a real `entries_versions` row, a **real chunk replacement**, a real audit row." (Implies the sync loop calls full `updateEntry`, which DELETEs + INSERTs chunks with fresh embeddings.)
+
+**D2 said:** "the lock, the new `entries_versions` row, and the tsv recompute all happen before the HTTP response. The **chunk re-embed is decoupled**: the loop enqueues one `re_embed_entry` job per affected entry, and a Python worker handler POSTs back to Node `PUT /api/ingest/[id]` ... triggering the standard re-chunk + re-embed inside `updateEntry`."
+
+These are contradictory. If both fire, every affected entry gets TWO `entries_versions` rows per rename — one from the sync loop, one from the worker's PUT. If only the sync loop fires, D2's async story is dead. If only the worker fires, D1's "real chunk replacement happens in the loop" is wrong.
+
+### A2 — Resolution: sync full `updateEntry`, async deferred
+
+**Decision: the sync loop calls full `updateEntry` per affected entry inline (lock + entries_versions + chunk DELETE+INSERT + re-embed + audit). The `re_embed_entry` worker handler is dropped from PR-A scope. D2's async posture moves to BACKLOG, gated on real corpus scale where a single rename exceeds the synchronous-loop tolerance (target: ~50 entries per rename at current Voyage latency budgets).**
+
+This is the simplest reconciliation. It accepts N synchronous Voyage embedding calls per rename — at M4 scale (tens of affected entries per typical rename, target latency budget ~30s p95), the cost is bounded and observable as request latency. The asymmetric-lane window that D2's async design accepted no longer exists; keyword lane and embedding lane stay synchronously consistent.
+
+**Sub-decisions that fall out of A2:**
+
+- **D1 prose stays as written.** "Real chunk replacement, real entries_versions row, real audit row" — all happen synchronously inside the per-entry `updateEntry` call.
+- **D2 is retired in its current form.** Its "async via M2b job queue" sentence, its idempotency-key shape, its degraded-mode TTL, its tx-posture invariant — all moot under A2. The `re_embed_entry` queue is never enqueued.
+- **D3 (merge) keeps the outer-tx posture** but the inner work is N synchronous `updateEntry` calls (each self-transacted, nested as SAVEPOINTs under the merge's outer tx). The cross-entry atomicity guarantee that D3 names is preserved.
+- **D4 payload shape changes (A3 below).**
+- **D7 PR-A scope shrinks** — drops `re_embed_entry` worker handler; PR-B is unchanged (still merge + lock-ordering + dashboard "Active operations" section, now empty since no jobs are enqueued — the section retires); PR-C is unchanged.
+- **Iron-rule #12 footprint changes.** The "asymmetric-lane window" / "24-hour queue-depth alert" framing in the Consequences section is retired. The new degraded-mode footprint: a Voyage outage during a rename causes the per-entry `updateEntry` call to throw mid-loop; the rename returns a partial-failure response. The retry-loop tolerance comes from D13's "observable retry, no data drift" — admin retries the same rename, the affected-set query re-finds entries not yet renamed, the second loop completes them. M4-scale ranges (tens of entries) make this acceptable; M5 production scale revisits.
+
+### A3 — D4 payload shape — final form
+
+The plan-CR's BLOCKING B2 caught that the original D4 payload shape (`re_embed_job_ids: string[]`) drifts under A2 (no jobs are enqueued). The replacement shape, locked here, is:
+
+```ts
+// audit_log payload for kind = "tag_rename"
+type TagRenameAuditPayload = {
+  from: string;
+  to: string;
+  affected_entry_ids: string[];      // first N capped at 1000 per the existing D4 cap rule
+  affected_entry_count: number;       // unbounded — the true count, even when ids is capped
+  truncated_count?: number;           // present iff affected_entry_count > 1000 (cap fired)
+  partial_failure?: true;             // present iff the loop threw mid-execution
+  partial_failure_reason?: string;    // present iff partial_failure; redacted error class
+};
+
+// audit_log payload for kind = "tag_delete"
+type TagDeleteAuditPayload = {
+  tag: string;
+  affected_entry_ids: string[];
+  affected_entry_count: number;
+  truncated_count?: number;
+  partial_failure?: true;
+  partial_failure_reason?: string;
+};
+
+// audit_log payload for kind = "tag_management_view"
+type TagManagementViewAuditPayload = {
+  tag_count: number;                  // 0 on the unauthorized branch (mirrors stale_entries_view shape)
+  outcome: "served" | "unauthorized";
+  role: "admin" | "user" | null;      // M4 #5 parity — stale_entries_view carries the same field; null on unauthorized
+};
+```
+
+**`re_embed_job_ids` is dropped.** Under A2 there are no jobs.
+
+**`affected_entry_ids` stays as an array, capped at 1000 per the existing D4 cap rule.** The cap is unchanged.
+
+**Cross-link to per-entry `ingest_update` rows** (plan-CR Q5 — the operator querying "what changed when?" sees N `ingest_update` + 1 `tag_rename` row per rename): the per-entry `updateEntry` calls inside `renameTag`/`deleteTag` thread `audit_extra: { triggered_by_audit_id: <tag_rename_or_tag_delete_row_id> }` through the existing `audit_extra` channel ([lib/ingest.ts](../../lib/ingest.ts) `updateEntry`). The `tag_rename` row is written FIRST (with empty `affected_entry_ids: []`), its `id` captured, then the per-entry loop runs, then the `tag_rename` row is UPDATEd at the end with the final `affected_entry_ids` array. This is the ONE place this ADR endorses an `UPDATE audit_log` write — `audit_log` is otherwise append-only.
+
+The "write first, update at end" shape (alternative was "write at end only" or "write at start with empty array, never update") is chosen because:
+- Capturing the `id` for `triggered_by_audit_id` threading requires the row to exist before the per-entry loop runs.
+- A loop that throws mid-execution would otherwise lose the audit row entirely; the start-write guarantees the operation is observable even on partial failure.
+- The final UPDATE is bounded (one row per operation) and `audit_log` does not currently have a `BEFORE UPDATE` trigger that would block it.
+
+### A4 — Validation policy + audit-row distinction (plan-CR BLOCKING B3)
+
+The plan-CR caught that the route's "Returns 400 on validation failure" rule conflicts with D13's "observable retry, no data drift" mandate. This amendment distinguishes the three cases:
+
+1. **Zod malformed request body** (caller sent invalid JSON, wrong field types, missing fields) → **HTTP 400, no audit row.** This is a request-shape error, not a semantic operation. The caller has not requested anything meaningful to audit.
+
+2. **D9 tag-validation failure at the lib boundary** (`to` contains niqqud, exceeds 64 chars, includes `,;`, is empty after NFC normalization) → **HTTP 400, no audit row.** The operation was invalid; the request never reached the data layer.
+
+3. **No-op rename / `to===from` / `from` absent from catalog / `tag` absent from catalog** → **HTTP 200, audit row written with empty `affected_entry_ids: []` + `affected_entry_count: 0`.** This is D13's "observable retry, no data drift" case — the operation ran, the loop iterated zero entries, the audit row attests to the fact.
+
+The distinction is "did the operation execute?" (write the audit row) vs "was the request shaped correctly?" (no audit row on shape failure). D13's framing in the original ADR is sharpened by this amendment.
+
+### A5 — `from` validation: catalog pre-fill mechanical floor (plan-CR M1)
+
+The original D9 said tag validation rules apply to all writes; the plan-CR's Q3 surfaced that strict D9 validation on `from` would block legitimate cleanup renames of pre-D9 tags (the catalog may contain Hebrew-niqqud-bearing tags written before D9 was enforced).
+
+**Decision: `from` is NOT validated against D9; it accepts any non-empty string ≤64 chars. `to` is validated against D9 in full.** The mechanical floor that closes the manual-typing-typo failure mode: **the rename form on `/admin/tags` MUST pre-fill `from` from a catalog-row click — there is no free-text `from` input.** The catalog row's tag value is the exact byte sequence stored in `entries.tags`, so the pre-filled `from` matches the entry's tag bytes exactly. An admin who types `from` manually is using a bypass path (raw HTTP via curl); for the form-driven path the pre-fill closes the surface.
+
+The catalog row-click pre-fill is implemented by passing the clicked tag's value through a form field that is read-only at the route boundary (server validates that `from` was not edited by checking it against the catalog before running `renameTag`). Implementation detail: hidden input + double-submit check, or session-bound CSRF-style token. PR-A picks the simpler "hidden input + server-side catalog membership check" — implementation lands in `app/admin/tags/RenameForm.tsx`.
+
+### A6 — Lock-ordering for concurrent rename (plan-CR M5)
+
+The plan-CR caught that D3 (merge) explicitly addresses lock-ordering for cross-row atomicity, but D1 (rename) does not address concurrent-rename-on-overlapping-tag-sets.
+
+**Decision: PR-A accepts deadlock-as-retry. Concurrent `rename foo→bar` + `rename foo→baz` may interleave (or one may deadlock and Postgres-rollback); the route returns 500/503 on deadlock and the caller retries.** The mitigation cost (lock-ordering by entry id across renames, advisory lock per `from`-tag) is disproportionate at M4 admin scale where two simultaneous tag-management operations from different admins is rare. M5 hosting revisits if real concurrency surfaces. This is an explicit deferred decision per the Deferred-decision-audit sub-rule.
+
+### A7 — Q1-Q5 from the plan-CR — answers
+
+- **Q1 (`to===from`):** HTTP 200, audit row with empty `affected_entry_ids`. The route does NOT short-circuit before calling `renameTag` — the lib function is the no-op-detection boundary.
+- **Q2 (`tag` not in catalog for delete):** HTTP 200, audit row with empty `affected_entry_ids`.
+- **Q3 (`affected_entry_ids` shape):** stays as an array per A3 above. The cap is 1000 (unchanged).
+- **Q4 (concurrent rename pair, contradictory audit rows):** each rename's audit row reflects what THAT call actually changed. If admin1's `rename foo→bar` updates entries 1-50 and admin2's `rename foo→baz` updates entries 51-100 (Postgres-serialized via the per-row FOR UPDATE), each audit row carries its actual affected entries. The audit pair is honest about the interleaving — not contradictory.
+- **Q5 (cross-link `tag_rename` ↔ per-entry `ingest_update`):** threaded via `audit_extra.triggered_by_audit_id` per A3 above.
+
+### A8 — `renameTag` / `deleteTag` no-throw contract (plan-CR M4)
+
+The original plan implied `renameTag` could throw mid-loop on Voyage 5xx, leaving the route's `try/finally` audit-write with an undefined affected count.
+
+**Decision: `renameTag` and `deleteTag` are no-throw at the operation level.** They always return:
+
+```ts
+type TagOperationResult = {
+  affected_entry_ids: string[];       // entries actually updated this call
+  partial_failure: boolean;            // true iff some entries failed mid-loop
+  partial_failure_reason?: string;     // present iff partial_failure
+};
+```
+
+Internal `updateEntry` throws are caught per-iteration; the loop continues to the next entry on transient failures (Voyage 5xx, lock-wait timeout). Permanent failures (DB connection lost) short-circuit the loop and return whatever was completed before the catastrophic error. The route writes the `tag_rename`/`tag_delete` audit row from the returned object unconditionally.
+
+The exception: if the operation has not yet written the start-of-loop `tag_rename` audit row (i.e., `renameTag` throws BEFORE the audit row write), the route's `try/finally` writes a fallback `tag_rename` row with `partial_failure: true` + `partial_failure_reason: "<error class>"` + `affected_entry_ids: []`. This is the only "no audit row at all" escape, and it is a real catastrophe (DB unreachable before the first INSERT) — observability falls back to the application's stderr log.
+
+### A9 — Tx posture for `lib/tags.ts` (plan-CR M3)
+
+The original D2 §"Tx posture for the enqueue" mandated `enqueueJob` lives inside the same tx as the `updateEntry` write. Under A2 there is no enqueue.
+
+**Decision: `lib/tags.ts::renameTag` and `deleteTag` call `updateEntry` directly per affected entry, with NO outer-tx wrapper.** `updateEntry` self-transacts; wrapping it in `db.transaction(...)` from the caller would just open a SAVEPOINT around the existing tx, adding no atomicity guarantee. The per-entry `updateEntry` calls are N independent tx; that is the correct shape for rename per D1 (which does NOT require cross-entry atomicity).
+
+Merge (PR-B) is different — its outer-tx wrapper is load-bearing per D3 and stays.
+
+### A10 — Plan-CR coverage summary
+
+- **B1 (bundling protocol)** — Disagree+why. SESSION_PROTOCOL.md §"ADR Discipline" §ADR-prose-vs-code-reconciliation sub-rule (2026-05-27) explicitly presupposes amendment + impl shipping in one PR with a grep floor at code-CR time. ADR-0022 PR #324 is the cited precedent. The reviewer's protocol claim was incorrect; the bundle is the codified pattern.
+- **B2 (D4 payload reshape)** — Folded into A3 above.
+- **B3 (validation-vs-no-op-rename audit distinction)** — Folded into A4 above.
+- **M1 (from-validation surface)** — Folded into A5 above.
+- **M2 (admin-tags SQL subquery alias + bigint cast)** — Implementation detail; folded into `lib/admin-tags.ts` write.
+- **M3 (redundant outer-tx wrapper)** — Folded into A9 above.
+- **M4 (try/finally audit shape)** — Folded into A8 above.
+- **M5 (lock-ordering for concurrent rename)** — Folded into A6 above.
+- **M6 (tag_management_view payload on unauth branch)** — Folded into A3's `TagManagementViewAuditPayload` shape (outcome field + `tag_count: 0` on unauth).
+- **MINORs (m1-m5)** — Folded into A3 or noted in implementation.
+- **QUESTIONS (Q1-Q5)** — Answered in A7 above.
+
+### A11 — Implementation-PR scope under A2 (PR-A revised)
+
+PR-A bundles:
+- This amendment (A1-A11).
+- `lib/tags.ts` — `renameTag` + `deleteTag` per A8/A9.
+- `lib/admin-tags.ts` — `listAdminTagsForRole` for the dashboard catalog read.
+- `app/api/admin/tags/rename/route.ts` + `app/api/admin/tags/delete/route.ts` — withAdmin + Zod + lib call + audit write per A3/A4.
+- `app/admin/tags/page.tsx` + `RenameForm.tsx` + `DeleteForm.tsx` — dashboard with catalog-pre-fill mechanical floor per A5.
+- 3 new `audit_log.kind` values: `tag_rename`, `tag_delete`, `tag_management_view` (no migration needed; CHECK constraint unaffected).
+- Test surface: lib unit + DB-integration + route + page (precedent: M4 #5 admin-stale-entries surface).
+- One-line ROADMAP M4 #4 update noting PR-A landed; box stays `[ ]` until PR-C.
+
+PR-B / PR-C unchanged from the original D7 split, except the D6 dashboard's "Active operations" section is retired under A2 (no jobs).

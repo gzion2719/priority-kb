@@ -2,6 +2,13 @@
 # Eliminates the CRLF/LF warning storm when committing from Windows.
 * text=auto eol=lf
 
+# lib/tags.ts contains one literal NUL byte inside a regex character class
+# (CONTROL_CHAR_RE matches ASCII control chars U+0000-U+001F per ADR-0025 D9).
+# Force text treatment so git diff stays line-by-line for PR review.
+# BACKLOG: rewrite the regex with explicit \u escapes once a hook-friendly
+# pattern is found that prettier doesn't re-normalize to the literal form.
+lib/tags.ts text
+
 # Binary files — never touch.
 *.png binary
 *.jpg binary

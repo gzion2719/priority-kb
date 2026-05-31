@@ -358,10 +358,14 @@ export async function updateEntry(args: {
    * [ADR-0021 §D3](../docs/adr/0021-worker-http-callback-architecture.md):
    * the M2b #5 worker passes its `worker_id` (and the originating
    * `job_id`) so a post-mortem can tell a worker-issued PUT apart from
-   * a human-admin PUT. Human-admin PUTs omit this argument; the
-   * `audit_log.payload` shape is otherwise unchanged.
+   * a human-admin PUT. Per [ADR-0025 Amendment A3](../docs/adr/0025-tag-management.md):
+   * the M4 #4 tag operations pass `triggered_by_audit_id` so each
+   * per-entry `ingest_update` row carries a pointer back to the
+   * operation-level `tag_rename`/`tag_delete` audit row. Human-admin
+   * PUTs omit all three; the `audit_log.payload` shape is otherwise
+   * unchanged.
    */
-  audit_extra?: { worker_id?: string; job_id?: string };
+  audit_extra?: { worker_id?: string; job_id?: string; triggered_by_audit_id?: string };
 }): Promise<IngestResult> {
   const { db, embedder, id, input, source, audit_extra } = args;
   const audit = auditShapeFor(source, "ingest_update");
@@ -454,6 +458,9 @@ export async function updateEntry(args: {
     }
     if (audit_extra?.job_id !== undefined) {
       auditPayload.job_id = audit_extra.job_id;
+    }
+    if (audit_extra?.triggered_by_audit_id !== undefined) {
+      auditPayload.triggered_by_audit_id = audit_extra.triggered_by_audit_id;
     }
     await tx.insert(schema.audit_log).values({
       kind: audit.kind,
