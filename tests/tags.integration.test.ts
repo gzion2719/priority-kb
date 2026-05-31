@@ -37,6 +37,18 @@ describe.skipIf(!DATABASE_URL)("tags integration (PR-A)", () => {
   beforeEach(async () => {
     // Tear down rows this suite seeds. The synthetic-fixture seed (M2a #8)
     // uses a stable source_pointer prefix that we're careful not to touch.
+    //
+    // Order matters: audit_log.entry_id has a FK to entries.id. The
+    // ingest_update / ingest rows written by updateEntry carry entry_id
+    // pointing to our test entries — those rows must be deleted BEFORE the
+    // entries DELETE or the FK constraint blocks it. PR #394 CI caught the
+    // earlier teardown only deleting operation-level kind LIKE 'tag\\_%'
+    // rows + missing the per-entry ingest_update rows.
+    await pool.query(
+      `DELETE FROM audit_log WHERE entry_id IN (SELECT id FROM entries WHERE source_pointer LIKE 'tagtest-%')`,
+    );
+    // Also clean operation-level tag_* rows (no entry_id; not covered by the
+    // FK-targeted DELETE above). Belt-and-suspenders for a fresh fixture.
     await pool.query(`DELETE FROM audit_log WHERE kind LIKE 'tag\\_%' ESCAPE '\\'`);
     await pool.query(
       `DELETE FROM chunks WHERE entry_id IN (SELECT id FROM entries WHERE source_pointer LIKE 'tagtest-%')`,
