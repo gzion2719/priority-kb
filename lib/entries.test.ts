@@ -3,8 +3,10 @@ import type { Pool } from "pg";
 
 import {
   findEntryForRole,
+  getVersion,
   isUuid,
   listEntriesForAdmin,
+  listVersionsForEntry,
   validateFilterString,
   validateSearchQuery,
   validateSensitivityFilter,
@@ -567,5 +569,79 @@ describe("listEntriesForAdmin — query clause SQL composition", () => {
     await listEntriesForAdmin(pool, "admin");
     expect(calls[0].sql).not.toMatch(/tsv\s*@@/);
     expect(calls[0].sql).not.toMatch(/websearch_to_tsquery/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listVersionsForEntry / getVersion — M4 #3 version history reads
+// ---------------------------------------------------------------------------
+
+describe("listVersionsForEntry — SQL contract", () => {
+  it("malformed entry id → returns empty array without hitting SQL", async () => {
+    const { pool, calls } = mockPool([]);
+    const result = await listVersionsForEntry(pool, "not-a-uuid");
+    expect(result).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("valid entry id → single SELECT against entries_versions", async () => {
+    const { pool, calls } = mockPool([]);
+    await listVersionsForEntry(pool, VALID_UUID);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sql).toMatch(/FROM\s+entries_versions/i);
+    expect(calls[0].params).toEqual([VALID_UUID]);
+  });
+
+  it("ORDER BY version_no DESC (newest first) — regression pin against order drift", async () => {
+    // Negative-assertion: a regression that emitted ASC would surface
+    // here. The history page renders newest first; the page reads
+    // currentVersionNo from rows[0].
+    const { pool, calls } = mockPool([]);
+    await listVersionsForEntry(pool, VALID_UUID);
+    expect(calls[0].sql).toMatch(/ORDER\s+BY\s+version_no\s+DESC/i);
+    expect(calls[0].sql).not.toMatch(/ORDER\s+BY\s+version_no\s+ASC/i);
+  });
+});
+
+describe("getVersion — SQL contract", () => {
+  it("malformed entry id → returns null without hitting SQL", async () => {
+    const { pool, calls } = mockPool([]);
+    const result = await getVersion(pool, "not-a-uuid", 1);
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("non-integer versionNo → returns null without hitting SQL", async () => {
+    const { pool, calls } = mockPool([]);
+    expect(await getVersion(pool, VALID_UUID, 1.5)).toBeNull();
+    expect(await getVersion(pool, VALID_UUID, Number.NaN)).toBeNull();
+    expect(await getVersion(pool, VALID_UUID, -1)).toBeNull();
+    expect(await getVersion(pool, VALID_UUID, 0)).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("valid (entryId, versionNo) → SELECT against entries_versions, LIMIT 1", async () => {
+    const { pool, calls } = mockPool([
+      {
+        version_no: 3,
+        title: "t",
+        category: "c",
+        tags: [],
+        body: "b",
+        sensitivity: "public",
+        created_at: new Date(),
+      },
+    ]);
+    const result = await getVersion(pool, VALID_UUID, 3);
+    expect(result?.version_no).toBe(3);
+    expect(calls[0].sql).toMatch(/FROM\s+entries_versions/i);
+    expect(calls[0].sql).toMatch(/WHERE\s+entry_id\s*=\s*\$1\s+AND\s+version_no\s*=\s*\$2/i);
+    expect(calls[0].sql).toMatch(/LIMIT\s+1/i);
+    expect(calls[0].params).toEqual([VALID_UUID, 3]);
+  });
+
+  it("empty result set → returns null (missing version)", async () => {
+    const { pool } = mockPool([]);
+    expect(await getVersion(pool, VALID_UUID, 999)).toBeNull();
   });
 });
