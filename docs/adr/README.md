@@ -44,3 +44,4 @@ The Context section describes the world the ADR addresses (what the spec require
 | 0022 | [OCR adapter: Azure Document Intelligence + stub-by-default factory (M2b #6)](0022-ocr-adapter.md) | Accepted |
 | 0023 | [Image processing: display-only caption column + deferred region-attribution contract (M2b #7)](0023-image-processing-caption-region-contract.md) | Accepted |
 | 0024 | [Stronger PII scrub: price + label-anchored vendor/customer ID; names deferred (M2b #8)](0024-pii-scrub-stronger-pass.md) | Accepted |
+| 0025 | [Tag management: rename + merge + delete + suggest (M4 #4)](0025-tag-management.md) | Accepted |
