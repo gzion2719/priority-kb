@@ -1,7 +1,17 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 
-import { findEntryForRole, listEntriesForAdmin } from "@/lib/entries";
+import { deriveCaption } from "@/lib/caption";
+import { createStubEmbedder } from "@/lib/embedding";
+import {
+  findEntryForRole,
+  getVersion,
+  listEntriesForAdmin,
+  listVersionsForEntry,
+} from "@/lib/entries";
+import { createEntry, updateEntry } from "@/lib/ingest";
+import * as schema from "@/drizzle/schema";
 import type { Sensitivity } from "@/drizzle/schema";
 
 // Integration test: flip-positive sensitivity proof against real
@@ -582,5 +592,163 @@ describeIfDb("listEntriesForAdmin — search (tsv lane) integration", () => {
     const result = await listEntriesForAdmin(pool, "admin", { query: "nonsense-token-xyz" });
     expect(result.rows).toHaveLength(0);
     expect(result.nextCursor).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listVersionsForEntry / getVersion / revert flow — M4 #3 integration
+//
+// The unit tests pin SQL wire shape (ORDER BY DESC, LIMIT 1, malformed-id
+// short-circuit). Only real Postgres proves the version_no monotonic
+// MAX+1 contract under createEntry → updateEntry → updateEntry-as-revert,
+// and that the revert restores sensitivity + re-derives caption from the
+// reverted body (load-bearing per Step 7b plan-CR B1 + B2).
+// ---------------------------------------------------------------------------
+describeIfDb("version history + revert flow — integration", () => {
+  let pool: Pool;
+  let db: NodePgDatabase<typeof schema>;
+
+  beforeAll(() => {
+    pool = new Pool({ connectionString: databaseUrl });
+    db = drizzle(pool, { schema });
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  afterEach(async () => {
+    await pool.query("TRUNCATE audit_log, chunks, entries_versions, entries CASCADE");
+  });
+
+  async function seedAndEdit(): Promise<{
+    id: string;
+    v1Body: string;
+    v2Body: string;
+  }> {
+    const embedder = createStubEmbedder();
+    const v1Body = "Original procedure step.\nLine two.";
+    const v2Body = "Revised procedure step.\nLine two updated.";
+    const created = await createEntry({
+      db,
+      embedder,
+      source: { kind: "direct" },
+      input: {
+        title: "Procedure",
+        category: "howto",
+        tags: ["proc"],
+        body: v1Body,
+        source_pointer: "ticket://m4-3-revert-test",
+        last_verified_at: new Date(),
+        sensitivity: "public",
+      },
+    });
+    // Update path: same entry, new body — appends v2.
+    await updateEntry({
+      db,
+      embedder,
+      id: created.id,
+      source: { kind: "direct" },
+      input: {
+        title: "Procedure (revised)",
+        category: "howto",
+        tags: ["proc", "revised"],
+        body: v2Body,
+        source_pointer: "ticket://m4-3-revert-test",
+        last_verified_at: new Date(),
+        sensitivity: "restricted",
+      },
+    });
+    return { id: created.id, v1Body, v2Body };
+  }
+
+  it("listVersionsForEntry returns versions in DESC order [2, 1] (negative-assertion against order drift)", async () => {
+    const { id } = await seedAndEdit();
+
+    const versions = await listVersionsForEntry(pool, id);
+    // EXACT ordered equality — a regression that returned [1, 2] (ASC)
+    // or [1] (LIMIT 1) would surface here. The history page reads
+    // currentVersionNo from versions[0], so the order is load-bearing.
+    expect(versions.map((v) => v.version_no)).toEqual([2, 1]);
+  });
+
+  it("getVersion(entry, 1) returns the v1 snapshot — NOT the current state (distinguishes 'returns latest' bug)", async () => {
+    const { id, v1Body, v2Body } = await seedAndEdit();
+
+    const v1 = await getVersion(pool, id, 1);
+    expect(v1).not.toBeNull();
+    expect(v1?.body).toBe(v1Body);
+    // Negative-assertion: the v1 snapshot must NOT carry v2's content.
+    // A regression that ignored the version_no WHERE clause would return
+    // the latest snapshot (v2) regardless of the requested versionNo.
+    expect(v1?.body).not.toBe(v2Body);
+    expect(v1?.title).toBe("Procedure");
+    expect(v1?.title).not.toBe("Procedure (revised)");
+    expect(v1?.sensitivity).toBe("public");
+    expect(v1?.sensitivity).not.toBe("restricted");
+    expect(v1?.tags).toEqual(["proc"]);
+    expect(v1?.tags).not.toEqual(["proc", "revised"]);
+  });
+
+  it("getVersion(entry, MAX+1) returns null (missing version, not crash)", async () => {
+    const { id } = await seedAndEdit();
+    expect(await getVersion(pool, id, 999)).toBeNull();
+  });
+
+  it("revert flow: writes v3 with v1's snapshot fields + preserves current source_pointer (negative-assertions on sensitivity + caption)", async () => {
+    const { id, v1Body, v2Body } = await seedAndEdit();
+    const embedder = createStubEmbedder();
+
+    // Simulate the RevertForm's PUT payload: snapshot fields + preserved
+    // source_pointer + preserved last_verified_at (from the current entry).
+    const v1 = await getVersion(pool, id, 1);
+    expect(v1).not.toBeNull();
+
+    // Read the CURRENT entry to source the preserved fields.
+    const currentBefore = await findEntryForRole(pool, id, "admin");
+    expect(currentBefore).not.toBeNull();
+
+    await updateEntry({
+      db,
+      embedder,
+      id,
+      source: { kind: "direct" },
+      input: {
+        title: v1!.title,
+        category: v1!.category,
+        tags: v1!.tags,
+        body: v1!.body,
+        sensitivity: v1!.sensitivity, // public — explicitly from snapshot.
+        // Preserved from current — snapshot doesn't carry these.
+        source_pointer: currentBefore!.source_pointer,
+        last_verified_at: currentBefore!.last_verified_at,
+      },
+    });
+
+    // Negative-assertion: list now contains [3, 2, 1] — a regression that
+    // overwrote in place would yield [2, 1] (unchanged) or [3] alone (history wipe).
+    const versions = await listVersionsForEntry(pool, id);
+    expect(versions.map((v) => v.version_no)).toEqual([3, 2, 1]);
+
+    // Negative-assertion: v3 carries v1's content, not v2's.
+    const v3 = await getVersion(pool, id, 3);
+    expect(v3?.body).toBe(v1Body);
+    expect(v3?.body).not.toBe(v2Body);
+
+    // Negative-assertion (Step 7b plan-CR B2): sensitivity restored to
+    // v1's PUBLIC tier. A regression that omitted sensitivity from the
+    // revert payload would land via IngestBodyForPut's worker-only
+    // preserve-current branch and the current state would stay
+    // RESTRICTED — load-bearing iron-rule #6 contract.
+    const currentAfter = await findEntryForRole(pool, id, "admin");
+    expect(currentAfter?.sensitivity).toBe("public");
+    expect(currentAfter?.sensitivity).not.toBe("restricted");
+
+    // Negative-assertion (Step 7b plan-CR B1): caption re-derived from
+    // the reverted body. A regression that stopped calling deriveCaption
+    // inside updateEntry would leave the stale v2 caption. The deriveCaption
+    // contract is "first non-empty line of body, grapheme-safe clip".
+    expect(currentAfter?.caption).toBe(deriveCaption(v1Body));
+    expect(currentAfter?.caption).not.toBe(deriveCaption(v2Body));
   });
 });

@@ -381,3 +381,93 @@ export async function listEntriesForAdmin(
     nextCursor: { updatedAt: lastOfPage.updated_at, id: lastOfPage.id },
   };
 }
+
+// ---------------------------------------------------------------------------
+// M4 #3 — version history (entries_versions reads)
+//
+// Read sibling to findEntryForRole + listEntriesForAdmin: powers the read-only
+// admin history viewer at /admin/entries/[id]/history. Both functions are
+// admin-only by CALL-SITE — the pages enforce role via resolveRoleFromHeader
+// + findEntryForRole before calling here. We deliberately skip a SQL role
+// filter at this layer because:
+//   (a) the metadata (version_no, created_at) is sensitivity-agnostic;
+//   (b) the full snapshot's sensitivity is part of the row, so a caller
+//       MUST pair this with findEntryForRole on the entry first (which
+//       enforces iron-rule #6 at the entry level — if the role can't see
+//       the current entry, the page does notFound() before calling here);
+//   (c) smearing a role filter into a metadata-only query would over-engineer
+//       the read.
+// ---------------------------------------------------------------------------
+
+export interface VersionListItem {
+  version_no: number;
+  created_at: Date;
+}
+
+/**
+ * Full snapshot of one `entries_versions` row. Note: source_pointer and
+ * last_verified_at are NOT included — the snapshot schema does not carry
+ * them (see `lib/ingest.ts:343-347`). Revert callers MUST pull those two
+ * fields from the current `entries` row, not from a snapshot.
+ */
+export interface VersionSnapshot {
+  version_no: number;
+  title: string;
+  category: string;
+  tags: string[];
+  body: string;
+  sensitivity: Sensitivity;
+  created_at: Date;
+}
+
+/**
+ * List all versions of an entry, ordered newest first. The list is small-
+ * bounded (one row per edit; typical entries have ≤10 versions) so no
+ * pagination cap is needed today. Add one when a single entry's history
+ * grows past ~100 versions in real usage.
+ */
+export async function listVersionsForEntry(
+  pool: Pool,
+  entryId: string,
+): Promise<VersionListItem[]> {
+  if (!isUuid(entryId)) return [];
+  const result = await pool.query<{ version_no: number; created_at: Date }>(
+    `SELECT version_no, created_at
+       FROM entries_versions
+      WHERE entry_id = $1
+      ORDER BY version_no DESC`,
+    [entryId],
+  );
+  return result.rows;
+}
+
+/**
+ * Fetch one version snapshot by (entryId, versionNo). Returns null when
+ * the version doesn't exist (unknown entry, unknown version_no, or
+ * malformed UUID). Same null-collapse discipline as findEntryForRole.
+ */
+export async function getVersion(
+  pool: Pool,
+  entryId: string,
+  versionNo: number,
+): Promise<VersionSnapshot | null> {
+  if (!isUuid(entryId)) return null;
+  if (!Number.isInteger(versionNo) || versionNo < 1) return null;
+  const result = await pool.query<{
+    version_no: number;
+    title: string;
+    category: string;
+    tags: string[];
+    body: string;
+    sensitivity: Sensitivity;
+    created_at: Date;
+  }>(
+    `SELECT version_no, title, category, tags, body, sensitivity, created_at
+       FROM entries_versions
+      WHERE entry_id = $1 AND version_no = $2
+      LIMIT 1`,
+    [entryId, versionNo],
+  );
+  if (result.rows.length === 0) return null;
+  return result.rows[0];
+}

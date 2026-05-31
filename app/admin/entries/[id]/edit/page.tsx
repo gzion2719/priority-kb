@@ -73,6 +73,8 @@ export default async function AdminEntryEditPage({ params }: PageProps): Promise
     >
       <nav style={{ fontSize: "0.875rem" }}>
         <Link href="/admin/entries">← Back to entries</Link>
+        {" · "}
+        <Link href={`/admin/entries/${entry.id}/history`}>View history</Link>
       </nav>
 
       <header style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
