@@ -399,6 +399,18 @@ function EntryCard({ row }: { row: EntryListItem }): React.ReactNode {
         <span style={{ fontSize: "0.75rem", color: "var(--kramer-neutral)" }}>
           category: {row.category}
         </span>
+        {/*
+          M4 #2 — admin Edit affordance. Page is already admin-gated at
+          the top, so this Link renders only for admins by construction.
+          marginLeft: auto pushes it to the row's trailing edge.
+        */}
+        <Link
+          href={`/admin/entries/${row.id}/edit`}
+          data-testid="admin-entries-edit-link"
+          style={{ marginLeft: "auto", fontSize: "0.75rem" }}
+        >
+          Edit
+        </Link>
       </div>
 
       {visibleTags.length > 0 && (

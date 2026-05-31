@@ -107,12 +107,12 @@ Uploading a Hebrew Priority screenshot via the admin chat results in a queued jo
 **Goal:** the admin and user surfaces are actually pleasant to use.
 
 ### Checklist
-- [ ] Admin entry browser: list, filter by category/tag/sensitivity, search.
-- [ ] Admin entry editor: edit existing entry (appends a new `entries_versions` row).
+- [x] Admin entry browser: list, filter by category/tag/sensitivity, search — shipped 2026-05-30 (M4 #1 batches a/b/c, PRs [#373](https://github.com/gzion2719/priority-kb/pull/373)–[#378](https://github.com/gzion2719/priority-kb/pull/378)); see [app/admin/entries/page.tsx](../app/admin/entries/page.tsx) + [lib/entries.ts](../lib/entries.ts) `listEntriesForAdmin`.
+- [x] Admin entry editor: edit existing entry (appends a new `entries_versions` row) — shipped 2026-05-31; see [app/admin/entries/[id]/edit/page.tsx](../app/admin/entries/[id]/edit/page.tsx) + [app/admin/entries/[id]/edit/EditForm.tsx](../app/admin/entries/[id]/edit/EditForm.tsx). Pure-helper boundary at [lib/edit-form-helpers.ts](../lib/edit-form-helpers.ts) + [lib/iso-date.ts](../lib/iso-date.ts); submits to existing `PUT /api/ingest/[id]` so the write path reuses M2a #5 coverage. Audit kind `entry_edit_view` for forensic "who opened the editor" signal. Optimistic-lock token (`If-Match: <version_no>`) deferred to BACKLOG — pairs with M5 multi-admin Entra cutover; mitigation in place is rendering the current `version_no` in the form header.
 - [ ] Version history viewer: diff between versions; one-click revert.
 - [ ] Tag management: rename, merge, suggest from existing entries.
 - [ ] Stale-entry detection: nightly job flags entries where `last_verified_at` > 6 months ago AND retrieval frequency > N; surfaces in admin dashboard.
-- [ ] Citation hover preview on retrieval answers.
+- [x] Citation hover preview on retrieval answers — shipped 2026-05-26 (M4 #6, PRs [#288](https://github.com/gzion2719/priority-kb/pull/288)→[#292](https://github.com/gzion2719/priority-kb/pull/292)); see [app/query/page.tsx](../app/query/page.tsx) hover popup + [lib/snippet.ts](../lib/snippet.ts) grapheme-safe slicer + ADR-0012 Amendment 2026-05-26 §A-J.
 
 ### Acceptance
 Admin can correct a wrong entry, see the version history, and revert if needed. Stale-entry dashboard shows a non-empty list of candidates for re-verification.
