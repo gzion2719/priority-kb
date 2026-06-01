@@ -59,6 +59,14 @@ vi.mock("@/lib/db", () => ({
   getDb: vi.fn(() => ({
     selectDistinct: (...args: unknown[]) => selectDistinctMock(...args),
   })),
+  // PR-C: dispatchListTags reads pool for listAdminTagsForRole. Returned
+  // value is opaque to the mocked listAdminTagsForRole below.
+  getPool: vi.fn(() => ({})),
+}));
+
+const listAdminTagsMock = vi.fn();
+vi.mock("@/lib/admin-tags", () => ({
+  listAdminTagsForRole: (...args: unknown[]) => listAdminTagsMock(...args),
 }));
 
 vi.mock("@/lib/embedding", () => ({
@@ -156,6 +164,7 @@ beforeEach(() => {
   logLines.length = 0;
   submitEntryFromAgentMock.mockReset();
   selectDistinctMock.mockReset();
+  listAdminTagsMock.mockReset();
 });
 
 afterEach(() => {
@@ -301,6 +310,155 @@ describe("POST /api/agent/ingest — tool-use round trip", () => {
       expect(tr.output).toEqual({ candidates: [], note: "retrieval_unavailable_m2a" });
     } else {
       throw new Error(`expected ok tool_result, got ${JSON.stringify(tr)}`);
+    }
+  });
+
+  it("list_tags (PR-C): dispatches lib call with resolved role + prefix, returns { tags }", async () => {
+    listAdminTagsMock.mockResolvedValueOnce([
+      { name: "vendor", entry_count: 5 },
+      { name: "supplier", entry_count: 3 },
+    ]);
+    const { agent } = makeRecordingAgent([
+      [
+        {
+          kind: "tool_use_start",
+          id: "toolu_lt_1",
+          name: "list_tags",
+          input: { prefix: "ven" },
+        },
+        { kind: "done", stop_reason: "tool_use" },
+      ],
+      [{ kind: "done", stop_reason: "end_turn" }],
+    ]);
+    agentForNextCall = agent;
+    const res = await POST(adminReq({ messages: makeBaseMessages(1) }) as never, {} as never);
+    const { events } = await readSse(res);
+    const tr = events.find((e) => e.kind === "tool_result");
+    if (tr && tr.kind === "tool_result" && tr.ok === true) {
+      expect(tr.output).toEqual({
+        tags: [
+          { name: "vendor", entry_count: 5 },
+          { name: "supplier", entry_count: 3 },
+        ],
+      });
+    } else {
+      throw new Error(`expected ok tool_result, got ${JSON.stringify(tr)}`);
+    }
+    // B2 plan-CR fix verification: the lib is called with the resolved role
+    // (admin, from withAdmin) — NOT a hard-coded string at the dispatch site.
+    expect(listAdminTagsMock).toHaveBeenCalledWith(expect.anything(), "admin", { prefix: "ven" });
+  });
+
+  it("list_tags (PR-C): omitted prefix dispatches with prefix: undefined (full catalog)", async () => {
+    listAdminTagsMock.mockResolvedValueOnce([]);
+    const { agent } = makeRecordingAgent([
+      [
+        { kind: "tool_use_start", id: "toolu_lt_2", name: "list_tags", input: {} },
+        { kind: "done", stop_reason: "tool_use" },
+      ],
+      [{ kind: "done", stop_reason: "end_turn" }],
+    ]);
+    agentForNextCall = agent;
+    const res = await POST(adminReq({ messages: makeBaseMessages(1) }) as never, {} as never);
+    // Must consume the SSE stream to drive dispatch — the route's ReadableStream
+    // start() callback is what fires dispatchTool, and an unconsumed stream
+    // never executes that callback.
+    await readSse(res);
+    expect(listAdminTagsMock).toHaveBeenCalledWith(expect.anything(), "admin", {
+      prefix: undefined,
+    });
+  });
+
+  it("list_tags (PR-C): non-string prefix → invalid_input tool_result (M6 plan-CR fix)", async () => {
+    const { agent } = makeRecordingAgent([
+      [
+        {
+          kind: "tool_use_start",
+          id: "toolu_lt_3",
+          name: "list_tags",
+          input: { prefix: 12345 },
+        },
+        { kind: "done", stop_reason: "tool_use" },
+      ],
+      [{ kind: "done", stop_reason: "end_turn" }],
+    ]);
+    agentForNextCall = agent;
+    const res = await POST(adminReq({ messages: makeBaseMessages(1) }) as never, {} as never);
+    const { events } = await readSse(res);
+    const tr = events.find((e) => e.kind === "tool_result");
+    if (tr && tr.kind === "tool_result" && tr.ok === false) {
+      // M6 plan-CR fix: Zod parse at dispatch boundary rejects non-string
+      // prefix BEFORE the lib is called. Negative-assertion: lib must NOT
+      // have been called for this invalid_input case.
+      expect(listAdminTagsMock).not.toHaveBeenCalled();
+      expect(tr.error).toContain("invalid_input");
+    } else {
+      throw new Error(`expected error tool_result, got ${JSON.stringify(tr)}`);
+    }
+  });
+});
+
+describe("POST /api/agent/ingest — registry-vs-dispatch drift floor (M4 plan-CR)", () => {
+  it("every tool in AGENT_TOOLS dispatches to a real handler (no unknown_tool: fallthrough)", async () => {
+    // Mechanical floor: iterate AGENT_TOOLS and fire each through the route's
+    // dispatch by injecting a tool_use_start event per tool. Any dispatch case
+    // that's missing returns `unknown_tool:` from the default branch — this
+    // test fails loudly on the first such drift. Adding a new tool to the
+    // registry without wiring its case statement will silently degrade in
+    // production today; this floor catches it at test time.
+    const { AGENT_TOOLS } = await import("@/lib/agents-tools");
+    // Per-tool minimal valid input that passes each handler's parse.
+    // submit_entry needs the full IngestBody shape; others tolerate {}.
+    const minimalInputs: Record<string, unknown> = {
+      submit_entry: {
+        title: "x",
+        category: "x",
+        body: "x",
+        source_pointer: "x",
+        last_verified_at: "2026-05-18T10:00:00Z",
+        sensitivity: "internal",
+      },
+      list_categories: {},
+      search_kb: { query: "x" },
+      list_tags: {},
+    };
+    // Mock the lib calls each handler makes so we get to "tool_result" without
+    // exercising real DB.
+    selectDistinctMock.mockReturnValue({
+      from: () => ({ orderBy: () => Promise.resolve([]) }),
+    });
+    listAdminTagsMock.mockResolvedValue([]);
+    submitEntryFromAgentMock.mockResolvedValue({
+      id: "00000000-0000-0000-0000-000000000001",
+      version_no: 1,
+    });
+
+    for (const tool of AGENT_TOOLS) {
+      const input = minimalInputs[tool.name];
+      const { agent } = makeRecordingAgent([
+        [
+          { kind: "tool_use_start", id: `toolu_drift_${tool.name}`, name: tool.name, input },
+          { kind: "done", stop_reason: "tool_use" },
+        ],
+        [{ kind: "done", stop_reason: "end_turn" }],
+      ]);
+      agentForNextCall = agent;
+      const res = await POST(adminReq({ messages: makeBaseMessages(1) }) as never, {} as never);
+      const { events } = await readSse(res);
+      const tr = events.find((e) => e.kind === "tool_result");
+      if (!tr || tr.kind !== "tool_result") {
+        throw new Error(`tool ${tool.name}: expected a tool_result, got ${JSON.stringify(tr)}`);
+      }
+      // M1 code-CR fix 2026-06-01: the load-bearing property is "the handler
+      // actually executed", not just "the error isn't unknown_tool:". A
+      // dispatch-time throw is remapped to `{ok: false, error: "tool_dispatch_failed"}`
+      // by the dispatchTool try/catch (route.ts:172), which would silently
+      // pass the original `not.toContain("unknown_tool:")` regex while still
+      // representing a broken handler. Assert ok:true directly — any ok:false
+      // means the case statement is missing OR the handler threw, both of
+      // which are the drift this floor is meant to catch. JSON.stringify(tr)
+      // is the diagnostic so a failure tells us which tool failed how.
+      expect(tr.ok, `tool ${tool.name} did not execute cleanly: ${JSON.stringify(tr)}`).toBe(true);
     }
   });
 });

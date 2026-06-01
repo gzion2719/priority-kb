@@ -110,20 +110,39 @@ describe("INGESTION_AGENT_PROMPT constant (ADR-0010 §1 system_prompt source)", 
   });
 });
 
-describe("INGESTION_AGENT_PROMPT v0.2.0 content (ADR-0010 §Prompt v0.2.0)", () => {
+describe("INGESTION_AGENT_PROMPT v0.3.0 content (ADR-0010 §Prompt v0.3.0 + ADR-0025 D5 PR-C)", () => {
   // Negative-assertion tests per WORKFLOW.md "Negative-assertion tests
   // distinguish from the regression": each case constructs an assertion
-  // that would fail if the v0.2.0 rewrite were silently reverted to the
-  // v0.1.0 wording. A "present" assertion alone would pass any prompt
+  // that would fail if the v0.3.0 rewrite were silently reverted to the
+  // v0.2.0 wording. A "present" assertion alone would pass any prompt
   // that happens to mention the substring; pairing with "old line absent"
   // proves the rewrite actually landed.
+  //
+  // PR-C v0.3.0 bump adds the list_tags() tool integration; the v0.2.0
+  // negative assertions stay in place to ensure neither v0.1.0 nor v0.2.0
+  // wording leaks back through a future rewrite.
 
-  it("bumps the version header to 0.2.0 (and removes the v0.1.0 header)", () => {
+  it("bumps the version header to 0.3.0 (and removes the v0.2.0 header + v0.1.0 header)", () => {
     expect(INGESTION_AGENT_PROMPT).toContain(
+      '**Version:** 0.3.0 (M4 #4 PR-C: `list_tags` tool; see ADR-0010 §"Prompt v0.3.0" + ADR-0025 D5)',
+    );
+    expect(INGESTION_AGENT_PROMPT).not.toContain(
       '**Version:** 0.2.0 (M2a chat UI ride-along; see ADR-0010 §"Prompt v0.2.0")',
     );
     expect(INGESTION_AGENT_PROMPT).not.toContain(
       "**Version:** 0.1.0 (M2a stub — to be tightened during M2a implementation)",
+    );
+  });
+
+  it("instructs the agent to call list_tags() while collecting the tags field (PR-C)", () => {
+    // Negative-assertion: the v0.2.0 line that said only "Reuse existing
+    // tags when possible (suggest from existing taxonomy)" with NO concrete
+    // tool call must be gone — v0.3.0 names the tool + prefix call shape
+    // explicitly so the agent has a mechanical path to follow.
+    expect(INGESTION_AGENT_PROMPT).toContain("`list_tags({prefix: <2-3 chars from admin input>})`");
+    expect(INGESTION_AGENT_PROMPT).toContain("prefer the catalog's exact byte form");
+    expect(INGESTION_AGENT_PROMPT).not.toContain(
+      "`tags[]` — 1-5 short tags. Reuse existing tags when possible (suggest from existing taxonomy).",
     );
   });
 

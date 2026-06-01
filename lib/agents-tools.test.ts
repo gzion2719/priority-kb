@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   AGENT_TOOLS,
   LIST_CATEGORIES_TOOL,
+  LIST_TAGS_TOOL,
   SEARCH_KB_TOOL,
   SUBMIT_ENTRY_TOOL,
 } from "./agents-tools";
@@ -11,10 +12,15 @@ import { IngestBody } from "./ingest-schema";
 import { sensitivityEnum } from "@/drizzle/schema";
 
 describe("AGENT_TOOLS registry — shape + content", () => {
-  it("contains exactly three tools, no duplicates", () => {
-    expect(AGENT_TOOLS).toHaveLength(3);
+  it("contains exactly four tools, no duplicates", () => {
+    expect(AGENT_TOOLS).toHaveLength(4);
     const names = AGENT_TOOLS.map((t) => t.name);
-    expect(new Set(names).size).toBe(3);
+    expect(new Set(names).size).toBe(4);
+    // Negative-assertion: the four names are exactly the expected set.
+    // Catches a drift where someone renames a tool but keeps the count.
+    expect(new Set(names)).toEqual(
+      new Set(["submit_entry", "list_categories", "search_kb", "list_tags"]),
+    );
   });
 
   it("each tool has a non-empty description (LLM consumes this)", () => {
@@ -108,5 +114,38 @@ describe("search_kb tool", () => {
     };
     expect(s.properties.query.type).toBe("string");
     expect([...s.required]).toEqual(["query"]);
+  });
+});
+
+describe("list_tags tool (M4 #4 PR-C — ADR-0025 D5)", () => {
+  it("name is the expected literal", () => {
+    expect(LIST_TAGS_TOOL.name).toBe("list_tags");
+  });
+
+  it("input schema has an optional `prefix` string (no required[])", () => {
+    const s = LIST_TAGS_TOOL.input_schema as {
+      properties: { prefix: { type: string } };
+      required?: readonly string[];
+      additionalProperties: boolean;
+    };
+    expect(s.properties.prefix.type).toBe("string");
+    // No required[] (or empty) — prefix is optional per D5.
+    expect(s.required ?? []).toEqual([]);
+    expect(s.additionalProperties).toBe(false);
+  });
+
+  it("description mentions canonical-name reuse (prose floor per Amendment 2026-06-01 §M5)", () => {
+    // Negative-assertion against future prompt-content drift: the
+    // description text is what the LLM consumes to decide when to call
+    // list_tags and how to interpret the result. Loss of the "canonical
+    // name" guidance silently regresses the prose floor.
+    expect(LIST_TAGS_TOOL.description.toLowerCase()).toContain("canonical");
+  });
+
+  it("description has no length cap mentioned (B1 plan-CR fix: D5 specifies no cap)", () => {
+    // Negative-assertion: a future edit that re-introduces a length cap
+    // in the description (e.g. "prefix ≤ 64 chars") would silently regress
+    // the B1 decision. The tool's prefix is uncapped by design.
+    expect(LIST_TAGS_TOOL.description).not.toMatch(/≤\s*\d+\s*char|max\s*\d+\s*char/i);
   });
 });
