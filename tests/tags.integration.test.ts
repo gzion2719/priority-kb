@@ -31,6 +31,31 @@ describe.skipIf(!DATABASE_URL)("tags integration (PR-A)", () => {
   });
 
   afterAll(async () => {
+    // CI hotfix 2026-06-01: clean tagtest-* data on file teardown so the
+    // last test's seed doesn't leak into the next test file. `fileParallelism`
+    // is false (vitest.config.ts) so files run serially; without this
+    // afterAll, the last test's tagtest-* entries survived until the next
+    // file's beforeEach — which in tests/retrieval-ann.integration.test.ts
+    // is actually an afterEach (it has none of its own beforeEach), so
+    // ANN's first test saw leaked public-sensitivity entries (CI red:
+    // expected 3, got 5 = 3 ANN-seeded + 2 of mine).
+    await pool
+      .query(
+        `DELETE FROM audit_log WHERE entry_id IN (SELECT id FROM entries WHERE source_pointer LIKE 'tagtest-%')`,
+      )
+      .catch(() => {});
+    await pool.query(`DELETE FROM audit_log WHERE kind LIKE 'tag\\_%' ESCAPE '\\'`).catch(() => {});
+    await pool
+      .query(
+        `DELETE FROM chunks WHERE entry_id IN (SELECT id FROM entries WHERE source_pointer LIKE 'tagtest-%')`,
+      )
+      .catch(() => {});
+    await pool
+      .query(
+        `DELETE FROM entries_versions WHERE entry_id IN (SELECT id FROM entries WHERE source_pointer LIKE 'tagtest-%')`,
+      )
+      .catch(() => {});
+    await pool.query(`DELETE FROM entries WHERE source_pointer LIKE 'tagtest-%'`).catch(() => {});
     await pool.end();
   });
 
