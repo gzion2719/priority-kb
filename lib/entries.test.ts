@@ -14,6 +14,7 @@ import {
   validateSensitivityFilter,
   type EntryListItem,
 } from "@/lib/entries";
+import { HEBREW_COMBINING_MARKS_PATTERN } from "@/lib/keyword-tsquery";
 
 // Mock-pool factory: returns a Pool-shaped object whose .query returns
 // `rows`. We assert on the captured (sql, params) tuple to prove the
@@ -540,12 +541,17 @@ describe("listEntriesForAdmin — query clause SQL composition", () => {
     await listEntriesForAdmin(pool, "admin", { query: "x" });
     const match = calls[0].sql.match(/regexp_replace\(\$\d+,\s*'\[([^\]]+)\]'/);
     expect(match).not.toBeNull();
-    // Canonical class bytes from drizzle/migrations/0002_unaccent_tsv_trigger.sql:43.
-    // Hex: d6912dd6bdd6bfd7812dd782d7842dd785d787 — non-contiguous,
-    // excludes maqaf U+05BE, paseq U+05C0, sof pasuq U+05C3, nun hafukha U+05C6.
-    const canonicalHex = "d6912dd6bdd6bfd7812dd782d7842dd785d787";
+    // m1 code-CR fix 2026-06-01: derive expected hex from the canonical
+    // constant rather than dual-pinning a literal here. A legitimate future
+    // pattern change (e.g., a Unicode-version update) edits the single
+    // source of truth at lib/keyword-tsquery.ts; this test inherits
+    // automatically. Human-readable hex stays in the comment for grep-ability.
+    //   d6912dd6bdd6bfd7812dd782d7842dd785d787 — non-contiguous Hebrew
+    //   combining-marks class; excludes U+05BE MAQAF, U+05C0 PASEQ,
+    //   U+05C3 SOF PASUQ, U+05C6 NUN HAFUKHA.
+    const expectedHex = Buffer.from(HEBREW_COMBINING_MARKS_PATTERN, "utf8").toString("hex");
     const observedHex = Buffer.from(match![1], "utf8").toString("hex");
-    expect(observedHex).toBe(canonicalHex);
+    expect(observedHex).toBe(expectedHex);
   });
 
   it("query AND-composes with filters (cursor + all filters + query)", async () => {

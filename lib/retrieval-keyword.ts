@@ -15,6 +15,7 @@
 import type { Pool } from "pg";
 
 import type { Sensitivity } from "@/drizzle/schema";
+import { buildKeywordTsquerySQL } from "@/lib/keyword-tsquery";
 
 export type KeywordCandidate = {
   entry_id: string;
@@ -59,13 +60,16 @@ export async function keywordCandidates(
   }
 
   // Query-side normalization mirrors the index-side trigger in migration 0002:
-  // strip Hebrew niqqud + cantillation marks, then unaccent. Both layers MUST
-  // apply identical normalization, or queries silently miss indexed lexemes.
+  // strip Hebrew niqqud + cantillation marks, then unaccent. Both layers share
+  // the canonical pattern via lib/keyword-tsquery.ts — the production-
+  // tokenization-mirror floor that catches the bug class this file used to
+  // exhibit (contiguous [֑-ׇ] regex stripped U+05BE MAQAF, breaking
+  // compound-noun matches; fix shipped 2026-06-01 via shared module).
   const sql = `
     SELECT entries.id AS entry_id,
            ts_rank_cd(entries.tsv, q) AS keyword_score
     FROM entries,
-         websearch_to_tsquery('simple', unaccent(regexp_replace($1, '[֑-ׇ]', '', 'g'))) q
+         ${buildKeywordTsquerySQL("$1")} q
     WHERE entries.sensitivity = ANY($2::text[])
       AND entries.tsv @@ q
     ORDER BY keyword_score DESC, entries.id ASC

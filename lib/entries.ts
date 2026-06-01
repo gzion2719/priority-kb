@@ -22,6 +22,7 @@ import type { Pool } from "pg";
 
 import { sensitivityAllowedForRole, type Role } from "@/lib/auth";
 import type { Sensitivity } from "@/drizzle/schema";
+import { buildKeywordTsquerySQL } from "@/lib/keyword-tsquery";
 
 export interface EntryDetail {
   id: string;
@@ -325,24 +326,11 @@ export async function listEntriesForAdmin(
   }
   if (query !== null) {
     const p = params.length + 1;
-    // CANONICAL niqqud-strip class — byte-identical to migration 0002 line 43
-    // (the index-side trigger). Non-contiguous: includes U+0591..U+05BD
-    // (combining marks) + U+05BF (rafe) + U+05C1..U+05C2 (sin/shin dot) +
-    // U+05C4..U+05C5 (mark + dot) + U+05C7 (qamats qatan). DELIBERATELY
-    // EXCLUDES U+05BE MAQAF, U+05C0 PASEQ, U+05C3 SOF PASUQ, U+05C6 NUN
-    // HAFUKHA — those are visible punctuation; stripping the maqaf would
-    // silently corrupt compound nouns (בית־ספר → ביתספר).
-    //
-    // KEEP IN SYNC with THREE sites — any change here must land in all:
-    //   1. drizzle/migrations/0002_unaccent_tsv_trigger.sql:43 (index-side trigger)
-    //   2. lib/retrieval-keyword.ts:68 (retrieval keyword lane)
-    //   3. lib/entries.ts (this file — admin list keyword search)
-    // BACKLOG entry tracks extracting a shared `lib/keyword-tsquery.ts`
-    // module + fixing the existing drift at retrieval-keyword.ts:68
-    // (which currently uses the contiguous range '[U+0591-U+05C7]'). The
-    // shared-module extraction is the 3rd-recurrence mechanical floor per
-    // feedback_prefer_mechanical_over_prose; queued for next session.
-    where += ` AND tsv @@ websearch_to_tsquery('simple', unaccent(regexp_replace($${p}, '[֑-ֽֿׁ-ׂׄ-ׇׅ]', '', 'g')))`;
+    // Canonical keyword-tsquery normalization via lib/keyword-tsquery.ts —
+    // the shared module landed 2026-06-01 as the production-tokenization-
+    // mirror 2nd-recurrence floor. Migrating this surface to the shared
+    // helper retires the KEEP-IN-SYNC comment block this site used to carry.
+    where += ` AND tsv @@ ${buildKeywordTsquerySQL(`$${p}`)}`;
     params.push(query);
   }
 

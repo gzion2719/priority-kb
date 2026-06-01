@@ -228,4 +228,84 @@ describeIfDb("keywordCandidates — ADR-0013 §2.3 integration", () => {
     await expect(keywordCandidates(pool, "x", ["public"], 0)).rejects.toThrow(RangeError);
     await expect(keywordCandidates(pool, "x", ["public"], 1001)).rejects.toThrow(RangeError);
   });
+
+  // --- PR fix/keyword-niqqud-class-drift coverage (2026-06-01) ---
+  //
+  // The drifted contiguous regex `[֑-ׇ]` in lib/retrieval-keyword.ts stripped
+  // U+05BE MAQAF from query-side input, so a Hebrew compound-noun query like
+  // `בית־ספר` (with maqaf) was normalized to `ביתספר` (one lexeme) while the
+  // index held `{בית, ספר}` (two lexemes). Match: zero. These tests fix the
+  // bug at the integration boundary; bidirectional coverage (M1 plan-CR fix)
+  // distinguishes "fix removed the wrong strip" from "fix removed both strips".
+  describe("Hebrew compound-noun MAQAF — bidirectional match (PR fix 2026-06-01)", () => {
+    it("query WITH maqaf matches entry indexed WITH maqaf (the original bug repro)", async () => {
+      await insertSeed(pool, [
+        {
+          id: "ff111111-0000-4000-8000-000000000001",
+          title: "בית־ספר workflow",
+          tags: [],
+          body: "מסמכי בית־ספר עדיפות גבוהה",
+          sensitivity: "public",
+        },
+      ]);
+      const results = await keywordCandidates(pool, "בית־ספר", ["public"]);
+      // Negative-assertion against the regression: under the buggy contiguous
+      // regex this would be empty (one-lexeme query vs two-lexeme index).
+      // Under the fixed shared module, the query produces {בית, ספר} which
+      // matches the index's {בית, ספר}.
+      expect(results.map((r) => r.entry_id)).toContain("ff111111-0000-4000-8000-000000000001");
+    });
+
+    it("query WITHOUT maqaf (space-separated) ALSO matches the same entry", async () => {
+      await insertSeed(pool, [
+        {
+          id: "ff222222-0000-4000-8000-000000000002",
+          title: "בית־ספר notes",
+          tags: [],
+          body: "פרוצדורת בית־ספר",
+          sensitivity: "public",
+        },
+      ]);
+      // Asymmetric direction: query 'בית ספר' (space) against indexed 'בית־ספר'
+      // (maqaf). Both normalize to {בית, ספר} under the simple tokenizer + the
+      // canonical niqqud-strip. This distinguishes "fix removed the wrong
+      // strip" from "fix removed both strips" — a regression that stripped
+      // maqaf on both sides would still match this test, but would fail the
+      // reverse direction (query WITH maqaf, index WITHOUT) below.
+      const results = await keywordCandidates(pool, "בית ספר", ["public"]);
+      expect(results.map((r) => r.entry_id)).toContain("ff222222-0000-4000-8000-000000000002");
+    });
+
+    it("query WITH maqaf matches entry indexed WITHOUT maqaf (reverse asymmetric)", async () => {
+      await insertSeed(pool, [
+        {
+          id: "ff333333-0000-4000-8000-000000000003",
+          title: "בית ספר guide",
+          tags: [],
+          body: "מסמכי בית ספר",
+          sensitivity: "public",
+        },
+      ]);
+      const results = await keywordCandidates(pool, "בית־ספר", ["public"]);
+      expect(results.map((r) => r.entry_id)).toContain("ff333333-0000-4000-8000-000000000003");
+    });
+
+    it("niqqud-bearing query still matches (the OTHER strip — combining marks — must work)", async () => {
+      // Sanity check that the canonical class still strips real combining
+      // marks. Without this, a fix that removed niqqud-strip entirely would
+      // pass the maqaf tests above but break the original ADR-0013 intent.
+      await insertSeed(pool, [
+        {
+          id: "ff444444-0000-4000-8000-000000000004",
+          title: "Priority workflow",
+          tags: [],
+          body: "עדיפות גבוהה",
+          sensitivity: "public",
+        },
+      ]);
+      // עְדִיפוּת — same word as "עדיפות" but with niqqud added.
+      const results = await keywordCandidates(pool, "עְדִיפוּת", ["public"]);
+      expect(results.map((r) => r.entry_id)).toContain("ff444444-0000-4000-8000-000000000004");
+    });
+  });
 });
