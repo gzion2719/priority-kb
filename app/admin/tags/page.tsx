@@ -25,10 +25,12 @@ import {
   listRecentTagAuditRows,
   type AdminTagsCatalogRow,
   type TagAuditRow,
+  type TagOperationAuditKind,
 } from "@/lib/admin-tags";
 
 import { RenameForm } from "./RenameForm";
 import { DeleteForm } from "./DeleteForm";
+import { MergeForm } from "./MergeForm";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -111,6 +113,7 @@ export default async function AdminTagsPage(): Promise<React.ReactNode> {
           <>
             <RenameForm catalog={catalog.map((c) => c.name)} />
             <DeleteForm catalog={catalog.map((c) => c.name)} />
+            <MergeForm catalog={catalog.map((c) => c.name)} />
           </>
         )}
       </section>
@@ -232,7 +235,7 @@ function AuditRowItem({ row }: { row: TagAuditRow }): React.ReactNode {
 }
 
 function summarizeAuditPayload(
-  kind: "tag_rename" | "tag_delete",
+  kind: TagOperationAuditKind,
   payload: Record<string, unknown>,
 ): string {
   const count =
@@ -246,6 +249,13 @@ function summarizeAuditPayload(
     const from = typeof payload.from === "string" ? payload.from : "?";
     const to = typeof payload.to === "string" ? payload.to : "?";
     return `rename "${from}" → "${to}" — ${count} ${count === 1 ? "entry" : "entries"}${partial}`;
+  }
+  if (kind === "tag_merge") {
+    const from = Array.isArray(payload.from)
+      ? (payload.from as unknown[]).map((s) => (typeof s === "string" ? s : "?")).join(", ")
+      : "?";
+    const to = typeof payload.to === "string" ? payload.to : "?";
+    return `merge [${from}] → "${to}" — ${count} ${count === 1 ? "entry" : "entries"}${partial}`;
   }
   const tag = typeof payload.tag === "string" ? payload.tag : "?";
   return `delete "${tag}" — ${count} ${count === 1 ? "entry" : "entries"}${partial}`;
