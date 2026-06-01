@@ -173,4 +173,118 @@ describe("TagValidationError", () => {
     expect(e.reason).toBe("niqqud");
     expect(e.message).toBe("test message");
   });
+
+  it("supports the new merge-specific reason codes", () => {
+    const reasons: Array<"to_in_from" | "empty_array" | "duplicate_in_from"> = [
+      "to_in_from",
+      "empty_array",
+      "duplicate_in_from",
+    ];
+    for (const reason of reasons) {
+      const e = new TagValidationError("from", reason, `reason=${reason}`);
+      expect(e.reason).toBe(reason);
+    }
+  });
+});
+
+// mergeTags-specific validation pins. The DB-bound success/rollback paths
+// live in tests/tags.integration.test.ts; this block covers the pre-DB
+// validation throw paths so they're verified without docker.
+describe("mergeTags — pre-DB validation", () => {
+  // Build a noop db handle: any DB access would throw, but every test in this
+  // block expects a TagValidationError thrown BEFORE any DB access.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const noopDb: any = new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error("validation should reject before any DB access");
+      },
+    },
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const noopEmbedder: any = {
+    model: "stub",
+    version: "v1",
+    embed: () => {
+      throw new Error("validation should reject before embed");
+    },
+    embedBatch: () => {
+      throw new Error("validation should reject before embedBatch");
+    },
+  };
+
+  it("rejects empty `to` with TagValidationError(reason=empty)", async () => {
+    const { mergeTags } = await import("@/lib/tags");
+    await expect(
+      mergeTags({ db: noopDb, embedder: noopEmbedder, from: ["a"], to: "   " }),
+    ).rejects.toMatchObject({ name: "TagValidationError", reason: "empty", field: "to" });
+  });
+
+  it("rejects niqqud in `to` (D9 strict)", async () => {
+    const { mergeTags } = await import("@/lib/tags");
+    await expect(
+      mergeTags({ db: noopDb, embedder: noopEmbedder, from: ["a"], to: "עְדִיפוּת" }),
+    ).rejects.toMatchObject({ name: "TagValidationError", reason: "niqqud" });
+  });
+
+  it("rejects empty `from` array with reason=empty_array", async () => {
+    const { mergeTags } = await import("@/lib/tags");
+    await expect(
+      mergeTags({ db: noopDb, embedder: noopEmbedder, from: [], to: "valid" }),
+    ).rejects.toMatchObject({
+      name: "TagValidationError",
+      reason: "empty_array",
+      field: "from",
+    });
+  });
+
+  it("rejects duplicate values inside `from[]` (after normalization)", async () => {
+    const { mergeTags } = await import("@/lib/tags");
+    // Two entries differ only in trailing whitespace → both normalize to "foo".
+    await expect(
+      mergeTags({ db: noopDb, embedder: noopEmbedder, from: ["foo", "  foo  "], to: "bar" }),
+    ).rejects.toMatchObject({
+      name: "TagValidationError",
+      reason: "duplicate_in_from",
+      field: "from",
+    });
+  });
+
+  it("rejects to ∈ from after normalization (DP2)", async () => {
+    const { mergeTags } = await import("@/lib/tags");
+    await expect(
+      mergeTags({ db: noopDb, embedder: noopEmbedder, from: ["foo", "bar"], to: "  foo  " }),
+    ).rejects.toMatchObject({
+      name: "TagValidationError",
+      reason: "to_in_from",
+      field: "to",
+    });
+  });
+
+  it("rejects from[] elements longer than MAX_TAG_LENGTH (loose-length rule still fires)", async () => {
+    const { mergeTags } = await import("@/lib/tags");
+    const tooLong = "x".repeat(MAX_TAG_LENGTH + 1);
+    await expect(
+      mergeTags({ db: noopDb, embedder: noopEmbedder, from: [tooLong], to: "valid" }),
+    ).rejects.toMatchObject({
+      name: "TagValidationError",
+      reason: "too_long",
+      field: "from",
+    });
+  });
+});
+
+describe("MergeRollbackError", () => {
+  it("preserves audit_id + cause class on the instance", async () => {
+    const { MergeRollbackError } = await import("@/lib/tags");
+    const e = new MergeRollbackError("audit-123", "VoyageError", "503 service unavailable");
+    expect(e).toBeInstanceOf(Error);
+    expect(e.name).toBe("MergeRollbackError");
+    expect(e.audit_id).toBe("audit-123");
+    expect(e.cause_class).toBe("VoyageError");
+    expect(e.cause_message).toBe("503 service unavailable");
+    expect(e.message).toContain("audit-123");
+    expect(e.message).toContain("VoyageError");
+  });
 });
