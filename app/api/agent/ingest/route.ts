@@ -47,8 +47,9 @@ import {
   getAgent,
 } from "@/lib/agents";
 import { AGENT_TOOLS } from "@/lib/agents-tools";
-import { withAdmin } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { listAdminTagsForRole } from "@/lib/admin-tags";
+import { resolveRoleFromHeader, STUB_ROLE_HEADER, type Role, withAdmin } from "@/lib/auth";
+import { getDb, getPool } from "@/lib/db";
 import { getEmbedder } from "@/lib/embedding";
 import { EmptyBodyAfterScrubError, submitEntryFromAgent } from "@/lib/ingest";
 import { IngestBody, issuesFromZodError } from "@/lib/ingest-schema";
@@ -122,15 +123,24 @@ const BodySchema = z.object({
 
 type ToolDispatchResult = { ok: true; output: unknown } | { ok: false; error: string };
 
+// PR-C plan-CR B2 fix 2026-06-01: dispatchTool takes `role` as a parameter
+// so list_tags (D5 "agent tool inherits the calling agent's role context")
+// can pass the resolved role to listAdminTagsForRole. Today the agent route
+// is withAdmin-gated → role is always "admin"; the parameter exists to make
+// the coupling visible, not because of an existing non-admin caller.
+const LIST_TAGS_INPUT = z.object({
+  prefix: z.string().optional(),
+});
+
 /**
  * Run one tool by name. The driver passes `tool_use_start.input` verbatim
  * from the agent; this function is responsible for schema validation
- * (for submit_entry), DB calls (list_categories), and stubbed returns
- * (search_kb). Generic throws are mapped to `ok:false` so the loop can
- * continue and let the agent re-prompt; only the dispatcher decides
- * what's recoverable.
+ * (for submit_entry + list_tags), DB calls (list_categories + list_tags),
+ * and stubbed returns (search_kb). Generic throws are mapped to `ok:false`
+ * so the loop can continue and let the agent re-prompt; only the dispatcher
+ * decides what's recoverable.
  */
-async function dispatchTool(name: string, input: unknown): Promise<ToolDispatchResult> {
+async function dispatchTool(name: string, input: unknown, role: Role): Promise<ToolDispatchResult> {
   try {
     switch (name) {
       case "submit_entry":
@@ -143,6 +153,8 @@ async function dispatchTool(name: string, input: unknown): Promise<ToolDispatchR
           ok: true,
           output: { candidates: [], note: "retrieval_unavailable_m2a" },
         };
+      case "list_tags":
+        return await dispatchListTags(input, role);
       default:
         return { ok: false, error: `unknown_tool:${name}` };
     }
@@ -202,6 +214,35 @@ async function dispatchListCategories(): Promise<ToolDispatchResult> {
   return { ok: true, output: { categories: rows.map((r) => r.category) } };
 }
 
+/**
+ * PR-C dispatch for list_tags (ADR-0025 D5 mirror). Plan-CR M6 fix 2026-06-01:
+ * the agent's tool_use_start.input is Zod-parsed here so a hallucinated
+ * `prefix: 12345` or `{prefix: "x", junk: "y"}` produces a clean tool_result
+ * with `ok:false`/`code:invalid_input` rather than coercing through to the lib.
+ * Role is plumbed per B2 fix; today always "admin" since the route is
+ * withAdmin, parameter exists to make the iron-rule-#6 coupling visible.
+ */
+async function dispatchListTags(input: unknown, role: Role): Promise<ToolDispatchResult> {
+  const parsed = LIST_TAGS_INPUT.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: JSON.stringify({
+        code: "invalid_input",
+        issues: issuesFromZodError(parsed.error),
+      }),
+    };
+  }
+  // Empty-string prefix normalizes to undefined (lib-side does the same,
+  // belt-and-suspenders at the dispatch boundary).
+  const prefix =
+    parsed.data.prefix !== undefined && parsed.data.prefix.trim() !== ""
+      ? parsed.data.prefix.trim()
+      : undefined;
+  const tags = await listAdminTagsForRole(getPool(), role, { prefix });
+  return { ok: true, output: { tags } };
+}
+
 // ── Tool-use loop driver ───────────────────────────────────────────────────
 
 type DriverStats = { iterations: number };
@@ -222,6 +263,10 @@ async function* runAgentTurn(
   signal: AbortSignal,
   env: AgentEnvConfig,
   stats: DriverStats,
+  // PR-C B2 fix: role threaded from handler so dispatchTool can pass it to
+  // list_tags' lib call. Always "admin" today (withAdmin gate); parameter
+  // exists to make the coupling visible.
+  role: Role,
 ): AsyncGenerator<AgentEvent, void, void> {
   let messages: AgentMessage[] = [...initialMessages];
 
@@ -296,7 +341,7 @@ async function* runAgentTurn(
     // the next-turn user message containing tool_result content blocks.
     const toolResultBlocks: AgentContentBlock[] = [];
     for (const tu of collectedToolUses) {
-      const result = await dispatchTool(tu.name, tu.input);
+      const result = await dispatchTool(tu.name, tu.input, role);
       const resultEvent: AgentEvent =
         result.ok === true
           ? { kind: "tool_result", name: tu.name, ok: true, output: result.output }
@@ -329,6 +374,25 @@ function jsonError(status: number, error: string, extra?: object): Response {
 }
 
 async function handler(req: NextRequest): Promise<Response> {
+  // 0. Resolve role for tool-dispatch plumbing (PR-C B2 fix). withAdmin has
+  // already gated the request, so role is guaranteed "admin" here — but
+  // threading it explicitly to dispatchTool keeps the iron-rule-#6 coupling
+  // visible at the call site (D5 "agent tool inherits the calling agent's
+  // role context").
+  //
+  // m3 code-CR fix 2026-06-01: fail loud if the resolved role isn't admin.
+  // A null/user result here means withAdmin's gate logic drifted apart from
+  // resolveRoleFromHeader's mapping; a silent `?? "admin"` fallback would
+  // grant admin to whoever evaded the gate, which is exactly the wrong
+  // recovery. Throw instead so the route returns 500 and the bug is loud.
+  const resolvedRole = resolveRoleFromHeader(req.headers.get(STUB_ROLE_HEADER));
+  if (resolvedRole !== "admin") {
+    throw new Error(
+      `withAdmin gate drift: agent ingest handler resolved role=${resolvedRole}, expected "admin"`,
+    );
+  }
+  const role: Role = resolvedRole;
+
   // 1. Body parse + Zod validate.
   let parsed: unknown;
   try {
@@ -406,7 +470,7 @@ async function handler(req: NextRequest): Promise<Response> {
       let lastStopReason: (AgentEvent & { kind: "done" })["stop_reason"] | undefined;
 
       try {
-        for await (const ev of runAgentTurn(agent, messages, composedSignal, env, stats)) {
+        for await (const ev of runAgentTurn(agent, messages, composedSignal, env, stats, role)) {
           tryEnqueue(enc.encode(`data: ${JSON.stringify(ev)}\n\n`));
           if (ev.kind === "error") {
             status = "error";
