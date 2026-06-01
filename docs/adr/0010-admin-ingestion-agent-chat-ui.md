@@ -221,6 +221,14 @@ The prompt hash will change on this bump; from that deploy forward `audit_log.pr
 
 **Note on §"Why not just a structured form?" below.** The v0.1.0 PII-coaching dialogue was one of three form-vs-chat arguments at the original ADR-0010 write-up. v0.2.0's shift to a one-shot PII alert ("heads-up, not a vote") neutralizes that argument — both shapes would now show a one-shot strip notice. Language-mirroring and duplicate-detection remain valid form-vs-chat differentiators; see §"Why not just a structured form?" below.
 
+### Prompt v0.3.0 (rides with M4 #4 PR-C — see ADR-0025 D5 + Amendment 2026-06-01)
+
+[prompts/ingestion-agent.md](../../prompts/ingestion-agent.md) gets one edit when the `list_tags` Ingestion Agent tool lands (M4 #4 PR-C):
+
+1. **Tag-collection paragraph rewrite.** v0.2.0 line 22 said: *"`tags[]` — 1-5 short tags. Reuse existing tags when possible (suggest from existing taxonomy)."* Rewrite to instruct the agent to **always call `list_tags({prefix: <2-3 chars from admin input>})`** before proposing a tag value and **prefer the catalog's exact byte form** (case-sensitive identity per ADR-0025 D10). Only create a new tag when the admin's intent has no reasonable match in the catalog. Call `list_tags()` with no prefix to fetch the whole catalog when the admin is undecided.
+
+The prompt hash changes on this bump exactly the way the v0.1.0 → v0.2.0 transition did: from that deploy forward `audit_log.prompt_hash` carries the v0.3.0 hash; prior `agent_ingest` rows keep the v0.2.0 hash; iron-rule #10's provenance design is doing its job. The `lib/prompts.ts` byte-roundtrip assertion at boot continues to be the runtime gate; `lib/prompts.test.ts` is updated to pin presence of the new v0.3.0 strings AND absence of v0.2.0/v0.1.0 strings (negative-assertion pattern per WORKFLOW.md).
+
 ### Anthropic SDK adoption
 
 `@anthropic-ai/sdk` is a non-trivial new dependency. At impl-PR step 1, run `npm ls` against the lockfile produced and check for transitive conflicts with `next@16` / `react@19`. Pin exactly; bump deliberately.

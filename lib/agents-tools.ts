@@ -1,9 +1,11 @@
 // lib/agents-tools.ts — agent tool registry (ADR-0010 §6).
 //
-// Three M2a tools the Ingestion Agent can call:
+// Four tools the Ingestion Agent can call:
 //   - submit_entry      → wraps IngestBody, lands a new entry
 //   - list_categories   → SELECT DISTINCT category FROM entries
 //   - search_kb         → duplicate detection (M3-deferred; M2a stub)
+//   - list_tags         → ADR-0025 D5 suggest endpoint mirror (M4 #4 PR-C):
+//                         optional prefix; returns role-filtered catalog
 //
 // Wire-shape conforms to the Anthropic SDK's `tools` parameter:
 // `{ name, description, input_schema }` where `input_schema` is JSON
@@ -97,6 +99,25 @@ export const SEARCH_KB_INPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+// ADR-0025 D5 list_tags: optional ILIKE prefix; both omitted-prefix and
+// present-prefix surface the role-filtered catalog. No length cap on prefix
+// (B1 plan-CR fix 2026-06-01: D5 specifies none + withAdmin gates the
+// surface + a UTF-16 .length cap would conflate with D9's NFC code-point
+// measurement). additionalProperties: false is an LLM coaching hint, NOT a
+// server-side gate (same posture as submit_entry; the route + dispatch
+// Zod-parse the input for actual enforcement).
+export const LIST_TAGS_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    prefix: {
+      type: "string",
+      description:
+        "Optional case-insensitive prefix to filter the catalog. Omit to fetch all tags.",
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 // Tool definitions. The outer object is deliberately NOT `as const` so
 // each property stays writable at the type level — `AgentToolDefinitionShape`
 // (lib/agents.ts) declares `name: string` (mutable), and a readonly
@@ -126,6 +147,13 @@ export const SEARCH_KB_TOOL = {
   input_schema: SEARCH_KB_INPUT_SCHEMA,
 };
 
+export const LIST_TAGS_TOOL = {
+  name: "list_tags" as const,
+  description:
+    "List existing tags in the KB, sorted by entry_count DESC then alphabetical. Optional `prefix` (case-insensitive) narrows the catalog — useful while collecting the `tags` field to suggest existing canonical names rather than create near-duplicate spellings. Returns { tags: Array<{ name: string, entry_count: number }> }. Always prefer reusing an existing canonical name (case-sensitive byte identity) over inventing a new tag.",
+  input_schema: LIST_TAGS_INPUT_SCHEMA,
+};
+
 /**
  * Discriminated union over the three M2a tool names. Narrower than
  * `AgentToolDefinitionShape` from `lib/agents.ts`: each member pins
@@ -135,7 +163,8 @@ export const SEARCH_KB_TOOL = {
 export type AgentToolDefinition =
   | typeof SUBMIT_ENTRY_TOOL
   | typeof LIST_CATEGORIES_TOOL
-  | typeof SEARCH_KB_TOOL;
+  | typeof SEARCH_KB_TOOL
+  | typeof LIST_TAGS_TOOL;
 
 /**
  * The registry the agent gets at every call. Static `ReadonlyArray` for
@@ -151,4 +180,5 @@ export const AGENT_TOOLS: ReadonlyArray<AgentToolDefinition> = [
   SUBMIT_ENTRY_TOOL,
   LIST_CATEGORIES_TOOL,
   SEARCH_KB_TOOL,
+  LIST_TAGS_TOOL,
 ];

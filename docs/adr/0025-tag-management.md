@@ -472,3 +472,42 @@ The audit-row payload shape (`partial_failure?: true`) is unchanged across all t
 - **Q3 (lock-ordering hold-all-locks as deferred concurrency cost)** — Agreed + documented in lib docstring + BACKLOG.
 - **Q4 (`to ∈ from` validation vs no-op audit row)** — Decided: 400 no audit (above, A4 extension).
 - **Q5 (D7 prose stale "Active operations" reference)** — Agreed + retired (D7 prose update above).
+
+---
+
+## Amendment 2026-06-01 (PR-C) — final implementation slice, M4 #4 closed
+
+PR-C ships the last leg of the D7 implementation split per ADR-0025 D5 + D14: the `GET /api/admin/tags?prefix=<>` admin endpoint and the `list_tags()` Ingestion Agent tool. Both surfaces share `lib/admin-tags.ts::listAdminTagsForRole`, now extended with an optional `{ prefix?: string }` filter. With PR-C live, **M4 #4 ROADMAP closes (box flips to `[x]`)**.
+
+### Implementation footprint (no new design decisions; D5 remains the contract)
+
+- `lib/admin-tags.ts` — `listAdminTagsForRole(pool, role, opts?)` gains optional ILIKE prefix per D5. Conditional WHERE expressed as `$2::text IS NULL OR LOWER(t.tag) LIKE LOWER($2) || '%'` (single SQL string handles both modes; m3 plan-CR fix).
+- `app/api/admin/tags/route.ts` (new) — `GET` withAdmin handler. **No prefix length cap** (B1 plan-CR fix: D5 doesn't specify one + a defensive UTF-16 .length cap would conflate with D9's NFC code-point measurement). Empty-string / whitespace-only prefix normalizes to undefined → full catalog (M3 plan-CR fix).
+- `lib/agents-tools.ts` — `LIST_TAGS_TOOL` + `LIST_TAGS_INPUT_SCHEMA` (optional `prefix`, no required[], `additionalProperties: false` as LLM coaching hint per existing pattern); `AGENT_TOOLS.length` 3 → 4.
+- `app/api/agent/ingest/route.ts` — new `case "list_tags":` in `dispatchTool`. **Role plumbed from the request through to the lib call** (B2 plan-CR fix: D5 says "the agent tool inherits the calling agent's role context" — today always admin via withAdmin gate, but making the coupling visible via the explicit `role` parameter prevents silent future drift). Tool input Zod-parsed via `LIST_TAGS_INPUT = z.object({ prefix: z.string().optional() })` at the dispatch boundary (M6 plan-CR fix: agent passing `{prefix: 12345}` now produces a clean `tool_result.ok: false` rather than coercing through to the lib).
+- `prompts/ingestion-agent.md` — version 0.2.0 → 0.3.0; the `tags[]` collection paragraph rewritten to instruct the agent to always call `list_tags({prefix: ...})` before proposing a tag value and prefer canonical bytes from the catalog. The hash sealed at boot (`lib/prompts.ts`) changes accordingly; every post-ship `agent_ingest`/`agent_ingest_update` audit row carries the new hash. Iron-rule #10 invariant unchanged — the byte-roundtrip assertion in `lib/prompts.ts` still fires and `lib/prompts.test.ts` pins both presence of v0.3.0 strings and absence of v0.2.0/v0.1.0 strings (m1 plan-CR fix).
+- **Mechanical floor: registry-vs-dispatch drift gate** — `app/api/agent/ingest/route.test.ts` adds a test that iterates `AGENT_TOOLS` and asserts every entry resolves through `dispatchTool` to a real handler (no `unknown_tool:` fallthrough). A future tool added to the registry without wiring its dispatch case will now fail loudly at test time (M4 plan-CR fix).
+
+### Plan-CR coverage summary (PR-C)
+
+- **B1** (prefix cap mismatch) — Agreed + dropped the cap entirely.
+- **B2** (hardcoded "admin" violates D5 role-context inheritance) — Agreed + plumbed role from request through `dispatchTool(name, input, role)` and into the lib call.
+- **B3** (Reconciliation-grep 1-hop transitives) — Agreed + extended the existing D5 `describe` block in the integration test rather than adding a parallel one; `Awaited<ReturnType<typeof listAdminTagsForRole>>` derivation in `merge/route.ts:96` survives unchanged (only added an optional `opts` parameter).
+- **M1** (audit-log tool-call ledger) — Deferred to BACKLOG: pre-existing gap, not introduced by PR-C; D5's "prompt_hash + tool-call log reproduces the run" is aspirational against the current audit-row shape.
+- **M2** (ILIKE no-index posture) — Agreed + documented in `lib/admin-tags.ts` docstring; BACKLOG entry queued for M5 production scale.
+- **M3** (empty/null/missing prefix semantics) — Agreed + locked: trim → if empty, undefined → full catalog. Route AND lib both normalize (belt-and-suspenders); test pinned.
+- **M4** (registry-vs-dispatch drift floor) — Agreed + implemented.
+- **M5** (catalog-pre-fill mechanical floor for agent) — Disagreed + documented: agent has no "free-text bypass" surface like the UI; legitimate "new tag" creations are indistinguishable from "typo of existing tag" server-side. Prose floor in v0.3.0 prompt is the right level for PR-C.
+- **M6** (tool input not Zod-parsed in dispatch) — Agreed + added `LIST_TAGS_INPUT` schema in route + `safeParse` at the dispatch boundary.
+- **m1** (v0.2.0→v0.3.0 negative-assertion) — Agreed + `lib/prompts.test.ts` content tests assert v0.3.0 strings + v0.2.0/v0.1.0 absence.
+- **m2** (Amendment wording locked) — Agreed; this section IS the locked confirmatory amendment.
+- **m3** (conditional WHERE via SQL coalescence) — Agreed + implemented.
+- **Q1** (audit-log tool-call ledger) — Covered by M1 BACKLOG.
+- **Q2** (verify-roadmap-tickboxes accepts PR-C flip) — Agreed + run as part of pre-push gate.
+- **Q3** (Hebrew prefix URL encoding) — Agreed + Hebrew prefix integration test added (`prefix: "ספ"` matches `ספק` + `ספר`, excludes `לקוח`).
+- **Q4** (prompt update LAST) — Agreed + order followed: lib + route + dispatch + tests gates green → THEN prompt v0.3.0 bump.
+- **Q5** (ADR-0010 v0.2.0→v0.3.0 transition prose) — Agreed; recorded in ADR-0010 alongside this amendment.
+
+### Reversibility
+
+The prompt v0.2.0 → v0.3.0 transition is reversible at the cost of a follow-up prompt edit + hash regen + test update; no audit-log row migration is required (rows carry whichever hash was sealed at write time — that's the whole point of iron-rule #10's hash field). The `list_tags` tool can be retired by deleting the registry entry + dispatch case; existing audit rows referencing the tool name remain valid as historical records.

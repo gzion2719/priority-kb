@@ -36,12 +36,36 @@ export interface AdminTagsCatalogRow {
  * unnest+group_by shape is awkward to express in Drizzle's query builder and the
  * SQL is short + self-documenting. Mirrors the listStaleEntries / listEntriesForAdmin
  * pattern in lib/entries.ts where keyset pagination also drops to raw SQL.
+ *
+ * PR-C (M4 #4) extension 2026-06-01: optional `prefix` parameter does a
+ * case-insensitive ILIKE prefix match per ADR-0025 D5. The conditional WHERE
+ * is expressed as `$2::text IS NULL OR LOWER(t.tag) LIKE LOWER($2) || '%'`
+ * (single SQL string, both with-prefix and no-prefix paths) rather than a
+ * runtime concatenation.
+ *
+ * No-index posture (M2 plan-CR fix, mirrors ADR-0025 Amendment 2026-06-01 §B2
+ * "accepted cost, documented, not engineered around"): the unnest+ILIKE path
+ * is a sequential scan after the sensitivity filter. At M4 admin scale (low
+ * hundreds of entries with low-tens of tags each), this is sub-millisecond.
+ * BACKLOG entry queued for M5 — at production scale either a materialized
+ * tags catalog table or a trigram/expression index on unnested tags becomes
+ * worth the complexity.
  */
-export async function listAdminTagsForRole(pool: Pool, role: Role): Promise<AdminTagsCatalogRow[]> {
+export async function listAdminTagsForRole(
+  pool: Pool,
+  role: Role,
+  opts?: { prefix?: string },
+): Promise<AdminTagsCatalogRow[]> {
   const allowedSensitivities = sensitivityAllowedForRole(role);
-  // The subquery alias `t` is required by Postgres for derived tables. The
-  // COUNT(*) cast to int handles the bigint -> string node-postgres default;
-  // entry_count is bounded by the corpus size (well under INT4_MAX).
+  // M3 plan-CR fix: normalize empty-string prefix to null (no-filter mode).
+  // m2 code-CR fix 2026-06-01: ALSO trim whitespace lib-side, not just
+  // route-side, so direct programmatic callers can't accidentally produce a
+  // route-vs-lib divergence by passing `{prefix: " "}` (single space) that
+  // the route would have trimmed to "" but the lib would have queried as
+  // `LOWER(' ') LIKE LOWER(' ') || '%'` returning zero results. With trim()
+  // + truthiness check, both code paths normalize to the same null.
+  const trimmed = opts?.prefix?.trim();
+  const prefix = trimmed ? trimmed : null;
   const result = await pool.query<{ name: string; entry_count: number }>(
     `
     SELECT t.tag AS name, COUNT(*)::int AS entry_count
@@ -50,10 +74,11 @@ export async function listAdminTagsForRole(pool: Pool, role: Role): Promise<Admi
       FROM entries
       WHERE sensitivity = ANY($1::text[])
     ) AS t
+    WHERE $2::text IS NULL OR LOWER(t.tag) LIKE LOWER($2) || '%'
     GROUP BY t.tag
     ORDER BY entry_count DESC, t.tag ASC
     `,
-    [allowedSensitivities],
+    [allowedSensitivities, prefix],
   );
   return result.rows;
 }

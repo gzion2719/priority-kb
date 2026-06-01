@@ -250,6 +250,61 @@ describe.skipIf(!DATABASE_URL)("tags integration (PR-A)", () => {
       expect(names).toContain("onlypublic");
       expect(names).not.toContain("onlyrestricted");
     });
+
+    // PR-C: ADR-0025 D5 prefix filter (case-insensitive ILIKE).
+    it("PR-C prefix filter narrows the catalog to tags starting with the prefix (case-insensitive)", async () => {
+      await seedEntry("pref-1", ["VendorA"], "public");
+      await seedEntry("pref-2", ["vendorB"], "public");
+      await seedEntry("pref-3", ["supplier"], "public");
+
+      // Lower-case prefix matches mixed-case tags via ILIKE.
+      const lower = await listAdminTagsForRole(pool, "admin", { prefix: "ven" });
+      const lowerNames = lower.map((c) => c.name);
+      expect(lowerNames).toContain("VendorA");
+      expect(lowerNames).toContain("vendorB");
+      expect(lowerNames).not.toContain("supplier");
+
+      // Upper-case prefix matches the same set (case-insensitivity proof).
+      const upper = await listAdminTagsForRole(pool, "admin", { prefix: "VEN" });
+      const upperNames = upper.map((c) => c.name);
+      expect(upperNames).toContain("VendorA");
+      expect(upperNames).toContain("vendorB");
+      expect(upperNames).not.toContain("supplier");
+    });
+
+    it("PR-C empty-string prefix is treated as no-filter (M3 plan-CR fix)", async () => {
+      await seedEntry("emptypref-1", ["alpha"], "public");
+      await seedEntry("emptypref-2", ["beta"], "public");
+
+      const empty = await listAdminTagsForRole(pool, "admin", { prefix: "" });
+      const emptyNames = empty.map((c) => c.name);
+      // Both tags returned — empty prefix === full catalog.
+      expect(emptyNames).toContain("alpha");
+      expect(emptyNames).toContain("beta");
+    });
+
+    it("PR-C prefix with no matches returns empty catalog (negative-assertion against universal match)", async () => {
+      await seedEntry("nomatch-1", ["alpha"], "public");
+      await seedEntry("nomatch-2", ["beta"], "public");
+
+      const noMatch = await listAdminTagsForRole(pool, "admin", { prefix: "zzz" });
+      // Distinguishes "filter works" from "filter is ignored": with no prefix
+      // applied, alpha + beta would surface. With the zzz prefix filter
+      // correctly applied, the catalog is empty.
+      expect(noMatch).toEqual([]);
+    });
+
+    it("PR-C Hebrew prefix matches Hebrew tags (Q3 plan-CR coverage)", async () => {
+      await seedEntry("heb-1", ["ספק"], "public");
+      await seedEntry("heb-2", ["ספר"], "public"); // different Hebrew root, same prefix ספ
+      await seedEntry("heb-3", ["לקוח"], "public");
+
+      const hebrew = await listAdminTagsForRole(pool, "admin", { prefix: "ספ" });
+      const hebrewNames = hebrew.map((c) => c.name);
+      expect(hebrewNames).toContain("ספק");
+      expect(hebrewNames).toContain("ספר");
+      expect(hebrewNames).not.toContain("לקוח");
+    });
   });
 
   describe("mergeTags (PR-B)", () => {

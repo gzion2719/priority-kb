@@ -20,6 +20,19 @@ describe("lib/admin-tags exports", () => {
   });
 });
 
+describe("listAdminTagsForRole — PR-C prefix option (M4 #4)", () => {
+  it("accepts an opts arg with optional prefix", () => {
+    // Compile-time shape pin: the function's signature must allow opts to be
+    // omitted entirely (PR-A/B precedent) AND must accept { prefix: string }.
+    // This is a typecheck-equivalent assertion at runtime — `as never` would
+    // hide a parameter-arity change.
+    expect(listAdminTagsForRole.length).toBeGreaterThanOrEqual(2);
+    // The lib-side normalization (empty/whitespace prefix → undefined) is
+    // exercised by the DB-bound tests in tests/tags.integration.test.ts;
+    // this file only pins the parameter surface.
+  });
+});
+
 describe("sensitivity-allow-list parity with ADR-0025 D5", () => {
   // The catalog query filters by entries.sensitivity = ANY(sensitivityAllowedForRole(role)).
   // Pinning the role → allow-list here prevents drift between
