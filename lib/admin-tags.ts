@@ -59,7 +59,18 @@ export async function listAdminTagsForRole(pool: Pool, role: Role): Promise<Admi
 }
 
 /**
- * Returns the last N tag-management audit_log rows (kind IN tag_rename/tag_delete),
+ * Canonical enumeration of operation-level tag-management audit kinds. M5 CR
+ * fix 2026-06-01: extracted as a single source-of-truth alias so adding a
+ * fourth audit kind in a future PR is one edit, not three coordinated edits
+ * (the union was previously duplicated in TagAuditRow.kind, the pg query
+ * generic in this file, and app/admin/tags/page.tsx's summarizeAuditPayload).
+ * Per-row entry-level audit kinds (`ingest`, `ingest_update`, `entry_view`,
+ * etc.) are NOT part of this union; they live elsewhere.
+ */
+export type TagOperationAuditKind = "tag_rename" | "tag_delete" | "tag_merge";
+
+/**
+ * Returns the last N tag-management audit_log rows (kind IN tag_rename/tag_delete/tag_merge),
  * newest first, for the dashboard's audit-trail section.
  *
  * Plain raw SQL again — Drizzle's query builder doesn't model `kind IN (...)` cleanly
@@ -68,7 +79,7 @@ export async function listAdminTagsForRole(pool: Pool, role: Role): Promise<Admi
  */
 export interface TagAuditRow {
   id: string;
-  kind: "tag_rename" | "tag_delete";
+  kind: TagOperationAuditKind;
   payload: Record<string, unknown>;
   occurred_at: Date;
 }
@@ -76,14 +87,14 @@ export interface TagAuditRow {
 export async function listRecentTagAuditRows(pool: Pool, limit = 50): Promise<TagAuditRow[]> {
   const result = await pool.query<{
     id: string;
-    kind: "tag_rename" | "tag_delete";
+    kind: TagOperationAuditKind;
     payload: Record<string, unknown>;
     occurred_at: Date;
   }>(
     `
     SELECT id, kind, payload, occurred_at
     FROM audit_log
-    WHERE kind IN ('tag_rename', 'tag_delete')
+    WHERE kind IN ('tag_rename', 'tag_delete', 'tag_merge')
     ORDER BY occurred_at DESC
     LIMIT $1
     `,

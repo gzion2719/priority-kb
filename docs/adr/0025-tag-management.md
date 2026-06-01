@@ -373,3 +373,102 @@ PR-A bundles:
 - One-line ROADMAP M4 #4 update noting PR-A landed; box stays `[ ]` until PR-C.
 
 PR-B / PR-C unchanged from the original D7 split, except the D6 dashboard's "Active operations" section is retired under A2 (no jobs).
+
+---
+
+## Amendment 2026-06-01 — PR-B reconciliation: atomic-or-bust + outer-tx mechanics
+
+The PR-B implementation session ran its Step 7b plan-CR against the planned PR-B shape; the reviewer surfaced three BLOCKING + five MAJOR findings that fold into the design text below ahead of PR-B's code-CR. Two locked design decisions also need to be captured at the ADR level so they survive into PR-C and beyond.
+
+### B1 — Atomic-or-bust failure semantics (DP1(a))
+
+**Decision: mergeTags is atomic-or-bust.** The per-entry loop runs inside ONE outer `db.transaction(...)`. Any per-iteration `updateEntry` throw propagates out of the callback; drizzle rolls back the outer tx (and every nested savepoint) → zero entries changed. mergeTags then throws `MergeRollbackError` carrying the audit_id captured at start.
+
+This was empirically verified before code-CR via a TDD-first integration test (`tests/tags.integration.test.ts` "ATOMIC-OR-BUST GATE (B1)"): seeds 5 entries, poisons the embedder on the 3rd call, asserts that NO `entries_versions` v2 rows + NO `ingest_update` audit rows exist for ANY iteration after the merge throws. The test passed first-try against local docker Postgres — drizzle's nested savepoint chain unwinds to the outermost transaction callback as designed.
+
+The alternative — mirror PR-A's A8 partial-failure (skip-on-transient + commit) — was considered and rejected because under outer-tx atomicity, "continue past a Voyage 5xx" would either (a) commit the merge with one entry silently unmerged, breaking D3's "single atomic event" claim, or (b) become decorative (the outer-tx wrapper adds nothing PR-A's per-iteration scoping doesn't already provide). DP1(a) honors D3 strictly.
+
+The `TagOperationResult.partial_failure` flag is therefore always `false` on a successful merge response; the merge route omits it from the 200 JSON body (Q1 decision below). A rollback never reaches the success path — it raises `MergeRollbackError` instead.
+
+### B2 — FOR-UPDATE lock-hold cost: stop-the-world for affected rows
+
+**Accepted cost (documented, not engineered around): each affected row's `FOR UPDATE` lock is held for the duration of the entire outer tx.** A 500-entry merge holds 500 row locks simultaneously, blocking every concurrent `updateEntry` on any of those rows for the merge's wall-clock duration.
+
+PR-A's renameTag/deleteTag deliberately scope per-iteration (each row lock releases at the per-iteration commit). PR-B's atomic-or-bust contract precludes that scoping — outer-tx atomicity requires holding locks until the outer commit. The two refactor-paths (give up atomicity to get per-iteration lock release; or accept the lock-hold cost) are mutually exclusive; PR-B picks the second.
+
+At M4 admin scale (one operator, low-tens to low-hundreds of entries per typical merge), the lock-hold cost is acceptable. M5 hosting decision (multiple concurrent admins, real production scale, possible long-running merges) will revisit; BACKLOG entry queued for the M5 concurrency-posture review.
+
+The lib's `applyTagTransformToEntry` helper gained an optional `outerTx?` parameter to support both modes — PR-A callers omit it (per-iteration scoping path); mergeTags provides it (atomic-or-bust path). The dual-mode helper is documented in-line.
+
+### B3 — MergeRollbackError + route finalize for forensic rollback shape
+
+**Decision: a rollback writes `partial_failure: true` + `partial_failure_reason` on the existing start-of-op `tag_merge` audit row.** Without this, a rolled-back merge's audit row is byte-identical to a no-op merge's audit row (both have empty `affected_entry_ids`), and the forensic trail cannot distinguish "rollback failure" from "no entries matched."
+
+Implementation contract:
+- `mergeTags` writes the start audit row BEFORE opening the outer tx (auto-tx INSERT). The row survives the outer-tx rollback.
+- On rollback, `mergeTags` throws `MergeRollbackError` carrying the audit_id + the redacted error class.
+- The merge route catches `MergeRollbackError`, reads the existing audit row's payload, splices in `partial_failure: true` + `partial_failure_reason: "rollback: <class>"`, writes it back via UPDATE. Wrapped in its own try/catch (a finalize failure shouldn't mask the 500).
+- `MergeRollbackError` is a distinct class from `TagValidationError` and from generic `Error`; the route's catch chain orders [TagValidationError → 400, MergeRollbackError → 500+finalize, other Error → 500+fallback INSERT].
+
+This is the ONE place beyond the lib's own end-of-op UPDATE that ADR-0025 endorses an `UPDATE audit_log` write. `audit_log` is otherwise append-only.
+
+### Q2 — Finalize-inside-outer-tx for the lib's end-of-op UPDATE
+
+**Decision: the lib's operation-level `tag_merge` audit-row UPDATE (the end-of-loop finalize that records the actual `affected_entry_ids`) lives INSIDE the outer tx, after the per-entry loop completes.** If the finalize UPDATE throws, the outer tx rolls back along with every per-entry change — atomic-or-bust extends to the finalize step.
+
+The alternative (finalize OUTSIDE the outer tx, like PR-A's `renameTag`/`deleteTag` do) was considered: a finalize failure would leave the database with entries changed but the audit row showing empty `affected_entry_ids` — strictly worse forensic state than the rollback case. PR-A's outside-tx finalize is correct for PR-A because there's no outer tx to be inside of; PR-B's inside-tx finalize is correct for PR-B because there is.
+
+### A4-extension — `to ∈ from` rejection (DP2)
+
+The original A4 distinguished three cases (Zod malformed → 400 no audit / D9 validation failure → 400 no audit / no-op operation → 200 audit with empty array). PR-B adds a fourth surface: `to ∈ from` at the validation boundary.
+
+**Decision: `to ∈ from` (after NFC normalization) joins A4 case 2** — HTTP 400, no audit row. Rationale: a merge with `to` in the source list is a request-shape error (the operation cannot coherently execute — what would the "merge target" mean if the target is also a source?). It's not a no-op the way "merge a non-existent tag" is; it's a malformed request. The lib's `mergeTags` throws `TagValidationError(field: "to", reason: "to_in_from")` BEFORE any DB write, so the no-audit-on-shape-failure invariant from A4 case 1 / case 2 extends to it naturally.
+
+The form's UI guards the same condition client-side (the `MergeForm` "Target tag is also in the source list" warning + disabled submit button), so legitimate UI requests never hit the server-side rejection.
+
+### D6 prose update — single-section MergeForm, retire per-row "Merge into…"
+
+The original D6 section 1 said per-row affordances "Rename", "Merge into…", "Delete." PR-A landed Rename + Delete as standalone forms (catalog dropdown for `from`/`tag`), not per-row affordances. PR-B mirrors that pattern: a single `MergeForm` section with checkbox multi-select for `from[]` + a dropdown for `to`. The per-row "Merge into…" framing is retired.
+
+Rationale: multi-source merge is the common case (the admin discovers three typo variants of "supplier" and merges them in one operation), and a multi-select UI is the natural shape. A per-row "Merge into…" would still need the multi-select to be useful, just promoted via a different entry point.
+
+### D7 prose update — PR-B's "Active operations" dashboard section is retired
+
+The original D7 said PR-B "lands the in-flight queue-depth section of D6, which becomes meaningful once merge can enqueue 100+ jobs at once." Amendment 2026-05-31 §A2 retired the `re_embed_entry` job queue (sync `updateEntry` instead). Amendment 2026-06-01 confirms: the D6 "Active operations" section is dropped from PR-B scope entirely; the lib's atomic-or-bust contract means there are no in-flight jobs to surface. PR-B ships the `MergeForm` + the `tag_merge` rendering branch in the existing audit-trail section; that's the dashboard delta.
+
+### M2 — Reconciliation grep for `tag_merge` audit kind
+
+The new `tag_merge` discriminator extends every existing surface that switches on `audit_log.kind` for tag operations:
+- `lib/admin-tags.ts` `TagAuditRow.kind` union (rename + delete → rename + delete + merge).
+- `lib/admin-tags.ts` `listRecentTagAuditRows` WHERE clause (adds `'tag_merge'`).
+- `app/admin/tags/page.tsx` `summarizeAuditPayload` switch (new `tag_merge` branch rendering `merge [a, b] → "c" — N entries`).
+- `tests/tags.integration.test.ts` audit-trail test assertion (new `expect(kinds).toContain("tag_merge")`).
+
+Each surface was reconciled in the PR-B implementation; the audit-trail teardown's `kind LIKE 'tag\_%'` LIKE pattern already covers `tag_merge` by construction (no test-side surface drift).
+
+### Q1 — Merge route response shape: omit `partial_failure` when false
+
+The PR-A rename/delete routes always include `partial_failure: boolean` in the 200 JSON body. The merge route omits the field entirely on a 200 response — under DP1(a), `partial_failure` is always `false` on success (any non-success throws `MergeRollbackError` and returns 500). The PR-A field is preserved on its routes for backward compatibility.
+
+The audit-row payload shape (`partial_failure?: true`) is unchanged across all three operations.
+
+### Plan-CR coverage summary
+
+- **B1 (savepoint-nesting atomicity)** — Agreed + verified via TDD-first integration test before code (above).
+- **B2 (FOR-UPDATE scope-broadening)** — Agreed + documented as accepted cost; BACKLOG entry queued for M5 revisit.
+- **B3 (forensic rollback gap)** — Agreed + implemented via `MergeRollbackError` + route finalize.
+- **M1 (D6 UX collision)** — Agreed + retired per-row "Merge into…" (D6 prose updated above).
+- **M2 (page.tsx switch + lib type union enumeration)** — Agreed + reconciled across every consumer.
+- **M3 (outerTx-provided code path needs concurrent-edit race coverage)** — Deferred — the atomic-or-bust gate test exercises the new path under the only race that matters (mid-loop throw); a "two concurrent admins merging the same tag set" scenario adds disproportionate test complexity for a scale (M4 single-operator) where the race is rare. BACKLOG entry queued with the M5 concurrency-posture review.
+- **M4 (atomic-rollback test under-specified)** — Agreed + implemented as count-based throwing embedder + per-iteration `entries_versions` count assertion.
+- **M5 (Drizzle text[] binding)** — Agreed + smoke-tested first. Empirical correction folded into code: drizzle's `sql\`${jsArray}\`` template binds via toString(); workaround is to serialize the array to a Postgres array literal string ourselves and bind it as a single text param cast to text[].
+- **m1 (iron-rule #6 docstring line)** — Agreed + added to `lib/tags.ts::mergeTags` docstring.
+- **m2 (TagValidationError reason union extension)** — Agreed + extended (`to_in_from` / `empty_array` / `duplicate_in_from`) — no new error class.
+- **m3 (server-side catalog membership re-check)** — Agreed + implemented in the merge route (divergence from PR-A's UI-only floor noted in the route comment; merge's multi-source failure mode is more severe).
+- **m4 (409 vs 500)** — Disagreed + documented: 500 is correct for outer-tx rollback because the rollback covers both transient (Voyage 5xx) and catastrophic (DB lost) causes; 409 implies a retriable client conflict which is misleading. Forensic surface lives in `partial_failure_reason`, not HTTP status.
+- **m5 (teardown assertion `expect(remaining).toBe(0)`)** — Agreed + added to `tests/tags.integration.test.ts` `beforeEach`.
+- **Q1 (partial_failure: false in 200 response)** — Decided: omit (above).
+- **Q2 (finalize UPDATE inside or outside outer tx)** — Decided: inside (above).
+- **Q3 (lock-ordering hold-all-locks as deferred concurrency cost)** — Agreed + documented in lib docstring + BACKLOG.
+- **Q4 (`to ∈ from` validation vs no-op audit row)** — Decided: 400 no audit (above, A4 extension).
+- **Q5 (D7 prose stale "Active operations" reference)** — Agreed + retired (D7 prose update above).
