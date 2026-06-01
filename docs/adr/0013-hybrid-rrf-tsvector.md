@@ -355,3 +355,37 @@ CI must install the `unaccent` extension in the test database (the migration doe
 - Bruch, Gai, Ingber (2023). *An Analysis of Fusion Functions for Hybrid Retrieval.* ACM TOIS.
 - Postgres docs — `unaccent` STABLE volatility; `to_tsvector` IMMUTABLE-with-literal-config; generated-column expression-immutability requirement.
 - Postgres docs — `websearch_to_tsquery` syntax; `ts_rank_cd` cover-density ranking.
+
+
+---
+
+## Amendment 2026-06-01 — Canonical niqqud-strip via lib/keyword-tsquery.ts
+
+The Hebrew niqqud character class specified in §2.1 was hand-written in three places that all needed to stay in sync: `drizzle/migrations/0002_unaccent_tsv_trigger.sql` (index-side trigger), `lib/retrieval-keyword.ts` (retrieval keyword lane), and `lib/entries.ts::listEntriesForAdmin` (admin keyword search). A fourth surface — `lib/tags.ts` D9 niqqud validation — also held a parallel JS RegExp of the same pattern.
+
+This amendment promotes the pattern to a single source of truth at `lib/keyword-tsquery.ts` exporting `HEBREW_COMBINING_MARKS_PATTERN` + the `buildKeywordTsquerySQL(paramRef)` helper + `hebrewCombiningMarksRegex()` JS consumer. All four consumer surfaces now route through the shared module.
+
+### Why this amendment fired (the bug)
+
+`lib/retrieval-keyword.ts:68` had drifted from migration 0002 to a contiguous class `[U+0591-U+05C7]` which **included U+05BE MAQAF**. A user querying a Hebrew compound noun like `בית־ספר` (with maqaf) had the maqaf stripped query-side → `ביתספר` (one lexeme); the index held `{בית, ספר}` (two lexemes, because the `simple` tokenizer treats MAQAF as a word boundary). Match: zero. Empirically reproduced 2026-06-01 against local docker Postgres:
+
+```
+to_tsvector('simple', regexp_replace('בית־ספר', '[U+0591-U+05C7]', '', 'g')) = '\'ביתספר\':1'  -- broken
+to_tsvector('simple', regexp_replace('בית־ספר', '<canonical>', '', 'g'))    = '\'בית\':1 \'ספר\':2'  -- correct
+```
+
+This is the 2nd recurrence of the production-tokenization-mirror class (1st: 2026-05-22 `bothfail` portmanteau, codified as `SESSION_PROTOCOL.md` Step 7 sub-rule). Per the codified `feedback_prefer_mechanical_over_prose` memory entry, 2nd recurrence promotes the prose floor to a mechanical floor: the shared module + multi-migration drift-gate test.
+
+### Mechanical floor
+
+`lib/keyword-tsquery.test.ts` includes a **multi-migration drift gate** that:
+
+1. Scans every `*.sql` file in `drizzle/migrations/` for `regexp_replace(<args>, '[<pattern>]', ...)` calls (parser is depth-aware to handle multi-line first-args like migration 0002's `coalesce(NEW.title, '') || ...`).
+2. For each pattern containing any character in the Hebrew block (U+0590..U+05FF), asserts byte-equality with `HEBREW_COMBINING_MARKS_PATTERN`.
+3. Positive-control check: at least one pattern MUST be found (catches a maintenance edit that silently drops the niqqud-strip from migration 0002).
+
+The gate fails loudly on any drift: a new migration that re-establishes a normalization expression with a different Hebrew character class will fail this test at `npm test` time, BEFORE the drift can ship.
+
+### Reversibility
+
+The lib's shared constant + helpers can be inlined back into the three consumer surfaces at any time (zero behavioral change). The drift-gate test would then need to either delete itself or scan each consumer surface individually — which is exactly the un-mechanical state the amendment exists to fix. Don't.
