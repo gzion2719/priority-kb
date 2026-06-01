@@ -32,6 +32,7 @@ import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import type { Embedder } from "@/lib/embedding";
 import { updateEntry, type IngestInput } from "@/lib/ingest";
+import { hebrewCombiningMarksRegex } from "@/lib/keyword-tsquery";
 import * as schema from "@/drizzle/schema";
 
 /**
@@ -94,8 +95,13 @@ export class MergeRollbackError extends Error {
 /** ADR-0025 D9: max 64 NFC code-points. */
 export const MAX_TAG_LENGTH = 64;
 
-/** ADR-0025 D9 Hebrew niqqud non-contiguous class (mirrors migration 0002 stripper). */
-const NIQQUD_RE = /[֑-ֽֿׁ-ׂׄ-ׇׅ]/;
+/**
+ * ADR-0025 D9 Hebrew niqqud check. Consumes the canonical pattern from
+ * lib/keyword-tsquery.ts so a single source of truth governs index-side
+ * trigger, retrieval keyword lane, admin keyword search, AND this tag
+ * validator.
+ */
+const NIQQUD_RE = hebrewCombiningMarksRegex();
 
 // ADR-0025 D9 ASCII control chars (U+0000-U+001F + U+007F DEL).
 // Escape-literal form keeps lib/tags.ts as a binary-clean text file
