@@ -6,7 +6,7 @@
 
 ## Context
 
-The UI/UX audit at [`docs/UI_AUDIT.md`](../UI_AUDIT.md) (landed same day in PR #406) surfaced four BLOCKING findings whose fixes all hit the same surface (`styles/kramer-brand.css`) and the same coupled set of decisions: typography, focus-visible compliance, contrast tokens, button primitive extraction, and a 6-file `--kramer-bg` CSS-variable typo. Shipping these as five independent polish PRs without a locked design decision would let each PR re-decide the same questions inconsistently (token names, font choice, focus-ring color, button API shape).
+The UI/UX audit at [`docs/UI_AUDIT.md`](../UI_AUDIT.md) (once PR #406 lands, otherwise on `chore/ui-audit-2026-06-02`) surfaced three in-scope BLOCKING findings whose fixes hit the same surface (`styles/kramer-brand.css`) plus two MAJOR cross-cutting findings on the same coupled set of decisions: typography, focus-visible compliance, contrast tokens, button primitive extraction, and a 6-file `--kramer-bg` CSS-variable typo. Shipping these as independent polish PRs without a locked design decision would let each PR re-decide the same questions inconsistently (token names, font choice, focus-ring color, button API shape).
 
 This ADR locks the five decisions. Implementation lands in follow-up PRs that constitute the M4.5 milestone block (per the audit's §4 B+C choice).
 
@@ -15,28 +15,15 @@ This ADR locks the five decisions. Implementation lands in follow-up PRs that co
 - **C1 BLOCKING** — GT Eesti has never actually loaded. `@font-face` blocks in `styles/kramer-brand.css:400-421` are commented out and `public/fonts/` does not exist. Every render falls through to system sans. The product has never rendered in its declared brand typography since M1.
 - **C7 BLOCKING** — Six admin client-component buttons use `color: var(--kramer-bg)` inline. `--kramer-bg` is not defined anywhere in `styles/kramer-brand.css` (the real var is `--kramer-dark`); undefined CSS vars fall back to `inherit` → `--kramer-neutral` → invisible buttons. Affected files: `app/admin/entries/[id]/edit/EditForm.tsx:367`, `app/admin/entries/[id]/history/page.tsx:115`, `app/admin/entries/[id]/history/[versionNo]/RevertForm.tsx:140`, `app/admin/entries/page.tsx:286`, `app/admin/tags/RenameForm.tsx:153`, `app/admin/tags/MergeForm.tsx:232`.
 - **C9 BLOCKING** — `:focus-visible` outline missing on 90% of interactive surfaces (only `.chat-input:focus` and `.filter-chip-remove:focus-visible` declare focus styles); WCAG 2.4.7 Level AA regression.
-- **C13 BLOCKING** — `source_pointer` editable on the edit form — iron-rule #7 (provenance) risk. *(NOTE: ADR-0026 does NOT cover C13. C13 is a domain-logic decision about the edit form, not a design-token decision. It ships as its own M4.5 BACKLOG item per the audit §2 backlog item 4. Cross-referenced here so future readers don't expect ADR-0026 to address it.)*
 - **C8 / C15 MAJOR** (cross-cutting) — WCAG AA contrast not verified for the palette; client-component admin forms bypass the brand `.btn` primitive via inline styles.
 
-### Pre-coding verification (per Mechanical-floor-surface-enumeration sub-rule)
+C13 (source-pointer editable, iron-rule #7) is also BLOCKING in the audit but is a domain-logic decision about the edit form, not a design-token decision; it is out of scope for ADR-0026 (see "Out of scope" at bottom).
 
-Before locking Decision 5 (the lint floor against undefined `--kramer-*` vars), enumerated all references and definitions empirically:
+### `--kramer-*` reference surface (world-fact at ADR-0026 commit time)
 
-```
-$ grep -rohE "var\(--kramer-[a-z-]+(?:,[^)]*)?\)" app/ | sort -u
-var(--kramer-bg)        ← UNDEFINED (the C7 bug)
-var(--kramer-mint)      ← defined ✓
-var(--kramer-neutral)   ← defined ✓
+Three distinct `--kramer-*` identifiers appear in `app/`: `--kramer-bg` (undefined → the C7 bug), `--kramer-mint` (defined), `--kramer-neutral` (defined). The kramer-brand.css `:root` block defines five tokens: `--kramer-dark`, `--kramer-mint`, `--kramer-neutral`, `--kramer-pink`, `--kramer-purple`. `--kramer-bg` is the only undefined-var typo at commit time; Decision 5's lint floor catches future regressions; today's scope is the surgical 6-file rename.
 
-$ grep -oE "^\s*--kramer-[a-z-]+" styles/kramer-brand.css | sort -u
---kramer-dark
---kramer-mint
---kramer-neutral
---kramer-pink
---kramer-purple
-```
-
-`--kramer-bg` is the only undefined-var typo today. The lint floor (Decision 5) catches future regressions; today's scope is the surgical 6-file rename.
+*(The grep commands that produced these counts live in the PR body, not the ADR, per the Context-section discipline sub-rule in `docs/adr/README.md`.)*
 
 ### Brand-skill divergence
 
@@ -62,6 +49,8 @@ public/fonts/
 └── IBMPlexSansHebrew-Medium.woff2
 ```
 
+Exact file names + release version pinned at M4.5/D impl time against the [IBM/plex GitHub releases](https://github.com/IBM/plex/releases) (the v6+ releases moved to per-script package layout; file names verified against the chosen release tag at bundle time).
+
 **Loading strategy:** `font-display: swap` — render with fallback immediately; swap to Plex when loaded. No FOIT (no flash of invisible text), no LCP regression. Brief FOUT (flash of unstyled text) is acceptable for an internal-use KB.
 
 **Fallback stack:**
@@ -74,10 +63,10 @@ public/fonts/
 Hebrew variant follows the Latin name in the stack — browsers walk the stack per glyph, so Latin glyphs match `"IBM Plex Sans"` and Hebrew glyphs cascade to `"IBM Plex Sans Hebrew"`. The `system-ui` / `"Segoe UI"` intermediates cover the FOUT window and the worst-case "woff2 failed to load" scenario.
 
 **Brand-standards override.** This decision overrides:
-- **ADR-0001 §"Brand standards"** ("GT Eesti typography"). ADR-0001 is amended via the precedent that newer ADRs supersede older ones on their specific subject matter.
-- **CLAUDE.md non-negotiable #13** ("typography (GT Eesti)"). Wording edit lands in the same PR — the iron-rule's literal text changes from "(GT Eesti)" to "(IBM Plex Sans)" with a back-pointer to this ADR.
+- **ADR-0001 §"Brand standards"** ("GT Eesti typography"). Override mechanism: M4.5/D adds an in-place `## Amendment 2026-06-02 — Typography pivot per ADR-0026` section to `docs/adr/0001-bootstrap.md` (matching the dominant amend-in-place pattern set by ADR-0005, ADR-0010, ADR-0011 — verified against the ADR index). ADR-0007 is the lone "new ADR supersedes older spec" precedent, and that pattern is reserved for CLAUDE.md / non-negotiable changes per its own framing; ADR-0001 is amended in place.
+- **CLAUDE.md non-negotiable #13** ("typography (GT Eesti)"). M4.5/D edits the iron-rule's literal text in the same PR — drops "(GT Eesti)", inserts "(IBM Plex Sans)", adds a back-pointer to this ADR. This matches the ADR-0007 precedent for CLAUDE.md changes (a new ADR plus an explicit edit to the rule it supersedes).
 
-Rationale for override: cost (SIL OFL = $0 vs ~$500-1200/year per-style GT Eesti license for an internal-use KB), empirically-verified Hebrew weight availability (Plex Hebrew ships Light + Medium per IBM/plex GitHub releases), and the fact that the product has rendered in system-sans fallback since M1 — pivoting to IBM Plex IS the brand uplift, not a regression.
+Rationale for override: cost (SIL OFL = $0 vs ~$500-1200/year per-style GT Eesti license for an internal-use KB), empirically-verified Hebrew weight availability (Plex Hebrew ships Light + Medium per IBM/plex GitHub releases — the v6+ releases at https://github.com/IBM/plex/releases ; impl-PR pins the exact release version), and the fact that the product has rendered in system-sans fallback since M1 — pivoting to IBM Plex IS the brand uplift, not a regression.
 
 ### 2. Focus-ring tokens + global `:focus-visible` rule
 
@@ -100,7 +89,10 @@ Rationale for override: cost (SIL OFL = $0 vs ~$500-1200/year per-style GT Eesti
 }
 ```
 
-`:where(*)` has zero specificity, so the existing carve-outs (`.chat-input:focus` at `kramer-brand.css:237-240`, `.filter-chip-remove:focus-visible` at `:352-356`) continue to win without per-surface rewriting. Carve-outs are intentional and documented in their respective CSS comment blocks.
+`:where(*)` has zero specificity, so the existing carve-outs continue to win without per-surface rewriting:
+
+- **`.chat-input:focus` at `kramer-brand.css:237-240`** — specificity (0,1,1). Beats the global (0,1,0) for keyboard focus on the chat input; the carve-out's 1px mint outline + offset-0 renders. Mouse-clicks on `.chat-input` fire `:focus` but NOT `:focus-visible`, so only the carve-out applies. Composition correct.
+- **`.filter-chip-remove:focus-visible` at `:352-356`** — specificity (0,1,1). This carve-out sets `opacity: 1; background: rgba(255,255,255,0.06);` but **does NOT set `outline`**, so the global rule's outline composes ON TOP of the carve-out's opacity/background changes. This is the intended behavior — the filter-chip remove `×` gets the standard mint focus ring AND its hover-like visual treatment. If the design intent is no outline on the remove button, M4.5/C adds an explicit `outline: none;` line to the carve-out.
 
 Closes C9 (WCAG 2.4.7 Level AA — Focus Visible).
 
@@ -142,42 +134,50 @@ export type ButtonVariant = "primary" | "cta" | "secondary" | "danger";
 // Consumer props: variant + the small set of HTML button attrs the consumer
 // is allowed to pass through. className + style are intentionally OMITTED to
 // enforce variant-as-only-styling-vector (closes C15 — no more inline CSS
-// overrides that bypass the brand .btn primitive). ref-forwarding is allowed
-// via React 19's plain `ref` prop on function components (no forwardRef).
+// overrides that bypass the brand .btn primitive). ref is typed for React 19
+// plain-`ref`-prop semantics — `RefObject<HTMLButtonElement | null>` matches
+// what `useRef<HTMLButtonElement>(null)` returns. data-* attrs admitted via
+// index signature for test selectors (data-testid etc).
 export type ButtonProps = {
   variant?: ButtonVariant;                                  // default "primary"
-  type?: "button" | "submit" | "reset";                     // default "button"
+  type?: "button" | "submit" | "reset";                     // default "button" (Safari historical: <button> outside <form> defaulted to submit; defensive default)
   disabled?: boolean;
   onClick?: React.MouseEventHandler<HTMLButtonElement>;
   children: React.ReactNode;
-  ref?: React.Ref<HTMLButtonElement>;
+  ref?: React.Ref<HTMLButtonElement | null>;
 } & Pick<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
-  | "name" | "value" | "form" | "formAction" | "formMethod"  // form-association attrs
-  | "autoFocus" | "tabIndex"                                // a11y attrs
-  | "aria-label" | "aria-labelledby" | "aria-describedby"   // a11y attrs
-  | "aria-pressed" | "aria-expanded" | "aria-controls"      // a11y attrs
-  | "title"                                                 // tooltip
->;
+  | "name" | "value" | "form"                                                   // form-association attrs
+  | "formAction" | "formMethod" | "formNoValidate" | "formTarget" | "formEncType" // form-submit override attrs
+  | "autoFocus" | "tabIndex"                                                    // a11y attrs
+  | "aria-label" | "aria-labelledby" | "aria-describedby"                       // a11y labeling
+  | "aria-pressed" | "aria-expanded" | "aria-controls"                          // a11y state
+  | "title"                                                                     // tooltip
+> & {
+  // data-* index signature for test selectors (data-testid, data-*). Required
+  // because data-* attrs aren't pickable from ButtonHTMLAttributes.
+  [key: `data-${string}`]: string | number | undefined;
+};
 
-export function Button(props: ButtonProps): React.ReactElement;
+// Ambient declaration — implementation in components/Button.tsx (M4.5/B).
+export declare function Button(props: ButtonProps): React.ReactElement;
 ```
 
-**Variant → brand-CSS class mapping:**
+**Variant → brand-CSS class mapping.** The component always renders `<button className="btn <modifier>">` — `.btn` is the base, variant adds a conditional modifier class:
 
-| `variant` | CSS class | Visual |
-|---|---|---|
-| `"primary"` (default) | `.btn` | Purple bg, neutral text |
-| `"cta"` | `.btn.cta` | Mint bg, dark text — primary calls to action (Save, Submit, Send) |
-| `"secondary"` | `.btn.secondary` (new — transparent bg + neutral border) | Used for Cancel / Back actions |
-| `"danger"` | `.btn.alert` | Pink bg, neutral text — used for Delete / destructive actions |
+| `variant` | Rendered `className` | Underlying CSS rule | Visual |
+|---|---|---|---|
+| `"primary"` (default) | `"btn"` | `button, .btn` at `kramer-brand.css:73-83` | Purple bg, neutral text |
+| `"cta"` | `"btn cta"` | `button.cta, .btn.cta` at `:85-89` | Mint bg, dark text — primary calls to action (Save, Submit, Send) |
+| `"secondary"` | `"btn secondary"` | **NEW** `.btn.secondary` (transparent bg + neutral border) shipped in M4.5/B | Used for Cancel / Back actions |
+| `"danger"` | `"btn alert"` | `button.alert, .btn.alert` at `:91-93` | Pink bg, neutral text — used for Delete / destructive actions |
 
-`.btn.secondary` is a new CSS class added in the same PR.
+The existing brand CSS selectors are `button, .btn` (compound: element OR class); `<button className="btn">` matches both, so element-base styles + class-base styles compose correctly. `.btn.secondary` is the only new rule added in M4.5/B.
 
 **Mechanical migration target** (impl-PR scope): 6 admin inline-styled buttons listed in C7 above. After migration, all use `<Button variant="...">` and the brand `.btn` primitive is the only path to a Kramer-branded button. Closes C15.
 
 **Deliberate non-features:**
-- No polymorphism (`as="a"`, `<Button asChild>`). `<Button>` is button-only. If link-styled-as-button is needed later, a separate `<ButtonLink>` ships in a follow-up ADR. Keeps the type narrow.
+- No polymorphism (`as="a"`, `<Button asChild>`). `<Button>` is button-only. **`<ButtonLink>` follow-up trigger:** the first consumer that needs a link-styled-as-button — likely C2's KramerLogo nav surface, OR a future rejudging of the audit's 4 mint breadcrumb links (`← Back to entries · …`) as button-visual. Keeps the type narrow until a real need surfaces.
 - No `loading` / `pending` state. Consumers handle their own disabled state via `disabled={isPending}`. Pending-state visual primitive is out of scope.
 
 ### 5. `--kramer-bg` retirement + lint floor
@@ -197,8 +197,8 @@ After retirement, `Grep var(--kramer-bg)` returns 0 across the repo.
 ```ts
 // styles/brand-tokens.test.ts — mechanical floor against undefined --kramer-* vars
 
-function listDefinedTokens(cssPath: string): Set<string>;
-function listUsedTokens(globPatterns: readonly string[]): readonly {
+function listDefinedTokens(cssGlobPatterns: readonly string[]): Set<string>;
+function listUsedTokens(usageGlobPatterns: readonly string[]): readonly {
   token: string;
   file: string;
   line: number;
@@ -207,14 +207,20 @@ function assertUsedTokensAreDefined(
   used: ReturnType<typeof listUsedTokens>,
   defined: Set<string>,
 ): void;
+// Guard test: assert that exactly one CSS file defines --kramer-* tokens
+// (kramer-brand.css). Future-proofs against the split-CSS false-negative
+// where defs silently disappear from one file while uses keep being scanned.
+function assertSingleDefinitionSource(
+  cssGlobPattern: string,
+  expectedSourcePath: string,
+): void;
 ```
 
-**Scan scope (glob):**
-- `app/**/*.{ts,tsx}` — page + component source
-- `components/**/*.{ts,tsx}` — once Decision 4's dir exists
-- `styles/**/*.css` — typos in CSS are the more dangerous class (silent browser fallback exactly like C7)
+**Scan scope (globs):**
+- **Definitions:** `styles/**/*.css` (passed to `listDefinedTokens`). `assertSingleDefinitionSource("styles/**/*.css", "styles/kramer-brand.css")` enforces that kramer-brand.css is the only definition source today; if a future PR splits the file, the assertion fails and the split is gated until the lint floor is updated.
+- **Uses:** `app/**/*.{ts,tsx}`, `components/**/*.{ts,tsx}` (once Decision 4's dir exists), `styles/**/*.css` (CSS-side typos are the more dangerous class — silent browser fallback exactly like C7).
 
-**Regex policy:** scan literal `var(--kramer-IDENT)` (optionally with fallback: `var(--kramer-IDENT, anything)`). Template-literal dynamic construction (`` `var(--kramer-${tier})` ``) is a known blind spot — documented in the test file's header. The blind spot is acceptable because no current code uses template-literal `--kramer-*` construction; if a future PR adds one, the regression surfaces during code review of that PR, not at lint time.
+**Regex policy:** scan literal `var(--kramer-IDENT)` and `var(--kramer-IDENT, fallback)`. Template-literal dynamic construction (`` `var(--kramer-${tier})` ``) is a known blind spot — documented in the test file's header. The blind spot is acceptable because no current code uses template-literal `--kramer-*` construction; if a future PR adds one, the regression surfaces during code review of that PR, not at lint time. CSS-side `--kramer-X:` *definitions* are not flagged as uses (regex matches only `var(...)` syntax, which appears in CSS uses only).
 
 **Positive-control test** (proves the scan actually catches the failure mode it claims to):
 
@@ -262,16 +268,16 @@ Closes C7 (mechanical fix today; lint prevents recurrence).
 
 ## Implementation outline
 
-The five decisions land in 4 follow-up PRs (not 5 — PR 1 from the prior plan absorbed into PR 2 per plan-CR m1 finding). Together these constitute the new "M4.5 — UI polish" milestone block (separate small ROADMAP.md edit PR ships after this ADR merges).
+The five decisions land in 4 follow-up PRs. Together these constitute the new "M4.5 — UI polish" milestone block (separate small ROADMAP.md edit PR ships after this ADR merges).
 
 | PR | Decision(s) | Scope | Depends on |
 |---|---|---|---|
-| **M4.5/A** | 5 (lint floor) | New `styles/brand-tokens.test.ts` per the test-helper skeleton above; covers `app/`, `components/` (when it exists), `styles/`. Positive-control test for known-bad ref. **Does NOT include the `--kramer-bg` rename** — that ships with M4.5/B (the rename disappears as a side effect of replacing the inline buttons with `<Button>`). | None |
-| **M4.5/B** | 4 (Button) + 5 (typo rename via Button migration) | New `components/Button.tsx` per type skeleton; new `.btn.secondary` CSS class; migrate the 6 admin inline-styled buttons to `<Button variant="...">`. The 6 sites currently using `var(--kramer-bg)` no longer reference it after migration. | M4.5/A merged (so the lint floor exists when M4.5/B's migration runs through it) |
-| **M4.5/C** | 2 (focus-ring tokens + global rule) | Add 3 new CSS custom properties; add `:where(*):focus-visible` global rule; document the 2 existing carve-outs. | None — can ship in parallel with A/B |
-| **M4.5/D** | 1 (font pivot) | Bundle 4 IBM Plex `.woff2` files under `public/fonts/`; uncomment + rewrite `@font-face` blocks in `kramer-brand.css` (and delete the legacy GT Eesti commented block); update `--font-body` / `--font-heading` tokens with the new family stack; rewrite the `kramer-brand.css:1-12` header comment; **edit CLAUDE.md non-negotiable #13 wording** (drop "(GT Eesti)" → "(IBM Plex Sans)" with back-pointer to ADR-0026); update CLAUDE.md File Map if needed. | None — can ship in parallel |
-| **M4.5/E** | 3 (WCAG AA contrast pass) | Compute ratios for the 7 meaningful pairs; document in new `docs/A11Y.md`; for each failing pair, apply the pre-enumerated remediation; add `-strong` variants only as needed. Update CLAUDE.md File Map to include `docs/A11Y.md`. | None — independent |
+| **M4.5/A** | 5 (lint floor + typo rename) | New `styles/brand-tokens.test.ts` per the test-helper skeleton (incl. `assertSingleDefinitionSource` guard); covers `app/`, `components/` (when it exists), `styles/`; positive-control test. **AND** mechanically rename `var(--kramer-bg)` → `var(--kramer-dark)` in the 6 affected files in the same PR, so the lint floor merges green (without the rename, the lint would fail immediately on the 6 known sites). Add the `/* renamed from --kramer-bg per ADR-0026 §5 */` back-pointer comment near `--kramer-dark`. | None |
+| **M4.5/B** | 4 (Button primitive + 6-site migration) | New `components/Button.tsx` per type skeleton; new `.btn.secondary` CSS class; migrate the 6 admin inline-styled buttons (EditForm + RenameForm + MergeForm + RevertForm + history/page.tsx + entries/page.tsx) to `<Button variant="...">`. After migration the 6 sites no longer reference any `--kramer-*` directly — they get brand-class styling through the Button primitive. Update CLAUDE.md File Map to include `components/`. | None — independent of A (after A's rename, the buttons still reference `--kramer-dark`; B replaces those references with the Button primitive entirely) |
+| **M4.5/C** | 2 (focus-ring tokens + global rule) | Add 3 new CSS custom properties; add `:where(*):focus-visible` global rule; document the 2 existing carve-outs in CSS comments + this ADR's Decision 2 reference. | None |
+| **M4.5/D** | 1 (font pivot) + amendments | Bundle 4 IBM Plex `.woff2` files (file names + release version pinned against the [IBM/plex release tag](https://github.com/IBM/plex/releases) chosen at impl time) under `public/fonts/`; uncomment + rewrite `@font-face` blocks in `kramer-brand.css`; delete the legacy GT Eesti commented block; update `--font-body` / `--font-heading` tokens; rewrite the `kramer-brand.css:1-12` header comment; **add `## Amendment 2026-06-02 — Typography pivot per ADR-0026` section to `docs/adr/0001-bootstrap.md`** (matching the dominant amend-in-place pattern); **edit CLAUDE.md non-negotiable #13 wording** (drop "(GT Eesti)" → "(IBM Plex Sans)" with back-pointer to ADR-0026); update CLAUDE.md File Map to include `public/fonts/`. | None |
+| **M4.5/E** | 3 (WCAG AA contrast pass) | Compute ratios for the 7 meaningful pairs; document in new `docs/A11Y.md`; for each failing pair, apply the pre-enumerated remediation; add `-strong` variants only as needed. Update CLAUDE.md File Map to include `docs/A11Y.md`. | None |
 
-**PR sequencing freedom:** only M4.5/B depends on M4.5/A. The other three (C, D, E) ship in parallel with no inter-dependencies. The four PRs together close UI_AUDIT.md findings C1, C7, C8, C9, C15.
+**PR sequencing freedom:** all four PRs are independent of each other and can ship in any order or in parallel. The four PRs together close UI_AUDIT.md findings C1, C7, C8, C9, C15.
 
-**Out of scope for the M4.5 block** (separate BACKLOG slices — per UI_AUDIT.md §2): C2 (KramerLogo), C3 (global nav chrome), C4 (per-page titles), C5 (branded admin 404), C6 (anon-access unification), C10 + C14 (responsive + viewport), C11 (seed diversification), C12 (`html.dir="rtl"`), C13 (source-pointer lock), C16 (aria-live).
+**Out of scope for the M4.5 block** (separate BACKLOG slices — per UI_AUDIT.md §2): C2 (KramerLogo), C3 (global nav chrome), C4 (per-page titles), C5 (branded admin 404), C6 (anon-access unification), C10 + C14 (responsive + viewport), C11 (seed diversification), C12 (`html.dir="rtl"`), C13 (source-pointer lock — domain logic, not design tokens), C16 (aria-live).
