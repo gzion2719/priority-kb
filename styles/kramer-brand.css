@@ -1,9 +1,20 @@
 /*
  * Kramer Brand — Priority Knowledge Base
  *
- * Source: anthropic-skills:kramer-brand
- * Typography: GT Eesti Display (Lt for body, Md for headings)
+ * Source: anthropic-skills:kramer-brand (upstream skill ships GT Eesti as
+ *         canonical; this project pivots to IBM Plex Sans per ADR-0026 §1 +
+ *         in-place amendment in docs/adr/0001-bootstrap.md. CLAUDE.md
+ *         non-negotiable #13 also edited to drop the "(GT Eesti)" wording
+ *         in the same PR. The brand-skill divergence is intentional and
+ *         out of this repo's authority to fix upstream).
+ * Typography: IBM Plex Sans Light/Medium (Latin) + IBM Plex Sans Hebrew
+ *             Light/Medium (Hebrew). Self-hosted under public/fonts/, pinned
+ *             to npm @ibm/plex-sans@1.1.0 + @ibm/plex-sans-hebrew@1.1.0
+ *             (fetched via jsdelivr CDN at impl time; binaries identical to
+ *             the IBM/plex GitHub release for the same version). SIL Open
+ *             Font License 1.1 text bundled at public/fonts/LICENSE.txt.
  * Palette: --kramer-purple / --kramer-mint / --kramer-pink / --kramer-neutral / --kramer-dark
+ *          + -strong variants per ADR-0026 §3 (see docs/A11Y.md).
  *
  * Import this in the Next.js root layout (M1):
  *   import "../styles/kramer-brand.css";
@@ -21,9 +32,24 @@
   /* Renamed from a typo `--kramer-bg` per ADR-0026 §5 — see lint floor at
    * styles/brand-tokens.test.ts. */
 
-  /* Typography */
-  --font-body: "GT Eesti Display Lt", "GT Eesti Display", sans-serif;
-  --font-heading: "GT Eesti Display Md", "GT Eesti Display", sans-serif;
+  /* WCAG AA strong variants — per ADR-0026 §3 + docs/A11Y.md.
+   * Hex picks computed empirically against actual rendered backgrounds
+   * (including alpha-blended pinks/purples composited over --kramer-dark),
+   * not just the solid token. See styles/contrast.test.ts mechanical floor.
+   * NOT covered by the brand-tokens lint floor's `--kramer-*` scope today;
+   * the contrast.test.ts floor covers them instead. */
+  --kramer-purple-strong: #d378ff; /* 7.05:1 on dark (min 6.82:1 composited) */
+  --kramer-pink-strong: #ff5fb0; /* 6.70:1 on dark (min 6.33:1 composited) */
+  --kramer-neutral-strong: #f5f5f5; /* 5.57:1 on --kramer-pink */
+
+  /* Typography — IBM Plex Sans per ADR-0026 §1. Body uses weight 300 (Light),
+   * headings use weight 500 (Medium); both family stacks include Hebrew
+   * variant so browsers walk per-glyph (Latin → Sans, Hebrew → Sans Hebrew
+   * via the unicode-range scoping on @font-face below). */
+  --font-body:
+    "IBM Plex Sans", "IBM Plex Sans Hebrew", system-ui, "Segoe UI", "Helvetica Neue", sans-serif;
+  --font-heading:
+    "IBM Plex Sans", "IBM Plex Sans Hebrew", system-ui, "Segoe UI", "Helvetica Neue", sans-serif;
   --fs-body: 12px;
   --fs-subhead: 18px;
   --fs-title: 24px;
@@ -48,6 +74,9 @@ body {
   background: var(--kramer-dark);
   color: var(--kramer-neutral);
   font-family: var(--font-body);
+  /* Light per ADR-0026 §1. Without an explicit weight here the UA renders
+   * the default 400 and the heading-vs-body weight intent (300/500) is lost. */
+  font-weight: 300;
   font-size: var(--fs-body);
   line-height: var(--lh-body);
   -webkit-font-smoothing: antialiased;
@@ -56,6 +85,8 @@ body {
 
 h1 {
   font-family: var(--font-heading);
+  /* Medium per ADR-0026 §1. */
+  font-weight: 500;
   font-size: var(--fs-title);
   line-height: var(--lh-heading);
   color: var(--kramer-neutral);
@@ -65,6 +96,8 @@ h1 {
 h2,
 h3 {
   font-family: var(--font-heading);
+  /* Medium per ADR-0026 §1. */
+  font-weight: 500;
   font-size: var(--fs-subhead);
   line-height: var(--lh-heading);
   color: var(--kramer-neutral);
@@ -77,7 +110,9 @@ a {
 }
 
 a:hover {
-  color: var(--kramer-purple);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: base --kramer-purple fails
+   * 4.5:1 on --kramer-dark (2.33:1). --kramer-purple-strong fixes it. */
+  color: var(--kramer-purple-strong);
 }
 
 button,
@@ -101,6 +136,11 @@ button.cta,
 button.alert,
 .btn.alert {
   background: var(--kramer-pink);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: --kramer-neutral on --kramer-pink
+   * is 4.46:1, below 4.5. --kramer-neutral-strong (#f5f5f5) brings it to
+   * 5.57:1. Current consumer: <Button variant="danger"> in
+   * app/admin/tags/DeleteForm.tsx. */
+  color: var(--kramer-neutral-strong);
 }
 
 /* `secondary` variant — per ADR-0026 §4. Transparent fill + neutral
@@ -259,7 +299,10 @@ button.cta:focus-visible {
 
 .chat-tool-chip.error {
   background: rgba(190, 0, 120, 0.1);
-  color: var(--kramer-pink);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: base --kramer-pink fails
+   * 4.5:1 on the alpha-blended pink-over-dark bg (#23101c, 4.49:1).
+   * --kramer-pink-strong brings it to 6.47:1. */
+  color: var(--kramer-pink-strong);
   border-color: rgba(190, 0, 120, 0.35);
 }
 
@@ -271,7 +314,8 @@ button.cta:focus-visible {
 
 .chat-banner.error {
   background: rgba(190, 0, 120, 0.12);
-  color: var(--kramer-pink);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: 4.43:1 → 6.37:1 with -strong. */
+  color: var(--kramer-pink-strong);
   border: 1px solid rgba(190, 0, 120, 0.35);
 }
 
@@ -371,12 +415,15 @@ button.cta:focus-visible {
 }
 .sensitivity-pill[data-tier="internal"] {
   background: rgba(130, 0, 180, 0.12);
-  color: var(--kramer-purple);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: base purple fails on the
+   * alpha-blended purple-over-dark bg (#1f1025). -strong is 6.82:1. */
+  color: var(--kramer-purple-strong);
   border-color: rgba(130, 0, 180, 0.5);
 }
 .sensitivity-pill[data-tier="restricted"] {
   background: rgba(190, 0, 120, 0.14);
-  color: var(--kramer-pink);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: 4.40:1 → 6.33:1 with -strong. */
+  color: var(--kramer-pink-strong);
   border-color: rgba(190, 0, 120, 0.5);
 }
 
@@ -480,24 +527,56 @@ button.cta:focus-visible {
 }
 
 /*
- * GT Eesti font loading
+ * IBM Plex Sans font loading — per ADR-0026 §1.
  * --------------------
- * GT Eesti is a commercial font by Grilli Type. If `.woff2` files are placed in
- * `public/fonts/`, uncomment the @font-face blocks below. Otherwise the browser
- * falls back to system sans-serif via the `'GT Eesti Display'` family entry.
+ * Self-hosted under public/fonts/. font-display: swap renders fallback
+ * immediately, swaps to Plex on load (no FOIT; brief FOUT acceptable for
+ * internal-use KB). Files pinned to npm @ibm/plex-sans@1.1.0 +
+ * @ibm/plex-sans-hebrew@1.1.0; LICENSE.txt (SIL OFL 1.1) co-located.
  *
- * @font-face {
- *   font-family: 'GT Eesti Display Lt';
- *   src: url('/fonts/GT-Eesti-Display-Light.woff2') format('woff2');
- *   font-weight: normal;
- *   font-style: normal;
- *   font-display: swap;
- * }
- * @font-face {
- *   font-family: 'GT Eesti Display Md';
- *   src: url('/fonts/GT-Eesti-Display-Medium.woff2') format('woff2');
- *   font-weight: normal;
- *   font-style: normal;
- *   font-display: swap;
- * }
+ * Hebrew @font-face declarations carry a `unicode-range` scoping the face
+ * to Hebrew block + Hebrew presentation forms B (U+0590-05FF, U+FB1D-FB4F).
+ * Without this scoping, browsers may select IBM Plex Sans Hebrew for Latin
+ * glyphs (it has Latin coverage too), defeating the per-glyph fallback
+ * design — Latin should match the Sans face, Hebrew should match the
+ * Hebrew face.
+ *
+ * `font-weight: 300` (Light) and `font-weight: 500` (Medium) are declared
+ * explicitly on each face; consumer rules above (html/body, h1, h2/h3)
+ * request the corresponding weight so the UA matches the correct face
+ * (default-400 requests would mis-match against weight-declared faces).
+ *
+ * Mechanical floor at styles/fonts.test.ts asserts every @font-face url()
+ * resolves to a file under public/fonts/ — catches font-file deletion +
+ * URL typos at gate time.
  */
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans Hebrew";
+  src: url("/fonts/IBMPlexSansHebrew-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0590-05FF, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: "IBM Plex Sans Hebrew";
+  src: url("/fonts/IBMPlexSansHebrew-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0590-05FF, U+FB1D-FB4F;
+}

@@ -116,6 +116,16 @@ Closes C9 (WCAG 2.4.7 Level AA — Focus Visible).
 
 ADR-0026 does not pre-decide which colors will need `-strong` variants — that's an empirical outcome of the impl-PR's ratio computation. The above table is the closed enumeration of fixes available; impl-PR picks per failing pair without re-deciding.
 
+#### Amendment 2026-06-10 — M4.5/E empirical hex picks
+
+The parenthetical example `--kramer-purple-strong: #a330d4` in row (a) above was illustrative; empirical computation during M4.5/E found it fails AA at 3.51:1 against `--kramer-dark`. The impl-PR's actual picks (in `styles/kramer-brand.css` and documented in `docs/A11Y.md`):
+
+- `--kramer-purple-strong: #d378ff` — 7.05:1 vs dark (min 6.82:1 on composited purple-over-dark surfaces)
+- `--kramer-pink-strong: #ff5fb0` — 6.70:1 vs dark (min 6.33:1 on composited pink-over-dark surfaces)
+- `--kramer-neutral-strong: #f5f5f5` — 5.57:1 on `--kramer-pink` (for `.btn.alert` text fix)
+
+A first round of picks used the minimum-delta candidates (`#c050ff`, `#e0399a`, `#ffffff`); plan-CR caught that the pink-strong candidate failed against the **actual rendered composited** backgrounds (4.43-4.49:1 across the 3 translucent pink surfaces) — not the solid `--kramer-dark` token used in the original 7-pair table. The composited-bg coverage is now baked into `styles/contrast.test.ts` as the mechanical floor.
+
 Closes C8.
 
 ### 4. `<Button>` primitive React component
