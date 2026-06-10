@@ -31,6 +31,14 @@
   /* Line heights */
   --lh-body: 1.4;
   --lh-heading: 1.2;
+
+  /* Focus ring — per ADR-0026 §2. Drives the global :focus-visible rule
+   * below. WCAG 2.4.7 Level AA. NOT covered by the brand-tokens lint floor
+   * (styles/brand-tokens.test.ts is --kramer-* scoped by design — if a
+   * --focus-ring-* typo recurrence happens, widen the floor then). */
+  --focus-ring-color: var(--kramer-mint);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
 }
 
 html,
@@ -107,6 +115,48 @@ code,
 pre {
   font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
   font-size: 12px;
+}
+
+/*
+ * Global focus-visible ring — per ADR-0026 §2. Closes UI_AUDIT.md C9.
+ * --------------------
+ * `:where(*)` has zero specificity, so any surface-specific carve-out wins
+ * without per-surface rewriting (see the two existing carve-outs at
+ * `.chat-input:focus` and `.filter-chip-remove:focus-visible` below, each
+ * with a back-pointer comment). WCAG 2.4.7 Level AA — Focus Visible.
+ *
+ * `:focus-visible` (vs `:focus`) ensures the ring renders on keyboard tab
+ * but NOT on mouse click — the UA's heuristic. For form controls
+ * (<input>/<textarea>/<select>), author-declared outline REPLACES the UA
+ * default `:focus-visible` ring (CSS replaces, does not stack), which IS
+ * the intended design — a single coherent mint ring instead of a UA
+ * fallback. The `:where(*)` selector also matches non-interactive elements
+ * receiving focus via `tabIndex` — acceptable for the broad WCAG-AA win.
+ *
+ * `.btn.cta:focus-visible` overrides outline-color only — `.btn.cta` has a
+ * mint background, so a mint ring would be invisible. Dark outline against
+ * the mint surface is high-contrast and distinct from the global mint ring.
+ * Other branded button surfaces (`.btn` purple, `.btn.alert` pink) pass
+ * mint-ring contrast by inspection against their backgrounds.
+ *
+ * `@media (forced-colors: active)` swaps the outline color to the system
+ * `Highlight` keyword — intention-preserving rather than relying on UA
+ * forced-colors replacement of `var(--focus-ring-color)`. WCAG 1.4.11.
+ */
+:where(*):focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.btn.cta:focus-visible,
+button.cta:focus-visible {
+  outline-color: var(--kramer-dark);
+}
+
+@media (forced-colors: active) {
+  :where(*):focus-visible {
+    outline-color: Highlight;
+  }
 }
 
 /* RTL support — applied per element via `dir="rtl"` */
@@ -236,6 +286,10 @@ pre {
   max-height: 12rem;
 }
 
+/* Composes with the global :focus-visible rule per ADR-0026 §2:
+ * specificity (0,1,1) > (0,1,0) so this carve-out's 1px outline + offset:0
+ * wins on keyboard focus. Mouse-click fires :focus but NOT :focus-visible,
+ * so only this rule applies. Intentional override of the 2px mint global. */
 .chat-input:focus {
   outline: 1px solid var(--kramer-mint);
   outline-offset: 0;
@@ -351,6 +405,10 @@ pre {
   color: var(--kramer-neutral);
   opacity: 0.7;
 }
+/* Composes with the global :focus-visible rule per ADR-0026 §2: this
+ * carve-out sets opacity + background but NOT outline, so the global's
+ * outline cascades through (CSS cascade is per-property). Result: mint
+ * 2px ring + this rule's hover-like opacity/background treatment, both. */
 .filter-chip-remove:hover,
 .filter-chip-remove:focus-visible {
   opacity: 1;
