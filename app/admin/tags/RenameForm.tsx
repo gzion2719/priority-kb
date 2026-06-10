@@ -15,6 +15,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/Button";
 import { STUB_ROLE_HEADER } from "@/lib/auth";
 
 export interface RenameFormProps {
@@ -139,24 +140,17 @@ export function RenameForm({ catalog }: RenameFormProps): React.ReactNode {
             }}
           />
         </label>
-        <button
-          type="submit"
-          disabled={submitting || from.length === 0 || to.length === 0}
-          data-testid="admin-tags-rename-submit"
-          style={{
-            fontFamily: "inherit",
-            fontSize: "0.9375rem",
-            padding: "0.5rem 1rem",
-            borderRadius: "0.375rem",
-            border: "1px solid var(--kramer-neutral)",
-            background: "var(--kramer-neutral)",
-            color: "var(--kramer-dark)",
-            cursor: submitting ? "wait" : "pointer",
-            alignSelf: "flex-end",
-          }}
-        >
-          {submitting ? "Renaming…" : "Rename"}
-        </button>
+        <span style={{ alignSelf: "flex-end" }}>
+          <Button
+            type="submit"
+            variant="cta"
+            disabled={submitting || from.length === 0 || to.length === 0}
+            aria-busy={submitting}
+            data-testid="admin-tags-rename-submit"
+          >
+            {submitting ? "Renaming…" : "Rename"}
+          </Button>
+        </span>
       </div>
       {status.kind === "error" && (
         <p

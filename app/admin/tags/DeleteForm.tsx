@@ -9,6 +9,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/Button";
 import { STUB_ROLE_HEADER } from "@/lib/auth";
 
 export interface DeleteFormProps {
@@ -115,24 +116,17 @@ export function DeleteForm({ catalog }: DeleteFormProps): React.ReactNode {
             ))}
           </select>
         </label>
-        <button
-          type="submit"
-          disabled={submitting || tag.length === 0}
-          data-testid="admin-tags-delete-submit"
-          style={{
-            fontFamily: "inherit",
-            fontSize: "0.9375rem",
-            padding: "0.5rem 1rem",
-            borderRadius: "0.375rem",
-            border: "1px solid #ff6b6b",
-            background: "transparent",
-            color: "#ff6b6b",
-            cursor: submitting ? "wait" : "pointer",
-            alignSelf: "flex-end",
-          }}
-        >
-          {submitting ? "Deleting…" : "Delete"}
-        </button>
+        <span style={{ alignSelf: "flex-end" }}>
+          <Button
+            type="submit"
+            variant="danger"
+            disabled={submitting || tag.length === 0}
+            aria-busy={submitting}
+            data-testid="admin-tags-delete-submit"
+          >
+            {submitting ? "Deleting…" : "Delete"}
+          </Button>
+        </span>
       </div>
       {status.kind === "error" && (
         <p
