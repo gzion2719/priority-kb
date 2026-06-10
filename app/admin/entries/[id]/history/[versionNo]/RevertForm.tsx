@@ -23,6 +23,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
+import { Button } from "@/components/Button";
 import { useState } from "react";
 
 import { STUB_ROLE_HEADER } from "@/lib/auth";
@@ -126,25 +128,17 @@ export function RevertForm(props: RevertFormProps): React.ReactNode {
         non-destructive.
       </p>
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-        <button
+        <Button
           type="submit"
+          variant="cta"
           disabled={submitting}
+          aria-busy={submitting}
           data-testid="admin-revert-submit"
-          style={{
-            fontFamily: "inherit",
-            fontSize: "0.9375rem",
-            padding: "0.5rem 1rem",
-            borderRadius: "0.375rem",
-            border: "1px solid var(--kramer-neutral)",
-            background: "var(--kramer-neutral)",
-            color: "var(--kramer-dark)",
-            cursor: submitting ? "wait" : "pointer",
-          }}
         >
           {submitting
             ? "Reverting…"
             : `Revert to v${props.versionNo} (creates v${props.nextVersionNo})`}
-        </button>
+        </Button>
         <Link
           href={`/admin/entries/${props.entryId}/history`}
           style={{

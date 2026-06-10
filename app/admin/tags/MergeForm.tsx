@@ -17,6 +17,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/Button";
 import { STUB_ROLE_HEADER } from "@/lib/auth";
 
 export interface MergeFormProps {
@@ -218,24 +219,17 @@ export function MergeForm({ catalog }: MergeFormProps): React.ReactNode {
             ))}
           </select>
         </label>
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          data-testid="admin-tags-merge-submit"
-          style={{
-            fontFamily: "inherit",
-            fontSize: "0.9375rem",
-            padding: "0.5rem 1rem",
-            borderRadius: "0.375rem",
-            border: "1px solid var(--kramer-neutral)",
-            background: "var(--kramer-neutral)",
-            color: "var(--kramer-dark)",
-            cursor: submitting ? "wait" : canSubmit ? "pointer" : "not-allowed",
-            alignSelf: "flex-end",
-          }}
-        >
-          {submitting ? "Merging…" : "Merge"}
-        </button>
+        <span style={{ alignSelf: "flex-end" }}>
+          <Button
+            type="submit"
+            variant="cta"
+            disabled={!canSubmit}
+            aria-busy={submitting}
+            data-testid="admin-tags-merge-submit"
+          >
+            {submitting ? "Merging…" : "Merge"}
+          </Button>
+        </span>
       </div>
 
       {toInFrom && (
