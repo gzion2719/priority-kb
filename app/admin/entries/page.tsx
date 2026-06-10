@@ -23,6 +23,8 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 
+import { Button } from "@/components/Button";
+
 import * as schema from "@/drizzle/schema";
 import { resolveRoleFromHeader, STUB_ROLE_HEADER, type Role } from "@/lib/auth";
 import { getDb, getPool } from "@/lib/db";
@@ -274,21 +276,9 @@ function SearchForm({
         if (value === undefined) return null;
         return <input key={key} type="hidden" name={key} value={value} />;
       })}
-      <button
-        type="submit"
-        style={{
-          fontFamily: "inherit",
-          fontSize: "0.875rem",
-          padding: "0.375rem 0.875rem",
-          borderRadius: "0.375rem",
-          border: "1px solid var(--kramer-neutral)",
-          background: "var(--kramer-neutral)",
-          color: "var(--kramer-dark)",
-          cursor: "pointer",
-        }}
-      >
+      <Button type="submit" variant="primary">
         Search
-      </button>
+      </Button>
     </form>
   );
 }

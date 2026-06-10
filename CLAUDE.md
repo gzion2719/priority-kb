@@ -116,6 +116,8 @@ C:\dev\PriorityKB\
 │   └── golden_set.yaml             ← retrieval eval set (Hebrew + English)
 ├── styles/
 │   └── kramer-brand.css            ← Kramer brand: colors, typography, base
+├── components/
+│   └── Button.tsx                  ← Brand button primitive (variants per ADR-0026 §4)
 └── .github/
     └── workflows/
         └── ci.yml                  ← GitHub Actions: Node + Python full CI

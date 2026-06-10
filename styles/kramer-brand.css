@@ -103,6 +103,28 @@ button.alert,
   background: var(--kramer-pink);
 }
 
+/* `secondary` variant — per ADR-0026 §4. Transparent fill + neutral
+ * border + inherited color. Used by <Button variant="secondary">. Lands
+ * unused in M4.5/B (no current consumer); reserved for the future
+ * <ButtonLink> per ADR §4 deliberate non-feature. Documented in PR body. */
+button.secondary,
+.btn.secondary {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--kramer-neutral);
+}
+
+/* `aria-busy` carrier — preserves the "wait" cursor on submit-in-flight
+ * buttons that previously used inline `cursor: submitting ? "wait" : ...`.
+ * M4.5/B migration drops the inline cursor; consumers now pass
+ * `aria-busy={submitting}` which screen readers also announce as the
+ * button's busy state (a11y win). Pairs with the `aria-busy` attr added
+ * to ButtonProps' Pick<> set in components/Button.tsx. */
+.btn[aria-busy="true"],
+button[aria-busy="true"] {
+  cursor: wait;
+}
+
 hr,
 .divider {
   border: none;

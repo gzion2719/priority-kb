@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/Button";
 import { sensitivityEnum, type Sensitivity } from "@/drizzle/schema";
 import { STUB_ROLE_HEADER } from "@/lib/auth";
 import {
@@ -289,14 +290,15 @@ export function EditForm({ entryId, initial }: EditFormProps): React.ReactNode {
       )}
 
       <div style={{ display: "flex", gap: "0.5rem" }}>
-        <button
+        <Button
           type="submit"
+          variant="cta"
           disabled={submitting}
+          aria-busy={submitting}
           data-testid="admin-edit-submit"
-          style={primaryButtonStyle}
         >
           {submitting ? "Saving…" : "Save changes"}
-        </button>
+        </Button>
         <Link href="/admin/entries" style={secondaryLinkStyle}>
           Cancel
         </Link>
@@ -355,17 +357,6 @@ const errorTextStyle: React.CSSProperties = {
   fontSize: "0.75rem",
   color: "#ff6b6b",
   margin: 0,
-};
-
-const primaryButtonStyle: React.CSSProperties = {
-  fontFamily: "inherit",
-  fontSize: "0.9375rem",
-  padding: "0.5rem 1rem",
-  borderRadius: "0.375rem",
-  border: "1px solid var(--kramer-neutral)",
-  background: "var(--kramer-neutral)",
-  color: "var(--kramer-dark)",
-  cursor: "pointer",
 };
 
 const secondaryLinkStyle: React.CSSProperties = {
