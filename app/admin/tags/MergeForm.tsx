@@ -229,7 +229,7 @@ export function MergeForm({ catalog }: MergeFormProps): React.ReactNode {
             borderRadius: "0.375rem",
             border: "1px solid var(--kramer-neutral)",
             background: "var(--kramer-neutral)",
-            color: "var(--kramer-bg)",
+            color: "var(--kramer-dark)",
             cursor: submitting ? "wait" : canSubmit ? "pointer" : "not-allowed",
             alignSelf: "flex-end",
           }}

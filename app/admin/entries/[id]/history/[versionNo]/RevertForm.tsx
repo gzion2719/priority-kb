@@ -137,7 +137,7 @@ export function RevertForm(props: RevertFormProps): React.ReactNode {
             borderRadius: "0.375rem",
             border: "1px solid var(--kramer-neutral)",
             background: "var(--kramer-neutral)",
-            color: "var(--kramer-bg)",
+            color: "var(--kramer-dark)",
             cursor: submitting ? "wait" : "pointer",
           }}
         >
