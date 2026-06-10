@@ -283,7 +283,7 @@ function SearchForm({
           borderRadius: "0.375rem",
           border: "1px solid var(--kramer-neutral)",
           background: "var(--kramer-neutral)",
-          color: "var(--kramer-bg)",
+          color: "var(--kramer-dark)",
           cursor: "pointer",
         }}
       >
