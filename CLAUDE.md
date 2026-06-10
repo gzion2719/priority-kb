@@ -106,6 +106,7 @@ C:\dev\PriorityKB\
 │   ├── ROADMAP.md                  ← phased plan (M1 → M6)
 │   ├── BACKLOG.md                  ← scope-creep capture
 │   ├── AGENTS.md                   ← Ingestion Agent + Retrieval Agent specs
+│   ├── A11Y.md                     ← WCAG AA contrast pass + provenance (ADR-0026 §3)
 │   └── adr/
 │       ├── README.md               ← ADR index
 │       └── 0001-bootstrap.md       ← bootstrap-time decisions

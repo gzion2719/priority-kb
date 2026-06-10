@@ -32,6 +32,16 @@
   /* Renamed from a typo `--kramer-bg` per ADR-0026 §5 — see lint floor at
    * styles/brand-tokens.test.ts. */
 
+  /* WCAG AA strong variants — per ADR-0026 §3 + docs/A11Y.md.
+   * Hex picks computed empirically against actual rendered backgrounds
+   * (including alpha-blended pinks/purples composited over --kramer-dark),
+   * not just the solid token. See styles/contrast.test.ts mechanical floor.
+   * NOT covered by the brand-tokens lint floor's `--kramer-*` scope today;
+   * the contrast.test.ts floor covers them instead. */
+  --kramer-purple-strong: #d378ff; /* 7.05:1 on dark (min 6.82:1 composited) */
+  --kramer-pink-strong: #ff5fb0; /* 6.70:1 on dark (min 6.33:1 composited) */
+  --kramer-neutral-strong: #f5f5f5; /* 5.57:1 on --kramer-pink */
+
   /* Typography — IBM Plex Sans per ADR-0026 §1. Body uses weight 300 (Light),
    * headings use weight 500 (Medium); both family stacks include Hebrew
    * variant so browsers walk per-glyph (Latin → Sans, Hebrew → Sans Hebrew
@@ -100,7 +110,9 @@ a {
 }
 
 a:hover {
-  color: var(--kramer-purple);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: base --kramer-purple fails
+   * 4.5:1 on --kramer-dark (2.33:1). --kramer-purple-strong fixes it. */
+  color: var(--kramer-purple-strong);
 }
 
 button,
@@ -124,6 +136,11 @@ button.cta,
 button.alert,
 .btn.alert {
   background: var(--kramer-pink);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: --kramer-neutral on --kramer-pink
+   * is 4.46:1, below 4.5. --kramer-neutral-strong (#f5f5f5) brings it to
+   * 5.57:1. Current consumer: <Button variant="danger"> in
+   * app/admin/tags/DeleteForm.tsx. */
+  color: var(--kramer-neutral-strong);
 }
 
 /* `secondary` variant — per ADR-0026 §4. Transparent fill + neutral
@@ -282,7 +299,10 @@ button.cta:focus-visible {
 
 .chat-tool-chip.error {
   background: rgba(190, 0, 120, 0.1);
-  color: var(--kramer-pink);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: base --kramer-pink fails
+   * 4.5:1 on the alpha-blended pink-over-dark bg (#23101c, 4.49:1).
+   * --kramer-pink-strong brings it to 6.47:1. */
+  color: var(--kramer-pink-strong);
   border-color: rgba(190, 0, 120, 0.35);
 }
 
@@ -294,7 +314,8 @@ button.cta:focus-visible {
 
 .chat-banner.error {
   background: rgba(190, 0, 120, 0.12);
-  color: var(--kramer-pink);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: 4.43:1 → 6.37:1 with -strong. */
+  color: var(--kramer-pink-strong);
   border: 1px solid rgba(190, 0, 120, 0.35);
 }
 
@@ -394,12 +415,15 @@ button.cta:focus-visible {
 }
 .sensitivity-pill[data-tier="internal"] {
   background: rgba(130, 0, 180, 0.12);
-  color: var(--kramer-purple);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: base purple fails on the
+   * alpha-blended purple-over-dark bg (#1f1025). -strong is 6.82:1. */
+  color: var(--kramer-purple-strong);
   border-color: rgba(130, 0, 180, 0.5);
 }
 .sensitivity-pill[data-tier="restricted"] {
   background: rgba(190, 0, 120, 0.14);
-  color: var(--kramer-pink);
+  /* WCAG AA per ADR-0026 §3 + docs/A11Y.md: 4.40:1 → 6.33:1 with -strong. */
+  color: var(--kramer-pink-strong);
   border-color: rgba(190, 0, 120, 0.5);
 }
 
