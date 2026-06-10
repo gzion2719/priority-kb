@@ -6,6 +6,18 @@ This file is read every chat (last 3 entries, per opening Step 4). Every 10 sess
 
 ---
 
+## 2026-06-10 — Housekeeping: orphan PR #391 reconcile + M4.5 tickboxes + first CHATLOG archival (3 PR pairs)
+
+- **Orphan PR #391 reconciled, not closed-and-lost.** Its branch was stale (its diff would revert 4 newer sessions) but held one unique never-merged 2026-05-31 "M4 closed bar #4" entry; folded verbatim into the live CHATLOG ([#424](https://github.com/gzion2719/priority-kb/pull/424)→[#425](https://github.com/gzion2719/priority-kb/pull/425) through main), #391 closed as superseded.
+- **M4.5/A–E ROADMAP tickboxes flipped** `[ ]`→`[x]` with exact per-slice PR mapping (A [#412](https://github.com/gzion2719/priority-kb/pull/412) / B [#416](https://github.com/gzion2719/priority-kb/pull/416) / C [#414](https://github.com/gzion2719/priority-kb/pull/414) / D [#419](https://github.com/gzion2719/priority-kb/pull/419) / E [#418](https://github.com/gzion2719/priority-kb/pull/418)); `verify-roadmap-tickboxes.mjs` clean. [#426](https://github.com/gzion2719/priority-kb/pull/426) merged to dev.
+- **First CHATLOG archival** (every-10-sessions hygiene): moved the M1+M2a+M3-foundations era (2026-05-14→05-20, 28 entries) to new `docs/CHATLOG_ARCHIVE.md`; active log 887→569 lines, 47 entries kept, count preserved (47+28=75). [#427](https://github.com/gzion2719/priority-kb/pull/427) open.
+- **Step 7b plan-review caught the #391 disposition flip** — I'd recommended "close as redundant"; the review's verify-before-disposing instinct surfaced that #391's entry was genuinely unique (a same-date match ≠ content match).
+- **Session Score 8/10.** Code 4/4 (every gate green first-try). Protocol 2/3 (−1: recommended closing #391 without diffing its content first). Efficiency 2/3 (−1: release-PR body redo after a denied chained command). **Ceiling:** diff an orphan PR's actual content vs target before recommending close.
+- **Process improvement:** none codifiable this session — assumed-redundant-without-diffing is 1st occurrence per `feedback_prefer_mechanical_over_prose`; the Ceiling carries it.
+- **Next session:** **M5 #1 — Entra ID OAuth + hosting decision ADR draft** (research archetype, no production code). Two open planning decisions: one combined ADR-0027 vs two (0027 auth + 0028 hosting); needs user Azure tenant for Phase 2. First housekeeping: merge [#427](https://github.com/gzion2719/priority-kb/pull/427) + open the `dev → main` release covering #426 + #427.
+
+---
+
 ## 2026-06-10 — M4.5 CLOSED: all 5 design-system slices + citation-popup fix + hebrew-tag recovery (6 PR pairs through main)
 
 - **M4.5 fully closed, M5 unblocked.** Shipped A ([#412](https://github.com/gzion2719/priority-kb/pull/412)→[#413](https://github.com/gzion2719/priority-kb/pull/413)) typo+lint floor, C ([#414](https://github.com/gzion2719/priority-kb/pull/414)→[#415](https://github.com/gzion2719/priority-kb/pull/415)) focus-ring, B ([#416](https://github.com/gzion2719/priority-kb/pull/416)→[#417](https://github.com/gzion2719/priority-kb/pull/417)) `<Button>` primitive + 6-site migration, E ([#418](https://github.com/gzion2719/priority-kb/pull/418)) WCAG contrast + D ([#419](https://github.com/gzion2719/priority-kb/pull/419)) IBM Plex pivot ([#420](https://github.com/gzion2719/priority-kb/pull/420) release carried both). 3 new mechanical floors: `styles/{brand-tokens,contrast,fonts}.test.ts`.
