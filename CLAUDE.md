@@ -60,7 +60,7 @@
 10. **Prompts live in `prompts/*.md` in git, hashed; the hash is stored alongside every agent response** for attribution and reproducibility.
 11. **≥2 admin accounts.** No bus-factor-of-one.
 12. **Degraded mode required.** If Claude or Voyage is down, retrieval falls back to keyword-only search without synthesis — better than full outage.
-13. **Brand standards from the Kramer brand skill are the default UI.** Colors, typography (GT Eesti), and logo per `styles/kramer-brand.css`. Override only with explicit user request.
+13. **Brand standards from the Kramer brand skill are the default UI.** Colors, typography (IBM Plex Sans per ADR-0026 §1 — pivoted from GT Eesti), and logo per `styles/kramer-brand.css`. Override only with explicit user request.
 
 ---
 
@@ -118,6 +118,8 @@ C:\dev\PriorityKB\
 │   └── kramer-brand.css            ← Kramer brand: colors, typography, base
 ├── components/
 │   └── Button.tsx                  ← Brand button primitive (variants per ADR-0026 §4)
+├── public/
+│   └── fonts/                      ← IBM Plex Sans woff2 + SIL OFL LICENSE (ADR-0026 §1)
 └── .github/
     └── workflows/
         └── ci.yml                  ← GitHub Actions: Node + Python full CI

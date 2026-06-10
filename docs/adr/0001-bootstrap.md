@@ -71,6 +71,12 @@ Full CI on `push` to `main` and on `pull_request`. Node lane (ESLint + Prettier 
 
 Kramer brand — GT Eesti typography, `--kramer-*` color palette, embedded logo. Canonical CSS in `styles/kramer-brand.css`. Applied to every page unless an explicit user override.
 
+#### Amendment 2026-06-10 — Typography pivot per ADR-0026
+
+Typography is now IBM Plex Sans Light/Medium (with IBM Plex Sans Hebrew variant for Hebrew text), self-hosted under `public/fonts/` per [ADR-0026 §1](0026-design-system-tokens-and-brand-loading.md). The pivot rationale: GT Eesti never actually loaded since M1 (commented-out `@font-face` blocks + `public/fonts/` did not exist — UI_AUDIT C1), and the commercial GT Eesti license (~$500-1200/year per-style) does not pencil for an internal-use KB. IBM Plex Sans ships under SIL OFL 1.1 (free), has full Hebrew coverage, and pairs better with the dark/neon Kramer palette than the alternatives considered (Noto, Inter — see ADR-0026 §Alternatives considered). The brand-skill divergence (`anthropic-skills:kramer-brand` continues to ship GT Eesti) is accepted; updating the upstream skill is out of this repo's authority. CLAUDE.md non-negotiable #13 also edited in the same PR to drop the "(GT Eesti)" parenthetical. The `--kramer-*` color palette is unchanged.
+
+Cross-ref: [ADR-0026 §1](0026-design-system-tokens-and-brand-loading.md), [docs/A11Y.md](../A11Y.md) (the WCAG AA contrast pass that landed alongside in M4.5/E).
+
 ### Non-negotiables (also listed in `CLAUDE.md`)
 
 13 rules. The load-bearing ones: prompts hashed, embedding model+version per row, tests never call live APIs, every retrieval cites sources, every entry has source + `last_verified_at`, sensitivity tag respected on retrieval, ≥2 admins, degraded mode required.
