@@ -18,6 +18,8 @@
   --kramer-pink: #be0078; /* Secondary accent / alert */
   --kramer-neutral: #dcddde; /* Light text, borders, dividers */
   --kramer-dark: #121212; /* Page background / deep surface */
+  /* Renamed from a typo `--kramer-bg` per ADR-0026 §5 — see lint floor at
+   * styles/brand-tokens.test.ts. */
 
   /* Typography */
   --font-body: "GT Eesti Display Lt", "GT Eesti Display", sans-serif;

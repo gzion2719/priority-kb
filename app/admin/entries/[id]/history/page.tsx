@@ -112,7 +112,7 @@ export default async function AdminEntryHistoryPage({
                     borderRadius: "999px",
                     border: "1px solid var(--kramer-neutral)",
                     background: "var(--kramer-neutral)",
-                    color: "var(--kramer-bg)",
+                    color: "var(--kramer-dark)",
                   }}
                 >
                   current
