@@ -46,3 +46,4 @@ The Context section describes the world the ADR addresses (what the spec require
 | 0024 | [Stronger PII scrub: price + label-anchored vendor/customer ID; names deferred (M2b #8)](0024-pii-scrub-stronger-pass.md) | Accepted |
 | 0025 | [Tag management: rename + merge + delete + suggest (M4 #4)](0025-tag-management.md) | Accepted |
 | 0026 | [Design-system tokens + brand-loading strategy (pre-M5 UI polish, M4.5)](0026-design-system-tokens-and-brand-loading.md) | Accepted |
+| 0027 | [M5 production foundation: hosting bundle + Microsoft Entra ID auth (M5 #1-#3)](0027-m5-production-foundation-hosting-and-entra-auth.md) | Proposed |
